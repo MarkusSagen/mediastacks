@@ -1,0 +1,13 @@
+.zig-cache/
+zig-out/
+zig-pkg/
+*.o
+*.a
+*.dylib
+*.so
+
+# Test artifacts
+tests/fixtures/output/
+
+# OS
+.DS_Store
