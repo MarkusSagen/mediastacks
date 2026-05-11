@@ -52,6 +52,12 @@ pub fn build(b: *std.Build) void {
     });
     booktool_mod.addIncludePath(b.path("lib/miniz"));
 
+    // Small C-side helpers for things translate-c can't express cleanly.
+    booktool_mod.addCSourceFile(.{
+        .file = b.path("lib/booktool_c/sqlite_helpers.c"),
+        .flags = &.{"-std=c99"},
+    });
+
     // Link system libraries.
     for (library_dirs) |dir| booktool_mod.addLibraryPath(.{ .cwd_relative = dir });
     for (include_dirs) |dir| booktool_mod.addIncludePath(.{ .cwd_relative = dir });

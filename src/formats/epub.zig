@@ -10,7 +10,8 @@ const OPF_NS = "http://www.idpf.org/2007/opf";
 const DC_NS = "http://purl.org/dc/elements/1.1/";
 
 pub fn readMetadata(allocator: std.mem.Allocator, path: []const u8) !meta.BookMetadata {
-    var reader = try zip.ZipReader.openFile(path);
+    var reader: zip.ZipReader = .{};
+    try reader.open(path);
     defer reader.close();
 
     // 1) container.xml -> OPF location

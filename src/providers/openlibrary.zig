@@ -40,26 +40,135 @@ pub const OpenLibrary = struct {
     ) !?meta.BookMetadata {
         _ = self;
 
-        const url = if (q.isbn) |isbn|
-            try std.fmt.allocPrint(
+        if (q.isbn) |isbn| {
+            const url = try std.fmt.allocPrint(
                 allocator,
                 "https://openlibrary.org/api/books?bibkeys=ISBN:{s}&format=json&jscmd=data",
                 .{isbn},
-            )
-        else
-            return null; // title/author search support comes next
-        defer allocator.free(url);
+            );
+            defer allocator.free(url);
+            var resp = http.get(allocator, io, url, .{}) catch |err| switch (err) {
+                error.HttpError, error.NotImplemented => return null,
+                else => return err,
+            };
+            defer resp.deinit(allocator);
+            if (resp.status != 200) return null;
+            return parseIsbnPayload(allocator, isbn, resp.body);
+        }
 
-        var resp = http.get(allocator, io, url, .{}) catch |err| switch (err) {
-            error.NotImplemented => return null, // soft-fail until http lands
-            else => return err,
-        };
-        defer resp.deinit(allocator);
-        if (resp.status != 200) return null;
+        if (q.title) |title| {
+            const author_q = q.author orelse "";
+            const escaped_title = try urlEncode(allocator, title);
+            defer allocator.free(escaped_title);
+            const escaped_author = try urlEncode(allocator, author_q);
+            defer allocator.free(escaped_author);
 
-        return parseIsbnPayload(allocator, q.isbn.?, resp.body);
+            const url = try std.fmt.allocPrint(
+                allocator,
+                "https://openlibrary.org/search.json?title={s}&author={s}&limit=1",
+                .{ escaped_title, escaped_author },
+            );
+            defer allocator.free(url);
+
+            var resp = http.get(allocator, io, url, .{}) catch |err| switch (err) {
+                error.HttpError, error.NotImplemented => return null,
+                else => return err,
+            };
+            defer resp.deinit(allocator);
+            if (resp.status != 200) return null;
+            return parseSearchPayload(allocator, resp.body);
+        }
+
+        return null;
     }
 };
+
+/// Minimal percent-encoder for URL query values.
+fn urlEncode(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+    for (s) |ch| {
+        const safe = std.ascii.isAlphanumeric(ch) or ch == '-' or ch == '_' or ch == '.' or ch == '~';
+        if (safe) {
+            try buf.append(allocator, ch);
+        } else if (ch == ' ') {
+            try buf.append(allocator, '+');
+        } else {
+            const hex = "0123456789ABCDEF";
+            try buf.append(allocator, '%');
+            try buf.append(allocator, hex[ch >> 4]);
+            try buf.append(allocator, hex[ch & 0x0f]);
+        }
+    }
+    return buf.toOwnedSlice(allocator);
+}
+
+/// Parse Open Library's search.json response and return metadata for
+/// the first matching doc. Confidence is dialled down a notch vs ISBN
+/// lookup because title-search is fuzzier.
+pub fn parseSearchPayload(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+) !?meta.BookMetadata {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return null;
+    defer parsed.deinit();
+
+    const root = parsed.value;
+    if (root != .object) return null;
+    const docs_v = root.object.get("docs") orelse return null;
+    if (docs_v != .array or docs_v.array.items.len == 0) return null;
+    const doc_v = docs_v.array.items[0];
+    if (doc_v != .object) return null;
+    const doc = doc_v.object;
+
+    var md: meta.BookMetadata = .{ .source = .openlibrary, .confidence = 0.6 };
+
+    if (doc.get("title")) |t| {
+        if (t == .string) md.title = try allocator.dupe(u8, t.string);
+    }
+    if (doc.get("first_publish_year")) |y| {
+        if (y == .integer and y.integer >= 1000 and y.integer < 3000) {
+            md.published_year = @intCast(y.integer);
+        }
+    }
+    if (doc.get("author_name")) |an| {
+        if (an == .array) {
+            var authors_buf: std.ArrayList(meta.Author) = .empty;
+            for (an.array.items) |a| {
+                if (a != .string) continue;
+                const author = try meta.Author.fromDisplay(allocator, a.string);
+                try authors_buf.append(allocator, author);
+            }
+            md.authors = try authors_buf.toOwnedSlice(allocator);
+        }
+    }
+    if (doc.get("isbn")) |is| {
+        if (is == .array and is.array.items.len > 0) {
+            // Prefer the first ISBN-13 (13 chars, all digits).
+            for (is.array.items) |it| {
+                if (it != .string) continue;
+                if (it.string.len == 13) {
+                    md.isbn = try allocator.dupe(u8, it.string);
+                    break;
+                }
+            }
+            if (md.isbn == null) {
+                const first = is.array.items[0];
+                if (first == .string) md.isbn = try allocator.dupe(u8, first.string);
+            }
+        }
+    }
+    if (doc.get("cover_i")) |ci| {
+        if (ci == .integer) {
+            md.cover_path = try std.fmt.allocPrint(
+                allocator,
+                "https://covers.openlibrary.org/b/id/{d}-L.jpg",
+                .{ci.integer},
+            );
+        }
+    }
+    return md;
+}
 
 /// Parse Open Library's ISBN-keyed jscmd=data response.
 /// Top-level shape: { "ISBN:9780...": { ...book... } }

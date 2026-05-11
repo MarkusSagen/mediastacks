@@ -1,10 +1,13 @@
-//! `booktool scan DIR` — walk DIR, hash files, ingest metadata into catalog.
-//! Stub: walks the tree and prints what it would ingest. Catalog write
-//! integration follows once the repo layer is filled in.
+//! `booktool scan DIR` — walk DIR recursively, extract embedded metadata,
+//! and upsert each ebook into the SQLite catalog.
 
 const std = @import("std");
 const cli = @import("../cli.zig");
+const catalog_mod = @import("../core/catalog.zig");
+const meta = @import("../core/metadata.zig");
 const format_mod = @import("../formats/format.zig");
+const epub_reader = @import("../formats/epub.zig");
+const mobi_reader = @import("../formats/mobi.zig");
 const hash_util = @import("../util/hash.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
@@ -21,27 +24,98 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     };
     defer dir.close(ctx.io);
 
+    const catalog_path = catalog_mod.defaultPath(ctx.arena, ctx.env) catch |err| {
+        try ctx.stderr.print("cannot resolve catalog path: {s}\n", .{@errorName(err)});
+        return 2;
+    };
+    var cat = catalog_mod.Catalog.open(catalog_path) catch |err| {
+        try ctx.stderr.print("cannot open catalog at {s}: {s}\n", .{ catalog_path, @errorName(err) });
+        return 2;
+    };
+    defer cat.close();
+
     var walker = try dir.walk(ctx.arena);
     defer walker.deinit();
 
-    var count: u32 = 0;
+    var counters: struct { seen: u32 = 0, ingested: u32 = 0, skipped: u32 = 0, errors: u32 = 0 } = .{};
+
     while (try walker.next(ctx.io)) |entry| {
         if (entry.kind != .file) continue;
         const ext = std.fs.path.extension(entry.basename);
         if (ext.len < 2) continue;
-        const fmt = @import("../core/metadata.zig").Format.fromExtension(ext[1..]);
+        const fmt = meta.Format.fromExtension(ext[1..]);
         if (fmt == .unknown) continue;
 
+        counters.seen += 1;
         const full_path = try std.fs.path.join(ctx.arena, &.{ dir_path, entry.path });
-        var hex_buf: [hash_util.HEX_LEN]u8 = undefined;
-        const sha = hash_util.fileSha256Hex(ctx.io, full_path, &hex_buf) catch |err| {
-            try ctx.stderr.print("hash failed for {s}: {s}\n", .{ full_path, @errorName(err) });
+
+        const result = ingestOne(ctx, &cat, full_path, fmt) catch |err| {
+            try ctx.stderr.print("error: {s}: {s}\n", .{ full_path, @errorName(err) });
+            counters.errors += 1;
             continue;
         };
-        try ctx.stdout.print("{s}  {s}  {s}\n", .{ sha[0..12], @tagName(fmt), full_path });
-        count += 1;
+        switch (result) {
+            .ingested => |id| {
+                counters.ingested += 1;
+                try ctx.stdout.print("[+] id={d} {s} {s}\n", .{ id, @tagName(fmt), full_path });
+            },
+            .skipped_unchanged => |id| {
+                counters.skipped += 1;
+                try ctx.stdout.print("[=] id={d} {s}\n", .{ id, full_path });
+            },
+        }
     }
 
-    try ctx.stdout.print("scanned {d} files\n", .{count});
-    return 0;
+    try ctx.stdout.print(
+        "\nseen={d} ingested={d} unchanged={d} errors={d}\n",
+        .{ counters.seen, counters.ingested, counters.skipped, counters.errors },
+    );
+    return if (counters.errors == 0) 0 else 1;
+}
+
+const IngestResult = union(enum) {
+    ingested: i64,
+    skipped_unchanged: i64,
+};
+
+fn ingestOne(
+    ctx: cli.Context,
+    cat: *catalog_mod.Catalog,
+    path: []const u8,
+    fmt: meta.Format,
+) !IngestResult {
+    var hex_buf: [hash_util.HEX_LEN]u8 = undefined;
+    const sha = try hash_util.fileSha256Hex(ctx.io, path, &hex_buf);
+    const sha_owned = try ctx.arena.dupe(u8, sha);
+
+    // mtime + size — read via Io.File.stat
+    const cwd = std.Io.Dir.cwd();
+    var f = try cwd.openFile(ctx.io, path, .{});
+    defer f.close(ctx.io);
+    const stat = try f.stat(ctx.io);
+    const size = stat.size;
+    const mtime: i64 = @intCast(@divTrunc(stat.mtime.nanoseconds, std.time.ns_per_s));
+
+    // Skip re-read if nothing material changed.
+    if (try cat.getBookByPath(ctx.arena, path)) |existing| {
+        if (std.mem.eql(u8, existing.sha256, sha_owned)) {
+            return .{ .skipped_unchanged = existing.id };
+        }
+    }
+
+    const md = switch (fmt) {
+        .epub => try epub_reader.readMetadata(ctx.arena, path),
+        .mobi, .azw3 => try mobi_reader.readMetadata(ctx.arena, path),
+        else => meta.BookMetadata{ .source = .derived, .confidence = 0.1 },
+    };
+
+    const id = try cat.upsertBook(ctx.arena, .{
+        .path = path,
+        .sha256 = sha_owned,
+        .size = size,
+        .format = fmt,
+        .mtime = mtime,
+        .metadata = md,
+    });
+    return .{ .ingested = id };
 }

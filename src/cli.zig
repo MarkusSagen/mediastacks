@@ -19,6 +19,7 @@ pub const Context = struct {
     arena: std.mem.Allocator,
     io: std.Io,
     args: []const []const u8,
+    env: *const std.process.Environ.Map,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 };

@@ -1,11 +1,16 @@
-//! Thin HTTP client wrapper for provider clients.
+//! HTTP client wrapper.
 //!
-//! Currently a stub: the actual std.http API in 0.16 is wired to the new
-//! std.Io interface and is still settling. We expose a tiny GET surface
-//! that providers can call so swapping the implementation later (e.g. to
-//! libcurl) is one-file work.
+//! Built on `std.http.Client` over the 0.16 `std.Io` interface. The
+//! single GET surface is enough for the Open Library provider; further
+//! provider integrations can extend this without touching call sites.
 
 const std = @import("std");
+
+pub const Error = error{
+    HttpError,
+    NotImplemented,
+    OutOfMemory,
+};
 
 pub const Response = struct {
     status: u16,
@@ -20,17 +25,40 @@ pub const ClientOptions = struct {
     user_agent: []const u8 = "booktool/0.0 (+https://github.com/markussagen/booktool)",
 };
 
-/// GET a URL. Returns a body owned by `allocator`.
-/// NOTE: implementation pending — currently returns error.NotImplemented.
+/// GET a URL and return the body. Caller owns `Response.body`.
 pub fn get(
     allocator: std.mem.Allocator,
     io: std.Io,
     url: []const u8,
     opts: ClientOptions,
 ) !Response {
-    _ = allocator;
-    _ = io;
-    _ = url;
-    _ = opts;
-    return error.NotImplemented;
+    var client: std.http.Client = .{
+        .allocator = allocator,
+        .io = io,
+    };
+    defer client.deinit();
+
+    var sink: std.Io.Writer.Allocating = .init(allocator);
+    defer sink.deinit();
+
+    var extra = [_]std.http.Header{
+        .{ .name = "user-agent", .value = opts.user_agent },
+        .{ .name = "accept", .value = "application/json,*/*;q=0.5" },
+    };
+
+    const fetched = client.fetch(.{
+        .location = .{ .url = url },
+        .method = .GET,
+        .extra_headers = &extra,
+        .response_writer = &sink.writer,
+    }) catch |err| {
+        std.log.warn("http.get {s}: {s}", .{ url, @errorName(err) });
+        return Error.HttpError;
+    };
+
+    const body = try sink.toOwnedSlice();
+    return .{
+        .status = @intFromEnum(fetched.status),
+        .body = body,
+    };
 }

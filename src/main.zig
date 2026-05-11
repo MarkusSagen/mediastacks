@@ -17,6 +17,7 @@ pub fn main(init: std.process.Init) !void {
         .arena = arena,
         .io = init.io,
         .args = args,
+        .env = init.environ_map,
         .stdout = stdout,
         .stderr = stderr,
     }) catch |err| {
