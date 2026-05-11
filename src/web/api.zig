@@ -12,6 +12,8 @@ const setcover = @import("../commands/setcover.zig");
 const convert_mod = @import("../convert/convert.zig");
 const openlibrary = @import("../providers/openlibrary.zig");
 const provider_iface = @import("../providers/provider.zig");
+const http = @import("../util/http.zig");
+const path_meta = @import("../core/path_meta.zig");
 
 // ---- Read endpoints -----------------------------------------------------
 
@@ -209,10 +211,14 @@ pub fn handleBookSubresource(
     }
     if (std.mem.eql(u8, tail, "cover")) {
         if (request.head.method == .POST) {
-            return handleCoverUpload(arena, cat, request, id);
+            return handleCoverUpload(arena, io, cat, request, id);
         }
         const book = (try cat.getBookById(arena, id)) orelse return notFound(request);
         return streamCover(arena, io, request, book);
+    }
+    if (std.mem.eql(u8, tail, "reset")) {
+        if (request.head.method != .POST) return methodNotAllowed(request);
+        return handleReset(arena, io, cat, request, id);
     }
     if (std.mem.eql(u8, tail, "enrich")) {
         if (request.head.method != .POST) return methodNotAllowed(request);
@@ -294,6 +300,26 @@ fn handlePatch(
     } else if (v == .integer) {
         update.year = try std.fmt.allocPrint(arena, "{d}", .{v.integer});
     };
+    if (obj.get("publisher")) |v| if (v == .string) { update.publisher = try arena.dupe(u8, v.string); };
+    if (obj.get("language")) |v| if (v == .string) { update.language = try arena.dupe(u8, v.string); };
+    if (obj.get("isbn")) |v| if (v == .string) { update.isbn = try arena.dupe(u8, v.string); };
+    if (obj.get("description")) |v| if (v == .string) { update.description = try arena.dupe(u8, v.string); };
+
+    // Subjects come in as a comma-separated string from the form; store
+    // them as a typed array on the in-memory metadata. The EPUB writer
+    // doesn't push these through to <dc:subject> yet (TODO), but the
+    // catalog reflects them immediately.
+    var new_subjects: ?[]const []const u8 = null;
+    if (obj.get("subjects")) |v| if (v == .string) {
+        var list: std.ArrayList([]const u8) = .empty;
+        var it = std.mem.splitScalar(u8, v.string, ',');
+        while (it.next()) |raw| {
+            const trimmed = std.mem.trim(u8, raw, " \t\r\n");
+            if (trimmed.len == 0) continue;
+            try list.append(arena, try arena.dupe(u8, trimmed));
+        }
+        new_subjects = try list.toOwnedSlice(arena);
+    };
 
     // Persist to the file (EPUB only — MOBI write would need mobimeta).
     if (book.format == .epub) {
@@ -316,6 +342,11 @@ fn handlePatch(
     if (update.series) |s| md.series = s;
     if (update.series_index) |idx| md.series_index = std.fmt.parseFloat(f32, idx) catch null;
     if (update.year) |y| md.published_year = std.fmt.parseInt(u16, y, 10) catch null;
+    if (update.publisher) |p| md.publisher = p;
+    if (update.language) |l| md.language = l;
+    if (update.isbn) |i| md.isbn = i;
+    if (update.description) |d| md.description = d;
+    if (new_subjects) |s| md.subjects = s;
     md.source = .manual;
     md.confidence = 1.0;
 
@@ -383,7 +414,21 @@ fn handleEnrich(
         return;
     };
 
-    const merged = try meta.BookMetadata.merge(arena, book.metadata, rich.metadata);
+    var merged = try meta.BookMetadata.merge(arena, book.metadata, rich.metadata);
+
+    // Filename-derived series wins over an OL guess. OL's series field
+    // is patchy and rarely populated; the filename a user organised
+    // their library with is far more reliable when it follows the
+    // common "Author - Series NN - Title" convention.
+    const derived = path_meta.fromPath(arena, book.path) catch path_meta.Derived{};
+    if (derived.series) |s| {
+        merged.series = s;
+        if (derived.series_index) |idx| merged.series_index = idx;
+    } else if (merged.series == null and derived.series_index != null) {
+        // Index without a name shouldn't happen, but be defensive.
+        merged.series_index = derived.series_index;
+    }
+
     _ = try cat.upsertBook(arena, .{
         .path = book.path,
         .sha256 = book.sha256,
@@ -489,41 +534,113 @@ fn handleConvert(
 }
 
 /// POST /api/books/:id/cover
-/// Body: { "data_base64": "...", "content_type"?: "image/jpeg" }
-/// EPUB only — replaces the bytes of the existing cover-image manifest
-/// entry and repacks the archive.
+/// Body (one of):
+///   { "data_base64": "..." }   inline image bytes
+///   { "url": "https://..." }   fetch the image server-side (used for
+///                              Open Library "alternative covers")
+/// Works for EPUB (in-place OPF rewrite) and MOBI/AZW3 (via mobimeta).
 fn handleCoverUpload(
     arena: std.mem.Allocator,
+    io: std.Io,
     cat: *catalog_mod.Catalog,
     request: *std.http.Server.Request,
     id: i64,
 ) !void {
     const book = (try cat.getBookById(arena, id)) orelse return notFound(request);
-    if (book.format != .epub) return errorJson(arena, request, "cover upload supports EPUB only", "");
+    if (book.format != .epub and book.format != .mobi and book.format != .azw3) {
+        return errorJson(arena, request, "cover upload not supported for this format", @tagName(book.format));
+    }
 
-    // 16 MB cap on the body — covers larger than this almost always
-    // mean someone uploaded a wrong file.
     const body = try readBody(arena, request, 16 * 1024 * 1024);
     var parsed = std.json.parseFromSlice(std.json.Value, arena, body, .{}) catch
         return errorJson(arena, request, "bad json", "");
     defer parsed.deinit();
     if (parsed.value != .object) return errorJson(arena, request, "body must be object", "");
+    const obj = parsed.value.object;
 
-    const b64_val = parsed.value.object.get("data_base64") orelse
-        return errorJson(arena, request, "missing data_base64", "");
-    if (b64_val != .string) return errorJson(arena, request, "data_base64 must be a string", "");
+    var image_bytes: []u8 = &.{};
+    if (obj.get("url")) |u| {
+        if (u != .string) return errorJson(arena, request, "url must be a string", "");
+        // Server-side fetch. Reuse the project's HTTP wrapper.
+        var resp = http.get(arena, io, u.string, .{}) catch |err|
+            return errorJson(arena, request, "cover fetch failed", @errorName(err));
+        defer resp.deinit(arena);
+        if (resp.status != 200) {
+            return errorJson(arena, request, "cover fetch non-200", try std.fmt.allocPrint(arena, "{d}", .{resp.status}));
+        }
+        image_bytes = try arena.dupe(u8, resp.body);
+    } else if (obj.get("data_base64")) |b64| {
+        if (b64 != .string) return errorJson(arena, request, "data_base64 must be a string", "");
+        const dec = std.base64.standard.Decoder;
+        const decoded_len = dec.calcSizeForSlice(b64.string) catch
+            return errorJson(arena, request, "bad base64 length", "");
+        image_bytes = try arena.alloc(u8, decoded_len);
+        dec.decode(image_bytes, b64.string) catch
+            return errorJson(arena, request, "base64 decode failed", "");
+    } else {
+        return errorJson(arena, request, "need data_base64 or url", "");
+    }
 
-    const dec = std.base64.standard.Decoder;
-    const decoded_len = dec.calcSizeForSlice(b64_val.string) catch
-        return errorJson(arena, request, "bad base64 length", "");
-    const decoded = try arena.alloc(u8, decoded_len);
-    dec.decode(decoded, b64_val.string) catch
-        return errorJson(arena, request, "base64 decode failed", "");
+    if (book.format == .epub) {
+        setcover.applyToEpub(arena, book.path, image_bytes) catch |err|
+            return errorJson(arena, request, "set-cover failed", @errorName(err));
+        try respondJson(request, "{\"ok\":true}");
+        return;
+    }
+    // MOBI / AZW3: libmobi's mobimeta tool exposes a fixed list of keys
+    // (title/author/publisher/description/...) and 'cover' / 'thumbnail'
+    // are not among them. There is no public libmobi API for cover
+    // replacement either — see issues at github.com/bfabiszewski/libmobi.
+    // Honest answer is "convert to EPUB first".
+    return errorJson(
+        arena,
+        request,
+        "cover replacement is not supported for MOBI/AZW3",
+        "Convert the book to EPUB first; libmobi exposes no cover-write API.",
+    );
+}
 
-    setcover.applyToEpub(arena, book.path, decoded) catch |err|
-        return errorJson(arena, request, "set-cover failed", @errorName(err));
+/// POST /api/books/:id/reset
+/// Discards any manual edits and enriched fields by re-reading the file's
+/// embedded metadata. Useful when an enrichment merged the wrong data,
+/// or after a user accidentally overwrote a field they wanted to keep.
+fn handleReset(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cat: *catalog_mod.Catalog,
+    request: *std.http.Server.Request,
+    id: i64,
+) !void {
+    claimEmptyBody(request);
+    _ = io;
+    const book = (try cat.getBookById(arena, id)) orelse return notFound(request);
 
-    try respondJson(request, "{\"ok\":true}");
+    const epub_reader = @import("../formats/epub.zig");
+    const mobi_reader = @import("../formats/mobi.zig");
+
+    const fresh_md = switch (book.format) {
+        .epub => epub_reader.readMetadata(arena, book.path) catch |err|
+            return errorJson(arena, request, "re-read failed", @errorName(err)),
+        .mobi, .azw3 => mobi_reader.readMetadata(arena, book.path) catch |err|
+            return errorJson(arena, request, "re-read failed", @errorName(err)),
+        else => return errorJson(arena, request, "reset not supported for this format", @tagName(book.format)),
+    };
+
+    // Wipe the row so existing fields don't COALESCE through the upsert.
+    try cat.deleteBook(book.id);
+    _ = try cat.upsertBook(arena, .{
+        .path = book.path,
+        .sha256 = book.sha256,
+        .size = book.size,
+        .format = book.format,
+        .mtime = book.mtime,
+        .metadata = fresh_md,
+    });
+
+    const reloaded = (try cat.getBookByPath(arena, book.path)) orelse return notFound(request);
+    var out: std.ArrayList(u8) = .empty;
+    try writeBookJson(arena, &out, reloaded);
+    try respondJson(request, out.items);
 }
 
 // ---- Bulk endpoints -----------------------------------------------------

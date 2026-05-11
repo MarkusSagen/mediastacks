@@ -528,10 +528,12 @@ function renderDetail(b) {
   body.innerHTML = '';
 
   const cover = document.createElement('img');
-  cover.className = 'detail-cover';
+  cover.className = 'detail-cover clickable';
   cover.src = `/api/books/${b.id}/cover?t=${Date.now()}`;
   cover.alt = b.title || '';
+  cover.title = 'Click to view full size';
   cover.onerror = () => { cover.style.display = 'none'; };
+  cover.onclick = () => openMainCoverLightbox(b);
   body.appendChild(cover);
 
   const info = document.createElement('div');
@@ -559,8 +561,9 @@ function renderDetail(b) {
   body.appendChild(path);
 }
 
-// Alternative covers strip. Click swaps the book's cover for EPUBs (the
-// only format we can rewrite covers in today); non-EPUBs are read-only.
+// Alternative covers strip. Click → lightbox preview with an Apply
+// button. Works for EPUB (OPF swap) and MOBI/AZW3 (mobimeta) — the
+// backend dispatches on format.
 function altCoversSection(b) {
   const section = document.createElement('div');
   section.className = 'rich-section';
@@ -574,45 +577,89 @@ function altCoversSection(b) {
     const img = document.createElement('img');
     img.src = url;
     img.loading = 'lazy';
-    img.title = b.format === 'epub'
-      ? 'Click to use this as the book cover'
-      : 'Cover from Open Library (EPUB-only swap)';
+    img.title = 'Click to preview / use this cover';
+    img.classList.add('clickable');
     img.onerror = () => img.remove();
-    if (b.format === 'epub') {
-      img.classList.add('clickable');
-      img.onclick = () => applyAltCover(b, url, img);
-    }
+    img.onclick = () => openCoverPreview(b, url);
     strip.appendChild(img);
   }
   section.appendChild(strip);
   return section;
 }
 
-async function applyAltCover(b, url, img) {
-  img.classList.add('busy');
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`fetch cover: ${res.status}`);
-    const blob = await res.blob();
-    const bytes = await blob.arrayBuffer();
-    const b64 = arrayBufferToBase64(bytes);
-    const r = await fetch(`/api/books/${b.id}/cover`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ data_base64: b64 }),
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.error || `status ${r.status}`);
+/// Show a lightbox preview of `url` with an Apply button. Apply tells
+/// the server to fetch the URL and write it as the book's cover (no
+/// CORS browser dance needed — the backend does the fetch).
+function openCoverPreview(b, url) {
+  const overlay = document.createElement('div');
+  overlay.className = 'lightbox';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  const card = document.createElement('div');
+  card.className = 'lightbox-card';
+
+  const img = document.createElement('img');
+  img.src = url;
+  card.appendChild(img);
+
+  const actions = document.createElement('div');
+  actions.className = 'lightbox-actions';
+
+  const apply = document.createElement('button');
+  apply.className = 'primary';
+  apply.textContent = 'Use this as cover';
+  apply.onclick = async () => {
+    apply.disabled = true;
+    apply.textContent = 'Applying…';
+    try {
+      const r = await fetch(`/api/books/${b.id}/cover`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `status ${r.status}`);
+      }
+      toast('cover replaced');
+      overlay.remove();
+      // Re-select to pick up the new cover (cache-bust on the URL).
+      if (state.currentBook?.id === b.id) selectBook(b.id);
+      refresh();
+    } catch (err) {
+      apply.disabled = false;
+      apply.textContent = 'Use this as cover';
+      toast('cover swap failed: ' + err.message, 'error');
     }
-    toast('cover replaced');
-    refresh();
-    if (state.currentBook?.id === b.id) renderDetail(state.currentBook);
-  } catch (err) {
-    toast('cover swap failed: ' + err.message, 'error');
-  } finally {
-    img.classList.remove('busy');
-  }
+  };
+
+  const close = document.createElement('button');
+  close.textContent = 'Close';
+  close.onclick = () => overlay.remove();
+
+  actions.append(apply, close);
+  card.appendChild(actions);
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+}
+
+/// Lightbox for the main detail cover. Esc and outside-click dismiss.
+function openMainCoverLightbox(b) {
+  const overlay = document.createElement('div');
+  overlay.className = 'lightbox';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  const card = document.createElement('div');
+  card.className = 'lightbox-card';
+  const img = document.createElement('img');
+  img.src = `/api/books/${b.id}/cover?t=${Date.now()}`;
+  card.appendChild(img);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  const onKey = (e) => {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }
+  };
+  document.addEventListener('keydown', onKey);
 }
 
 function editionsSection(b) {
@@ -747,17 +794,23 @@ function editForm(b) {
   title.textContent = 'Edit metadata';
   wrap.appendChild(title);
 
-  const form = document.createElement('div');
-  form.className = 'edit-form';
-  const fields = [
+  // Single-line text fields.
+  const textFields = [
     ['title', 'Title', b.title || ''],
     ['author', 'Author', b.author_sort || ''],
     ['series', 'Series', b.series || ''],
     ['series_index', 'Series #', b.series_index ?? ''],
     ['year', 'Year', b.year ?? ''],
+    ['publisher', 'Publisher', b.publisher || ''],
+    ['language', 'Language', b.language || ''],
+    ['isbn', 'ISBN', b.isbn || ''],
+    ['subjects', 'Subjects', (b.subjects || []).join(', ')],
   ];
+
+  const form = document.createElement('div');
+  form.className = 'edit-form';
   const inputs = {};
-  for (const [key, label, value] of fields) {
+  for (const [key, label, value] of textFields) {
     const lbl = document.createElement('label');
     lbl.textContent = label;
     lbl.htmlFor = `edit-${key}`;
@@ -768,33 +821,82 @@ function editForm(b) {
     form.append(lbl, input);
     inputs[key] = input;
   }
+  // Description gets a textarea — it's typically a paragraph.
+  {
+    const lbl = document.createElement('label');
+    lbl.textContent = 'Description';
+    lbl.htmlFor = 'edit-description';
+    const ta = document.createElement('textarea');
+    ta.id = 'edit-description';
+    ta.rows = 5;
+    ta.value = (b.description || '').replace(/<[^>]+>/g, '').trim();
+    form.append(lbl, ta);
+    inputs.description = ta;
+  }
+  // Cover: inline file picker.
+  {
+    const lbl = document.createElement('label');
+    lbl.textContent = 'Cover';
+    const wrap2 = document.createElement('div');
+    wrap2.className = 'cover-edit-row';
+    const thumb = document.createElement('img');
+    thumb.src = `/api/books/${b.id}/cover?t=${Date.now()}`;
+    thumb.className = 'cover-edit-thumb';
+    thumb.onerror = () => { thumb.style.visibility = 'hidden'; };
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = 'image/jpeg,image/png';
+    picker.id = 'edit-cover-file';
+    wrap2.append(thumb, picker);
+    form.append(lbl, wrap2);
+  }
   wrap.appendChild(form);
 
   const actions = document.createElement('div');
   actions.className = 'actions';
+
   const save = document.createElement('button');
   save.className = 'primary';
   save.textContent = 'Save';
   save.onclick = async () => {
     save.disabled = true;
-    const update = {};
-    for (const [k, inp] of Object.entries(inputs)) {
-      if (inp.value !== '' && inp.value !== String(b[k] ?? '')) update[k] = inp.value;
-    }
-    if (Object.keys(update).length === 0) {
-      toast('nothing changed');
-      state.editing = false;
-      renderDetail(b);
-      return;
-    }
+    save.textContent = 'Saving…';
     try {
-      const fresh = await fetch(`/api/books/${b.id}`, {
-        method: 'PATCH', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(update),
-      }).then(r => r.json());
+      // First push any picked cover, then PATCH the metadata. Doing
+      // cover first means we don't mark the row "manual" without the
+      // image actually landing.
+      const file = $('#edit-cover-file')?.files?.[0];
+      if (file) {
+        const bytes = await file.arrayBuffer();
+        const b64 = arrayBufferToBase64(bytes);
+        const cr = await fetch(`/api/books/${b.id}/cover`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ data_base64: b64 }),
+        });
+        if (!cr.ok) {
+          const err = await cr.json().catch(() => ({}));
+          throw new Error('cover: ' + (err.error || cr.status));
+        }
+      }
+
+      const update = {};
+      for (const [k, inp] of Object.entries(inputs)) {
+        const current = (k === 'subjects' ? (b.subjects || []).join(', ') : String(b[k] ?? ''));
+        if (inp.value !== current && inp.value !== '') update[k] = inp.value;
+      }
+      let fresh = b;
+      if (Object.keys(update).length > 0) {
+        fresh = await fetch(`/api/books/${b.id}`, {
+          method: 'PATCH', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(update),
+        }).then(r => r.json());
+      } else if (!file) {
+        toast('nothing changed');
+      }
       state.currentBook = fresh;
       state.editing = false;
-      renderDetail(fresh);
+      // Re-select so the new cover is fetched and rich fields refresh.
+      selectBook(b.id);
       refresh();
       loadFacets();
       toast('saved');
@@ -802,8 +904,10 @@ function editForm(b) {
       toast('save failed: ' + err.message, 'error');
     } finally {
       save.disabled = false;
+      save.textContent = 'Save';
     }
   };
+
   const cancel = document.createElement('button');
   cancel.textContent = 'Cancel';
   cancel.onclick = () => { state.editing = false; renderDetail(b); };
@@ -815,13 +919,24 @@ function editForm(b) {
 function actionBar(b) {
   const actions = document.createElement('div');
   actions.className = 'actions';
+
+  // Read: EPUB opens the reader directly; MOBI/AZW3 first converts in
+  // the background (the result becomes a sibling EPUB) and then reads
+  // that. PDF and unknowns just show Download.
   if (b.format === 'epub') {
     const read = document.createElement('button');
     read.className = 'primary';
     read.textContent = 'Read';
     read.onclick = () => openReader(b);
     actions.appendChild(read);
+  } else if (b.format === 'mobi' || b.format === 'azw3') {
+    const read = document.createElement('button');
+    read.className = 'primary';
+    read.textContent = 'Convert + read';
+    read.onclick = () => convertAndRead(b, read);
+    actions.appendChild(read);
   }
+
   const dl = document.createElement('button');
   dl.textContent = 'Download';
   dl.onclick = () => { window.location.href = `/api/books/${b.id}/file`; };
@@ -837,13 +952,18 @@ function actionBar(b) {
   enrich.onclick = () => doEnrich(b, enrich);
   actions.appendChild(enrich);
 
-  if (b.format === 'epub') {
-    const cov = document.createElement('button');
-    cov.textContent = 'Change cover';
-    cov.onclick = () => uploadCover(b);
-    actions.appendChild(cov);
-  }
+  const cov = document.createElement('button');
+  cov.textContent = 'Change cover';
+  cov.onclick = () => uploadCover(b);
+  actions.appendChild(cov);
+
   actions.appendChild(convertMenu(b));
+
+  const reset = document.createElement('button');
+  reset.textContent = 'Reset to embedded';
+  reset.title = 'Discard all manual edits + enriched data; re-read the file';
+  reset.onclick = () => doReset(b, reset);
+  actions.appendChild(reset);
 
   const del = document.createElement('button');
   del.style.cssText = 'border-color:var(--danger);color:var(--danger)';
@@ -851,6 +971,57 @@ function actionBar(b) {
   del.onclick = () => doDelete(b, del);
   actions.appendChild(del);
   return actions;
+}
+
+/// Converts the source MOBI/AZW3 to EPUB (server-side, via libmobi),
+/// re-scans the catalog to pick the new file up, then opens the reader.
+async function convertAndRead(b, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Converting…';
+  try {
+    const r = await fetch(`/api/books/${b.id}/convert`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to: 'epub' }),
+    }).then(r => r.json());
+    if (!r.ok) throw new Error(r.error || 'convert failed');
+
+    // The converted file lands next to the source. Issue a quick
+    // catalog refresh and look it up by path so we can hand the
+    // reader a real book id.
+    await fetch('/api/books').then(x => x.json()); // warm the index
+    const list = await fetch('/api/books').then(x => x.json());
+    const fresh = list.find(x => x.path === r.path);
+    if (!fresh) {
+      toast('converted, but not yet in catalog — run scan and try again');
+    } else {
+      openReader(fresh);
+    }
+  } catch (err) {
+    toast('convert failed: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Convert + read';
+  }
+}
+
+async function doReset(b, btn) {
+  if (!confirm(`Reset metadata for "${b.title || b.path}" to the file's embedded values?\n\nManual edits and Open Library data on this row will be discarded.`)) return;
+  btn.disabled = true;
+  btn.textContent = 'Resetting…';
+  try {
+    const fresh = await fetch(`/api/books/${b.id}/reset`, { method: 'POST' }).then(r => r.json());
+    state.currentBook = fresh;
+    state.editing = false;
+    renderDetail(fresh);
+    refresh();
+    loadFacets();
+    toast('reset to embedded metadata');
+  } catch (err) {
+    toast('reset failed: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Reset to embedded';
+  }
 }
 
 function convertMenu(b) {

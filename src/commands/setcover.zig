@@ -39,19 +39,18 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 }
 
 fn setMobiCover(ctx: cli.Context, book_path: []const u8, image_path: []const u8) !u8 {
-    const setter = try std.fmt.allocPrint(ctx.arena, "thumbnail={s}", .{image_path});
-    const result = std.process.run(ctx.arena, ctx.io, .{
-        .argv = &.{ "mobimeta", "-a", setter, book_path },
-    }) catch |err| {
-        try ctx.stderr.print("mobimeta failed: {s} (brew install libmobi)\n", .{@errorName(err)});
-        return 2;
-    };
-    if (result.stdout.len > 0) try ctx.stdout.writeAll(result.stdout);
-    if (result.stderr.len > 0) try ctx.stderr.writeAll(result.stderr);
-    return switch (result.term) {
-        .exited => |c| c,
-        else => 2,
-    };
+    _ = image_path;
+    // libmobi's mobimeta tool only knows about a fixed list of named
+    // metadata keys (title/author/publisher/description/isbn/subject/
+    // publishdate/review/contributor/copyright/asin/language/imprint).
+    // 'cover' and 'thumbnail' are not among them, and libmobi itself
+    // exposes no public cover-write API. Honest answer is "convert
+    // first" — the resulting EPUB *can* have its cover replaced.
+    try ctx.stderr.print(
+        "set-cover is not supported for {s}.\n  libmobi does not expose a cover-write API. Convert\n  '{s}' to EPUB first (booktool convert --to epub) and try again.\n",
+        .{ "MOBI/AZW3", book_path },
+    );
+    return 2;
 }
 
 fn setEpubCover(ctx: cli.Context, book_path: []const u8, image_path: []const u8) !u8 {
@@ -158,6 +157,12 @@ pub fn applyToEpub(arena: std.mem.Allocator, book_path: []const u8, image_bytes:
         unlinkPath(tmp_path);
         return error.RenameFailed;
     }
+}
+
+fn cleanupTmp(path: []const u8) void {
+    var buf: [4096]u8 = undefined;
+    const z = std.fmt.bufPrintZ(&buf, "{s}", .{path}) catch return;
+    _ = std.c.unlink(z.ptr);
 }
 
 fn unlinkPath(path: []const u8) void {

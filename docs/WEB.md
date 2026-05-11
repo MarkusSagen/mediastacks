@@ -59,17 +59,27 @@ in-memory for the session.
 shows the cover from `/api/books/:id/cover`, all populated metadata
 fields, and per-book actions:
 
-- **Read** — in-browser reader overlay (EPUB only). `Esc` to close,
+- **Read** — in-browser reader overlay (EPUB). `Esc` to close,
   `←`/`→` to page.
+- **Convert + read** — shown instead of Read for MOBI/AZW3. Triggers a
+  libmobi-side conversion to EPUB, picks up the new file from the
+  catalog, and opens it in the reader.
 - **Download** — streams the original file from `/api/books/:id/file`.
-- **Edit** — flips the panel into edit mode. Inline inputs for title,
-  author, series, series index, year. Save rewrites the EPUB's OPF
-  (for EPUB) and updates the catalog row; Cancel discards changes.
+- **Edit** — flips the panel into edit mode. Inputs for title, author,
+  series, series index, year, publisher, language, ISBN, subjects
+  (comma-separated), description (textarea), and an inline cover file
+  picker. Save rewrites the EPUB's OPF and updates the catalog row;
+  Cancel discards changes. The picked cover (if any) is pushed first
+  so the row is never marked "manual" with a stale image.
 - **Fetch info** — POSTs to `/api/books/:id/enrich`, merging Open
   Library results into the existing metadata.
-- **Change cover** (EPUB only) — file picker, base64-encodes the image
-  client-side and POSTs to `/api/books/:id/cover`. The existing cover
-  manifest entry is replaced and the archive is repacked.
+- **Change cover** — file picker, base64-encodes the image client-side
+  and POSTs to `/api/books/:id/cover`. EPUB only at the file level —
+  libmobi doesn't expose a cover-write API, so MOBI/AZW3 returns a
+  clear "convert to EPUB first" error.
+- **Reset to embedded** — discards manual edits and Open Library
+  enrichments by re-reading the file's embedded OPF / MOBI metadata
+  and overwriting the catalog row.
 - **Convert ▾** — dropdown of target formats. Calls
   `/api/books/:id/convert`; output lands next to the source file.
 - **Delete** — confirmation modal; optionally also unlink the file.
@@ -188,7 +198,8 @@ All optional, combinable. Filtering is server-side SQL.
 | `PATCH` | `/api/books/:id` | `{title?, author?, series?, series_index?, year?}` | Rewrites embedded OPF (EPUB) + catalog row. Returns the updated book JSON. |
 | `POST` | `/api/books/:id/enrich` | (empty) | Open Library lookup + merge. Returns `{enriched: bool, book: {...}}`. |
 | `POST` | `/api/books/:id/convert` | `{to: "epub"\|"mobi"\|"azw3"\|"pdf"}` | Returns `{ok: true, path}`. Same engines as the CLI's `convert`. |
-| `POST` | `/api/books/:id/cover` | `{data_base64, content_type?}` | EPUB only. Replaces the cover-manifest entry bytes. |
+| `POST` | `/api/books/:id/cover` | `{data_base64}` **or** `{url}` | EPUB only. Replaces the cover-manifest entry bytes. With `{url}` the server fetches the image (used for Open Library alt covers, avoids browser CORS dance). |
+| `POST` | `/api/books/:id/reset` | (empty) | Re-reads embedded metadata; discards manual edits and enrichments. Returns the refreshed book. |
 | `DELETE` | `/api/books/:id[?file=1]` | (empty) | Removes catalog row. With `?file=1`, also unlinks the file. |
 | `PATCH` | `/api/books/:id/status` | `{status: "unread"\|"reading"\|"finished"}` | Sets reading state; stamps `started_at` / `finished_at`. Returns the updated book. |
 | `POST` | `/api/books/bulk/enrich` | `{ids: [...]}` | `{enriched, no_match, errors}` counts. |

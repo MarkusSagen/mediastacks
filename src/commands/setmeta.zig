@@ -22,6 +22,10 @@ pub const Update = struct {
     series: ?[]const u8 = null,
     series_index: ?[]const u8 = null,
     year: ?[]const u8 = null,
+    publisher: ?[]const u8 = null,
+    language: ?[]const u8 = null,
+    isbn: ?[]const u8 = null,
+    description: ?[]const u8 = null,
 };
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
@@ -202,6 +206,10 @@ fn rewriteOpf(arena: std.mem.Allocator, opf: []const u8, u: Update) ![]u8 {
     if (u.title) |t| current = try replaceElementText(arena, current, "dc:title", t);
     if (u.author) |a| current = try replaceElementText(arena, current, "dc:creator", a);
     if (u.year) |y| current = try replaceElementText(arena, current, "dc:date", y);
+    if (u.publisher) |p| current = try replaceElementText(arena, current, "dc:publisher", p);
+    if (u.language) |l| current = try replaceElementText(arena, current, "dc:language", l);
+    if (u.description) |d| current = try replaceElementText(arena, current, "dc:description", d);
+    if (u.isbn) |i| current = try replaceElementText(arena, current, "dc:identifier", i);
     if (u.series) |s|
         current = try upsertMeta(arena, current, "calibre:series", s);
     if (u.series_index) |idx|

@@ -734,6 +734,85 @@ main:has(#detail:not([hidden])) {
 }
 .cover-strip img.busy { opacity: 0.4; }
 
+/* ---- Lightbox (alt cover preview + main cover zoom) ----------- */
+
+.lightbox {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 20000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.lightbox-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: min(80vw, 600px);
+  max-height: 95vh;
+}
+.lightbox-card img {
+  max-width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}
+.lightbox-actions {
+  display: flex;
+  gap: 8px;
+}
+.lightbox-actions button {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 8px 18px;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.lightbox-actions button.primary {
+  background: var(--accent-dim);
+  color: #16161d;
+  border-color: var(--accent-dim);
+}
+.lightbox-actions button.primary:hover { background: var(--accent); }
+
+img.clickable {
+  cursor: zoom-in;
+  transition: transform 0.08s ease;
+}
+img.clickable:hover { transform: scale(1.01); }
+
+/* ---- Cover-edit row inside the edit form ---------------------- */
+
+.cover-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cover-edit-thumb {
+  width: 60px;
+  height: 90px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+}
+.edit-form textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+.edit-form textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
 .editions-table {
   width: 100%;
   border-collapse: collapse;
