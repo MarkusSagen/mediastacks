@@ -36,7 +36,7 @@ pub fn convert(
 ) ![]u8 {
     const engine = pickEngine(src_format, dst_format) orelse return ConvertError.UnsupportedConversion;
     return switch (engine) {
-        .libmobi => libmobi_path.toEpub(allocator, src_path, out_dir),
+        .libmobi => libmobi_path.toEpub(allocator, io, src_path, out_dir),
         .calibre => calibre.run(allocator, io, src_path, dst_format, out_dir),
     };
 }
