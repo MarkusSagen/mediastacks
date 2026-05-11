@@ -1,6 +1,15 @@
 const std = @import("std");
 const booktool = @import("booktool");
 
+// Silence vaxis info-level logs. They go to stderr and leak into the
+// alt-screen output during TUI init ("info(vaxis): kitty keyboard
+// capability detected" etc).
+pub const std_options: std.Options = .{
+    .log_scope_levels = &.{
+        .{ .scope = .vaxis, .level = .warn },
+    },
+};
+
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);

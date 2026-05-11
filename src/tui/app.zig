@@ -56,7 +56,10 @@ pub fn run(
         .books = books,
     };
 
-    var tty_buf: [4 * 1024]u8 = undefined;
+    // Vaxis can fill a screen-wide refresh with kilobytes of escape
+    // codes; a small TTY buffer silently truncates renders. 64K is
+    // generous and amortises per-frame work.
+    var tty_buf: [64 * 1024]u8 = undefined;
     var tty = try vaxis.Tty.init(io, &tty_buf);
     defer tty.deinit();
 
@@ -71,8 +74,31 @@ pub fn run(
     try vx.enterAltScreen(tty.writer());
     try vx.queryTerminal(tty.writer(), .{ .nanoseconds = std.time.ns_per_s });
 
+    // Vaxis won't draw until it knows the terminal size. Ask the TTY
+    // directly so the very first render has a non-zero canvas — without
+    // this the size-guards in renderList/renderReader skip everything
+    // until SIGWINCH delivers a winsize event (which may never happen
+    // if the user doesn't resize).
+    const initial_ws = try tty.getWinsize();
+    try vx.resize(allocator, tty.writer(), initial_ws);
+
+    // First paint before we wait on input, so the user sees the list
+    // immediately rather than after their first keypress.
+    {
+        const win = vx.window();
+        win.clear();
+        render(&app, win);
+        try vx.render(tty.writer());
+    }
+
     while (true) {
         const event = try loop.nextEvent();
+
+        // Resize events always need to flow into vaxis, otherwise the
+        // screen buffer keeps the stale dimensions and rendering
+        // produces gibberish.
+        if (event == .winsize) try vx.resize(allocator, tty.writer(), event.winsize);
+
         const quit = try handleEvent(&app, event);
 
         const win = vx.window();
@@ -91,6 +117,9 @@ pub fn run(
 fn handleEvent(app: *App, event: vaxis.Event) !bool {
     switch (event) {
         .key_press => |key| {
+            // Ctrl-C always quits, regardless of view. Vaxis puts the
+            // terminal in raw mode, so the kernel never delivers SIGINT.
+            if (key.matches('c', .{ .ctrl = true })) return true;
             return switch (app.view) {
                 .list => listKey(app, key),
                 .reader => readerKey(app, key),

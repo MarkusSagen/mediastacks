@@ -52,6 +52,7 @@ cols), title, and a format badge.
 | `G` | jump to bottom |
 | `enter` | open the selected book in the reader |
 | `q`, `Esc` | quit |
+| `Ctrl-C` | quit (works in any view) |
 
 The cursor row stays in view automatically — scrolling tracks the
 selection.
@@ -79,6 +80,7 @@ height and centered to 76 columns for comfortable line lengths.
 | `space`, `→`, `l`, `PgDn` | next page |
 | `b`, `←`, `h`, `PgUp` | previous page |
 | `q`, `Esc` | back to list view |
+| `Ctrl-C` | quit booktool entirely |
 
 The status bar shows `page n/m`.
 
