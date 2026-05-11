@@ -68,6 +68,10 @@ pub const MobiBook = struct {
     pub fn language(self: MobiBook, allocator: std.mem.Allocator) !?[]const u8 {
         return dupeIfPresent(allocator, c.mobi_meta_get_language(self.data));
     }
+
+    pub fn subject(self: MobiBook, allocator: std.mem.Allocator) !?[]const u8 {
+        return dupeIfPresent(allocator, c.mobi_meta_get_subject(self.data));
+    }
 };
 
 fn dupeIfPresent(allocator: std.mem.Allocator, ptr: [*c]u8) !?[]const u8 {

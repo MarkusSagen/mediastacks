@@ -61,6 +61,38 @@ pub fn readMetadata(allocator: std.mem.Allocator, path: []const u8) !meta.BookMe
         allocator.free(raw);
     }
 
+    // dc:subject can appear zero, one, or many times. Each occurrence
+    // is one genre/category label.
+    var subjects_buf: std.ArrayList([]const u8) = .empty;
+    {
+        const c = @import("c");
+        const ctx = c.xmlXPathNewContext(opf.ptr);
+        if (ctx) |xctx| {
+            defer c.xmlXPathFreeContext(xctx);
+            const ns_uri: [:0]const u8 = "http://purl.org/dc/elements/1.1/";
+            _ = c.xmlXPathRegisterNs(xctx, "dc", ns_uri.ptr);
+            if (c.xmlXPathEvalExpression("//dc:subject", xctx)) |result| {
+                defer c.xmlXPathFreeObject(result);
+                const nodes = result.*.nodesetval;
+                if (nodes != null) {
+                    var i: c_int = 0;
+                    while (i < nodes.*.nodeNr) : (i += 1) {
+                        const node = nodes.*.nodeTab[@intCast(i)];
+                        const content = c.xmlNodeGetContent(node);
+                        if (content == null) continue;
+                        defer c.xmlFree.?(content);
+                        const cstr: [*c]u8 = @ptrCast(content);
+                        const len = std.mem.len(cstr);
+                        if (len == 0) continue;
+                        const trimmed = std.mem.trim(u8, cstr[0..len], " \t\r\n");
+                        if (trimmed.len == 0) continue;
+                        try subjects_buf.append(allocator, try allocator.dupe(u8, trimmed));
+                    }
+                }
+            }
+        }
+    }
+
     return .{
         .title = title,
         .authors = try authors_buf.toOwnedSlice(allocator),
@@ -69,6 +101,7 @@ pub fn readMetadata(allocator: std.mem.Allocator, path: []const u8) !meta.BookMe
         .description = description,
         .isbn = isbn_raw,
         .published_year = year,
+        .subjects = try subjects_buf.toOwnedSlice(allocator),
         .source = .embedded,
         .confidence = 0.9,
     };

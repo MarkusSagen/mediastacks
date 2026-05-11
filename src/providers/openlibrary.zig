@@ -1,17 +1,47 @@
 //! Open Library provider.
 //!
 //! Endpoints used:
-//!   ISBN:  https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data
-//!   Search: https://openlibrary.org/search.json?title=...&author=...
+//!   ISBN slim:   https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data
+//!   ISBN deep:   https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=details
+//!   Search:      https://openlibrary.org/search.json?title=...&author=...
+//!   Work:        https://openlibrary.org/works/{key}.json
+//!   Editions:    https://openlibrary.org/works/{key}/editions.json?limit=50
 //!
-//! HTTP currently goes through util/http.zig which is a stub. The JSON
-//! parsing logic is implemented and tested against fixtures so when the
-//! transport lands, integration is one wire-up.
+//! `lookup()` returns the slim per-edition record (one HTTP call). For the
+//! web UI's "Fetch info" button we use `lookupRich()` which fans out to
+//! the work and editions endpoints to surface alternative covers,
+//! subjects, and sibling editions.
 
 const std = @import("std");
 const meta = @import("../core/metadata.zig");
 const provider_iface = @import("provider.zig");
 const http = @import("../util/http.zig");
+
+/// A single edition of a work — one printing/imprint with its own ISBN.
+/// Returned as part of `EnrichResult.editions`; not persisted on the
+/// `books` row (those store the *user's* edition).
+pub const Edition = struct {
+    ol_key: ?[]const u8 = null, // e.g. "/books/OL12345M"
+    isbn: ?[]const u8 = null,
+    publisher: ?[]const u8 = null,
+    published_year: ?u16 = null,
+    language: ?[]const u8 = null,
+    pages: ?u32 = null,
+    cover_url: ?[]const u8 = null,
+};
+
+/// The full payload `lookupRich` returns: the merge-ready BookMetadata
+/// (same shape as `lookup` returns) plus the work-level extras that the
+/// UI needs in order to surface alternatives.
+pub const EnrichResult = struct {
+    metadata: meta.BookMetadata,
+    work_key: ?[]const u8 = null, // e.g. "/works/OL12345W"
+    /// Cover URLs gathered from the work record and from every edition
+    /// in the work; de-duplicated, primary cover excluded.
+    alt_cover_urls: []const []const u8 = &.{},
+    /// Sibling editions of the same work.
+    editions: []const Edition = &.{},
+};
 
 pub const OpenLibrary = struct {
     pub fn provider(self: *OpenLibrary) provider_iface.Provider {
@@ -81,7 +111,189 @@ pub const OpenLibrary = struct {
 
         return null;
     }
+
+    /// Like `lookup` but follows the work/editions links to return the
+    /// full picture. Up to three HTTP calls per invocation; any of them
+    /// can fail and we degrade gracefully — the user always gets at
+    /// least the slim metadata `lookup` would have returned.
+    pub fn lookupRich(
+        self: *OpenLibrary,
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        q: provider_iface.Query,
+    ) !?EnrichResult {
+        _ = self;
+
+        // Step 1: get a starting BookMetadata + (when possible) the
+        // work key. ISBN path uses both `jscmd=data` and `jscmd=details`
+        // — data has nice human strings, details has the work pointer.
+        var base_md: ?meta.BookMetadata = null;
+        var work_key: ?[]const u8 = null;
+        var isbn_for_followup: ?[]const u8 = null;
+
+        if (q.isbn) |isbn| {
+            isbn_for_followup = isbn;
+
+            const data_url = try std.fmt.allocPrint(
+                allocator,
+                "https://openlibrary.org/api/books?bibkeys=ISBN:{s}&format=json&jscmd=data",
+                .{isbn},
+            );
+            defer allocator.free(data_url);
+            if (httpGetOk(allocator, io, data_url)) |body| {
+                defer allocator.free(body);
+                base_md = parseIsbnPayload(allocator, isbn, body) catch null;
+            }
+
+            const det_url = try std.fmt.allocPrint(
+                allocator,
+                "https://openlibrary.org/api/books?bibkeys=ISBN:{s}&format=json&jscmd=details",
+                .{isbn},
+            );
+            defer allocator.free(det_url);
+            if (httpGetOk(allocator, io, det_url)) |body| {
+                defer allocator.free(body);
+                const det = parseDetailsPayload(allocator, isbn, body) catch
+                    .{ .work_key = null, .md = null };
+                work_key = det.work_key;
+                if (det.md) |dm| {
+                    if (base_md) |bm| {
+                        base_md = try meta.BookMetadata.merge(allocator, bm, dm);
+                    } else {
+                        base_md = dm;
+                    }
+                }
+            }
+        } else if (q.title) |title| {
+            // Search path. Pull the first doc and lift the work key from it.
+            const author_q = q.author orelse "";
+            const et = try urlEncode(allocator, title);
+            defer allocator.free(et);
+            const ea = try urlEncode(allocator, author_q);
+            defer allocator.free(ea);
+            const url = try std.fmt.allocPrint(
+                allocator,
+                "https://openlibrary.org/search.json?title={s}&author={s}&limit=1",
+                .{ et, ea },
+            );
+            defer allocator.free(url);
+            if (httpGetOk(allocator, io, url)) |body| {
+                defer allocator.free(body);
+                base_md = parseSearchPayload(allocator, body) catch null;
+                work_key = extractFirstWorkKey(allocator, body) catch null;
+            }
+        }
+
+        if (base_md == null and work_key == null) return null;
+
+        // Step 2 (optional): work record for subjects/description/series.
+        var alt_covers: std.ArrayList([]const u8) = .empty;
+        if (work_key) |wk| {
+            const wk_path = stripWorksPrefix(wk);
+            const url = try std.fmt.allocPrint(
+                allocator,
+                "https://openlibrary.org/works/{s}.json",
+                .{wk_path},
+            );
+            defer allocator.free(url);
+            if (httpGetOk(allocator, io, url)) |body| {
+                defer allocator.free(body);
+                const info = parseWorkPayload(allocator, body) catch WorkInfo{};
+                if (base_md == null) base_md = .{ .source = .openlibrary, .confidence = 0.7 };
+                var bm = base_md.?;
+                if (bm.series == null and info.series != null) bm.series = info.series;
+                if (bm.description == null and info.description != null) bm.description = info.description;
+                if (bm.subjects.len == 0 and info.subjects.len > 0) bm.subjects = info.subjects;
+                base_md = bm;
+
+                // Collect alt cover URLs from the work, skipping the
+                // primary cover so we don't show it twice.
+                for (info.cover_ids) |cid| {
+                    const cover_url = try std.fmt.allocPrint(
+                        allocator,
+                        "https://covers.openlibrary.org/b/id/{d}-M.jpg",
+                        .{cid},
+                    );
+                    if (bm.cover_path) |primary| {
+                        if (std.mem.indexOf(u8, primary, cover_url[cover_url.len - 12 ..]) != null) {
+                            allocator.free(cover_url);
+                            continue;
+                        }
+                    }
+                    try alt_covers.append(allocator, cover_url);
+                }
+            }
+        }
+
+        // Step 3 (optional): editions list.
+        var editions: []const Edition = &.{};
+        if (work_key) |wk| {
+            const wk_path = stripWorksPrefix(wk);
+            const url = try std.fmt.allocPrint(
+                allocator,
+                "https://openlibrary.org/works/{s}/editions.json?limit=50",
+                .{wk_path},
+            );
+            defer allocator.free(url);
+            if (httpGetOk(allocator, io, url)) |body| {
+                defer allocator.free(body);
+                editions = parseEditionsPayload(allocator, body, 50) catch &.{};
+
+                // Promote a few unique edition covers into alt_covers
+                // so the user gets visual alternatives even when the
+                // work record has only one cover_id.
+                var seen: std.StringHashMap(void) = .init(allocator);
+                defer seen.deinit();
+                for (alt_covers.items) |u| try seen.put(u, {});
+                for (editions) |e| {
+                    const u = e.cover_url orelse continue;
+                    if (seen.contains(u)) continue;
+                    try seen.put(u, {});
+                    try alt_covers.append(allocator, u);
+                    if (alt_covers.items.len >= 12) break;
+                }
+            }
+        }
+
+        return .{
+            .metadata = base_md orelse .{ .source = .openlibrary, .confidence = 0.6 },
+            .work_key = work_key,
+            .alt_cover_urls = try alt_covers.toOwnedSlice(allocator),
+            .editions = editions,
+        };
+    }
 };
+
+/// Convenience: HTTP GET, return the body on 200, null on anything else.
+/// We keep error handling internal so callers don't have to thread
+/// error unions through every step of the orchestrator.
+fn httpGetOk(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ?[]u8 {
+    var resp = http.get(allocator, io, url, .{}) catch return null;
+    if (resp.status != 200) {
+        resp.deinit(allocator);
+        return null;
+    }
+    return resp.body;
+}
+
+fn stripWorksPrefix(key: []const u8) []const u8 {
+    const prefix = "/works/";
+    if (std.mem.startsWith(u8, key, prefix)) return key[prefix.len..];
+    return key;
+}
+
+fn extractFirstWorkKey(allocator: std.mem.Allocator, body: []const u8) !?[]const u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const docs = parsed.value.object.get("docs") orelse return null;
+    if (docs != .array or docs.array.items.len == 0) return null;
+    const doc = docs.array.items[0];
+    if (doc != .object) return null;
+    const k = doc.object.get("key") orelse return null;
+    if (k != .string) return null;
+    return try allocator.dupe(u8, k.string);
+}
 
 /// Minimal percent-encoder for URL query values.
 fn urlEncode(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
@@ -243,6 +455,241 @@ pub fn parseIsbnPayload(
     }
 
     return md;
+}
+
+// ---- Rich enrichment ----------------------------------------------------
+
+/// Parse a `jscmd=details` response and pull out the work key plus
+/// anything we don't already get from `jscmd=data`. Returns null if the
+/// requested ISBN is absent. The returned metadata is partial — callers
+/// merge it with parseIsbnPayload's result for the final picture.
+pub fn parseDetailsPayload(
+    allocator: std.mem.Allocator,
+    isbn: []const u8,
+    body: []const u8,
+) !struct { work_key: ?[]const u8, md: ?meta.BookMetadata } {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch
+        return .{ .work_key = null, .md = null };
+    defer parsed.deinit();
+    if (parsed.value != .object) return .{ .work_key = null, .md = null };
+
+    var key_buf: [128]u8 = undefined;
+    const key = std.fmt.bufPrint(&key_buf, "ISBN:{s}", .{isbn}) catch
+        return .{ .work_key = null, .md = null };
+    const outer = parsed.value.object.get(key) orelse return .{ .work_key = null, .md = null };
+    if (outer != .object) return .{ .work_key = null, .md = null };
+
+    const details_v = outer.object.get("details") orelse return .{ .work_key = null, .md = null };
+    if (details_v != .object) return .{ .work_key = null, .md = null };
+    const details = details_v.object;
+
+    var work_key: ?[]const u8 = null;
+    if (details.get("works")) |ws| {
+        if (ws == .array and ws.array.items.len > 0) {
+            const first = ws.array.items[0];
+            if (first == .object) {
+                if (first.object.get("key")) |k| {
+                    if (k == .string) work_key = try allocator.dupe(u8, k.string);
+                }
+            }
+        }
+    }
+
+    var md: meta.BookMetadata = .{ .source = .openlibrary, .confidence = 0.75 };
+    // (number_of_pages is captured per-edition in parseEditionsPayload;
+    // BookMetadata has no `pages` field so we don't pull it here.)
+    if (details.get("languages")) |ls| {
+        if (ls == .array and ls.array.items.len > 0) {
+            const first = ls.array.items[0];
+            if (first == .object) {
+                if (first.object.get("key")) |k| {
+                    if (k == .string and std.mem.startsWith(u8, k.string, "/languages/")) {
+                        md.language = try allocator.dupe(u8, k.string["/languages/".len..]);
+                    }
+                }
+            }
+        }
+    }
+    if (details.get("subjects")) |sj| {
+        if (sj == .array) {
+            md.subjects = try collectStringArray(allocator, sj.array.items, 24);
+        }
+    }
+    if (details.get("covers")) |covers| {
+        if (covers == .array and covers.array.items.len > 0) {
+            const first = covers.array.items[0];
+            if (first == .integer) {
+                md.cover_path = try std.fmt.allocPrint(
+                    allocator,
+                    "https://covers.openlibrary.org/b/id/{d}-L.jpg",
+                    .{first.integer},
+                );
+            }
+        }
+    }
+
+    return .{ .work_key = work_key, .md = md };
+}
+
+/// Parse `/works/{key}.json` and extract subjects, description, series
+/// (heuristic), and the full list of cover IDs (used as alt covers).
+pub const WorkInfo = struct {
+    subjects: []const []const u8 = &.{},
+    description: ?[]const u8 = null,
+    series: ?[]const u8 = null,
+    cover_ids: []const i64 = &.{},
+};
+
+pub fn parseWorkPayload(allocator: std.mem.Allocator, body: []const u8) !WorkInfo {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return .{};
+    defer parsed.deinit();
+    if (parsed.value != .object) return .{};
+    const work = parsed.value.object;
+
+    var info: WorkInfo = .{};
+
+    if (work.get("subjects")) |sj| {
+        if (sj == .array) info.subjects = try collectStringArray(allocator, sj.array.items, 24);
+    }
+
+    if (work.get("description")) |d| {
+        if (d == .string) {
+            info.description = try allocator.dupe(u8, d.string);
+        } else if (d == .object) {
+            if (d.object.get("value")) |v| {
+                if (v == .string) info.description = try allocator.dupe(u8, v.string);
+            }
+        }
+    }
+
+    // OL has no canonical series field on the work; some records expose
+    // a "series" array of strings — pick the first if so.
+    if (work.get("series")) |sv| {
+        if (sv == .array and sv.array.items.len > 0) {
+            const first = sv.array.items[0];
+            if (first == .string) info.series = try allocator.dupe(u8, first.string);
+        }
+    }
+
+    if (work.get("covers")) |cv| {
+        if (cv == .array) {
+            var ids: std.ArrayList(i64) = .empty;
+            for (cv.array.items) |item| {
+                if (item != .integer) continue;
+                // OL marks placeholders as -1; skip.
+                if (item.integer <= 0) continue;
+                try ids.append(allocator, item.integer);
+            }
+            info.cover_ids = try ids.toOwnedSlice(allocator);
+        }
+    }
+
+    return info;
+}
+
+/// Parse `/works/{key}/editions.json` and return a slice of editions
+/// sorted by publish year (descending) so the latest printings surface
+/// first. `cap` limits how many we keep, since OL works can have
+/// hundreds of editions.
+pub fn parseEditionsPayload(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    cap: usize,
+) ![]const Edition {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return &.{};
+    defer parsed.deinit();
+    if (parsed.value != .object) return &.{};
+    const entries_v = parsed.value.object.get("entries") orelse return &.{};
+    if (entries_v != .array) return &.{};
+
+    var list: std.ArrayList(Edition) = .empty;
+    for (entries_v.array.items) |entry| {
+        if (entry != .object) continue;
+        const e = entry.object;
+
+        var ed: Edition = .{};
+
+        if (e.get("key")) |k| if (k == .string) {
+            ed.ol_key = try allocator.dupe(u8, k.string);
+        };
+        // Prefer ISBN-13, fall back to ISBN-10.
+        ed.isbn = (try firstStringFromArray(allocator, e.get("isbn_13"))) orelse
+            (try firstStringFromArray(allocator, e.get("isbn_10")));
+        ed.publisher = try firstStringFromArray(allocator, e.get("publishers"));
+        if (e.get("publish_date")) |d| {
+            if (d == .string) ed.published_year = findYear(d.string);
+        }
+        if (e.get("number_of_pages")) |np| if (np == .integer and np.integer > 0) {
+            ed.pages = @intCast(np.integer);
+        };
+        if (e.get("languages")) |ls| {
+            if (ls == .array and ls.array.items.len > 0) {
+                const first = ls.array.items[0];
+                if (first == .object) {
+                    if (first.object.get("key")) |k| {
+                        if (k == .string and std.mem.startsWith(u8, k.string, "/languages/")) {
+                            ed.language = try allocator.dupe(u8, k.string["/languages/".len..]);
+                        }
+                    }
+                }
+            }
+        }
+        if (e.get("covers")) |cv| {
+            if (cv == .array) {
+                for (cv.array.items) |item| {
+                    if (item != .integer or item.integer <= 0) continue;
+                    ed.cover_url = try std.fmt.allocPrint(
+                        allocator,
+                        "https://covers.openlibrary.org/b/id/{d}-M.jpg",
+                        .{item.integer},
+                    );
+                    break;
+                }
+            }
+        }
+
+        // Skip records that look like noise (no ISBN AND no publisher AND no year).
+        if (ed.isbn == null and ed.publisher == null and ed.published_year == null) continue;
+
+        try list.append(allocator, ed);
+        if (list.items.len >= cap) break;
+    }
+
+    // Stable sort by year desc, then publisher.
+    const slice = try list.toOwnedSlice(allocator);
+    std.sort.block(Edition, slice, {}, editionLessThan);
+    return slice;
+}
+
+fn editionLessThan(_: void, a: Edition, b: Edition) bool {
+    const ay = a.published_year orelse 0;
+    const by = b.published_year orelse 0;
+    if (ay != by) return ay > by; // newer first
+    const ap = a.publisher orelse "";
+    const bp = b.publisher orelse "";
+    return std.mem.lessThan(u8, ap, bp);
+}
+
+fn firstStringFromArray(allocator: std.mem.Allocator, value: ?std.json.Value) !?[]const u8 {
+    const v = value orelse return null;
+    if (v != .array or v.array.items.len == 0) return null;
+    const first = v.array.items[0];
+    if (first != .string) return null;
+    return try allocator.dupe(u8, first.string);
+}
+
+fn collectStringArray(
+    allocator: std.mem.Allocator,
+    items: []const std.json.Value,
+    cap: usize,
+) ![]const []const u8 {
+    var out: std.ArrayList([]const u8) = .empty;
+    for (items) |item| {
+        if (item != .string) continue;
+        try out.append(allocator, try allocator.dupe(u8, item.string));
+        if (out.items.len >= cap) break;
+    }
+    return out.toOwnedSlice(allocator);
 }
 
 fn findYear(s: []const u8) ?u16 {

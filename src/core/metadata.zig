@@ -100,6 +100,9 @@ pub const BookMetadata = struct {
     language: ?[]const u8 = null,
     description: ?[]const u8 = null,
     cover_path: ?[]const u8 = null,
+    /// Genre / category labels (BISAC subjects from the OPF, or
+    /// libmobi's subject getter). Free-form strings.
+    subjects: []const []const u8 = &.{},
     source: Source = .embedded,
     confidence: f32 = 0.5,
 
@@ -143,6 +146,7 @@ pub const BookMetadata = struct {
             .language = hi.language orelse lo.language,
             .description = hi.description orelse lo.description,
             .cover_path = hi.cover_path orelse lo.cover_path,
+            .subjects = if (hi.subjects.len > 0) hi.subjects else lo.subjects,
             .source = hi.source,
             .confidence = @max(hi.confidence, lo.confidence),
         };

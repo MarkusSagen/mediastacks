@@ -20,10 +20,105 @@ pub fn handleBooksList(
     cat: *catalog_mod.Catalog,
     request: *std.http.Server.Request,
 ) !void {
-    const books = try cat.listBooks(arena);
+    const q = try parseSearchQuery(arena, request.head.target);
+    const books = try cat.searchBooks(arena, q);
     var out: std.ArrayList(u8) = .empty;
     try writeBookListJson(arena, &out, books);
     try respondJson(request, out.items);
+}
+
+/// GET /api/authors  (also /api/series, /api/genres)
+/// Returns: [{ name: "...", count: N }, ...]
+pub fn handleFacets(
+    arena: std.mem.Allocator,
+    cat: *catalog_mod.Catalog,
+    request: *std.http.Server.Request,
+    facet: enum { authors, series, genres },
+) !void {
+    const items = switch (facet) {
+        .authors => try cat.distinctAuthors(arena),
+        .series => try cat.distinctSeries(arena),
+        .genres => try cat.distinctGenres(arena),
+    };
+    var out: std.ArrayList(u8) = .empty;
+    try out.append(arena, '[');
+    for (items, 0..) |f, i| {
+        if (i > 0) try out.append(arena, ',');
+        try out.appendSlice(arena, "{\"name\":");
+        try writeJsonString(arena, &out, f.name);
+        try out.appendSlice(arena, ",\"count\":");
+        try out.appendSlice(arena, try std.fmt.allocPrint(arena, "{d}", .{f.count}));
+        try out.append(arena, '}');
+    }
+    try out.append(arena, ']');
+    try respondJson(request, out.items);
+}
+
+/// Parse `?q=foo&author=Hobb&series=Farseer&year_from=2010&year_to=2020&format=epub&status=reading&order=year_desc&limit=50&has_isbn=1&missing=1`
+fn parseSearchQuery(
+    arena: std.mem.Allocator,
+    target: []const u8,
+) !catalog_mod.Catalog.SearchQuery {
+    var q: catalog_mod.Catalog.SearchQuery = .{};
+    const qstart = std.mem.indexOfScalar(u8, target, '?') orelse return q;
+    const qs = target[qstart + 1 ..];
+
+    var it = std.mem.splitScalar(u8, qs, '&');
+    while (it.next()) |pair| {
+        const eq = std.mem.indexOfScalar(u8, pair, '=') orelse continue;
+        const key = pair[0..eq];
+        const raw_val = pair[eq + 1 ..];
+        const val = try urlDecode(arena, raw_val);
+
+        if (std.mem.eql(u8, key, "q")) q.text = val
+        else if (std.mem.eql(u8, key, "author")) q.author = val
+        else if (std.mem.eql(u8, key, "series")) q.series = val
+        else if (std.mem.eql(u8, key, "genre")) q.genre = val
+        else if (std.mem.eql(u8, key, "format")) {
+            const f = meta.Format.fromExtension(val);
+            if (f != .unknown) q.format = f;
+        }
+        else if (std.mem.eql(u8, key, "year_from")) q.year_from = std.fmt.parseInt(u16, val, 10) catch null
+        else if (std.mem.eql(u8, key, "year_to")) q.year_to = std.fmt.parseInt(u16, val, 10) catch null
+        else if (std.mem.eql(u8, key, "status")) q.status = catalog_mod.ReadStatus.fromStr(val)
+        else if (std.mem.eql(u8, key, "source")) q.source = std.meta.stringToEnum(meta.Source, val)
+        else if (std.mem.eql(u8, key, "has_isbn")) q.has_isbn = boolFromStr(val)
+        else if (std.mem.eql(u8, key, "has_cover")) q.has_cover = boolFromStr(val)
+        else if (std.mem.eql(u8, key, "has_series")) q.has_series = boolFromStr(val)
+        else if (std.mem.eql(u8, key, "missing")) q.missing_any = std.mem.eql(u8, val, "1") or std.mem.eql(u8, val, "true")
+        else if (std.mem.eql(u8, key, "order")) {
+            q.order = std.meta.stringToEnum(catalog_mod.Catalog.Order, val) orelse .author;
+        }
+        else if (std.mem.eql(u8, key, "limit")) q.limit = std.fmt.parseInt(usize, val, 10) catch null;
+    }
+    return q;
+}
+
+fn boolFromStr(s: []const u8) ?bool {
+    if (std.mem.eql(u8, s, "1") or std.mem.eql(u8, s, "true")) return true;
+    if (std.mem.eql(u8, s, "0") or std.mem.eql(u8, s, "false")) return false;
+    return null;
+}
+
+/// Percent-decode + replace '+' with space. Minimal — query values are
+/// short and never contain Unicode that needs validation here.
+fn urlDecode(arena: std.mem.Allocator, src: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < src.len) : (i += 1) {
+        const ch = src[i];
+        if (ch == '+') {
+            try out.append(arena, ' ');
+        } else if (ch == '%' and i + 2 < src.len) {
+            const h1 = std.fmt.charToDigit(src[i + 1], 16) catch { try out.append(arena, ch); continue; };
+            const h2 = std.fmt.charToDigit(src[i + 2], 16) catch { try out.append(arena, ch); continue; };
+            try out.append(arena, @intCast(h1 * 16 + h2));
+            i += 2;
+        } else {
+            try out.append(arena, ch);
+        }
+    }
+    return out.toOwnedSlice(arena);
 }
 
 pub fn handleMissing(
@@ -32,6 +127,17 @@ pub fn handleMissing(
     request: *std.http.Server.Request,
 ) !void {
     const books = try cat.listIncomplete(arena);
+    var out: std.ArrayList(u8) = .empty;
+    try writeBookListJson(arena, &out, books);
+    try respondJson(request, out.items);
+}
+
+pub fn handleUnverified(
+    arena: std.mem.Allocator,
+    cat: *catalog_mod.Catalog,
+    request: *std.http.Server.Request,
+) !void {
+    const books = try cat.listUnverified(arena);
     var out: std.ArrayList(u8) = .empty;
     try writeBookListJson(arena, &out, books);
     try respondJson(request, out.items);
@@ -116,8 +222,36 @@ pub fn handleBookSubresource(
         if (request.head.method != .POST) return methodNotAllowed(request);
         return handleConvert(arena, io, cat, request, id);
     }
+    if (std.mem.eql(u8, tail, "status")) {
+        if (request.head.method != .PATCH and request.head.method != .POST) return methodNotAllowed(request);
+        return handleSetStatus(arena, cat, request, id);
+    }
 
     return notFound(request);
+}
+
+/// PATCH /api/books/:id/status
+/// Body: { "status": "unread" | "reading" | "finished" }
+fn handleSetStatus(
+    arena: std.mem.Allocator,
+    cat: *catalog_mod.Catalog,
+    request: *std.http.Server.Request,
+    id: i64,
+) !void {
+    const body = try readBody(arena, request, 256);
+    var parsed = std.json.parseFromSlice(std.json.Value, arena, body, .{}) catch
+        return errorJson(arena, request, "bad json", "");
+    defer parsed.deinit();
+    if (parsed.value != .object) return errorJson(arena, request, "body must be object", "");
+    const v = parsed.value.object.get("status") orelse return errorJson(arena, request, "missing 'status'", "");
+    if (v != .string) return errorJson(arena, request, "'status' must be a string", "");
+
+    const status = catalog_mod.ReadStatus.fromStr(v.string);
+    try cat.setReadStatus(id, status);
+    const fresh = (try cat.getBookById(arena, id)) orelse return notFound(request);
+    var out: std.ArrayList(u8) = .empty;
+    try writeBookJson(arena, &out, fresh);
+    try respondJson(request, out.items);
 }
 
 // ---- Write endpoints ----------------------------------------------------
@@ -624,6 +758,23 @@ fn writeBookJson(
     if (md.language) |v| try writeString(arena, out, "language", v, false);
     if (md.description) |v| try writeString(arena, out, "description", v, false);
     if (md.cover_path) |v| try writeString(arena, out, "cover_url_external", v, false);
+
+    if (md.subjects.len > 0) {
+        try out.appendSlice(arena, ",\"subjects\":[");
+        for (md.subjects, 0..) |s, i| {
+            if (i > 0) try out.append(arena, ',');
+            try writeJsonString(arena, out, s);
+        }
+        try out.append(arena, ']');
+    }
+
+    try out.appendSlice(arena, ",\"read_status\":\"");
+    try out.appendSlice(arena, @tagName(b.read_status));
+    try out.append(arena, '"');
+    if (b.started_at) |t| try writeNumber(arena, out, "started_at", t, false);
+    if (b.finished_at) |t| try writeNumber(arena, out, "finished_at", t, false);
+    try writeNumber(arena, out, "added_at", b.added_at, false);
+    try writeNumber(arena, out, "updated_at", b.updated_at, false);
 
     if (md.authors.len > 0) {
         try out.appendSlice(arena, ",\"author_sort\":");

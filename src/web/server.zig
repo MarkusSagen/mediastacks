@@ -110,6 +110,18 @@ fn handle(
     if (std.mem.eql(u8, path, "/api/missing")) {
         return api.handleMissing(arena, cat, request);
     }
+    if (std.mem.eql(u8, path, "/api/unverified")) {
+        return api.handleUnverified(arena, cat, request);
+    }
+    if (std.mem.eql(u8, path, "/api/authors")) {
+        return api.handleFacets(arena, cat, request, .authors);
+    }
+    if (std.mem.eql(u8, path, "/api/series")) {
+        return api.handleFacets(arena, cat, request, .series);
+    }
+    if (std.mem.eql(u8, path, "/api/genres")) {
+        return api.handleFacets(arena, cat, request, .genres);
+    }
     if (matchPrefix(path, "/api/books/")) |rest| {
         return api.handleBookSubresource(arena, io, cat, request, rest);
     }

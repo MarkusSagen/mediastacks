@@ -10,7 +10,19 @@ const sql = @import("../ffi/sqlite3.zig");
 const meta = @import("metadata.zig");
 const clock = @import("../util/clock.zig");
 
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
+
+pub const ReadStatus = enum {
+    unread,
+    reading,
+    finished,
+
+    pub fn fromStr(s: []const u8) ReadStatus {
+        if (std.mem.eql(u8, s, "reading")) return .reading;
+        if (std.mem.eql(u8, s, "finished")) return .finished;
+        return .unread;
+    }
+};
 
 pub const Book = struct {
     id: i64,
@@ -20,6 +32,11 @@ pub const Book = struct {
     format: meta.Format,
     mtime: i64,
     metadata: meta.BookMetadata,
+    read_status: ReadStatus = .unread,
+    started_at: ?i64 = null,
+    finished_at: ?i64 = null,
+    added_at: i64 = 0,
+    updated_at: i64 = 0,
 };
 
 pub const BookInput = struct {
@@ -69,13 +86,26 @@ pub const Catalog = struct {
             \\  source          TEXT NOT NULL DEFAULT 'embedded',
             \\  confidence      REAL NOT NULL DEFAULT 0.5,
             \\  added_at        INTEGER NOT NULL,
-            \\  updated_at      INTEGER NOT NULL
+            \\  updated_at      INTEGER NOT NULL,
+            \\  subjects_json   TEXT,
+            \\  read_status     TEXT NOT NULL DEFAULT 'unread',
+            \\  started_at      INTEGER,
+            \\  finished_at     INTEGER
             \\);
         );
+        // Live migrations for pre-v2 schemas. PRAGMA table_info gives us
+        // the existing column set; we ADD COLUMN only when missing.
+        try addColumnIfMissing(self.db, "subjects_json", "TEXT");
+        try addColumnIfMissing(self.db, "read_status", "TEXT NOT NULL DEFAULT 'unread'");
+        try addColumnIfMissing(self.db, "started_at", "INTEGER");
+        try addColumnIfMissing(self.db, "finished_at", "INTEGER");
         try sql.exec(self.db,
             \\CREATE INDEX IF NOT EXISTS idx_books_sha256 ON books(sha256);
             \\CREATE INDEX IF NOT EXISTS idx_books_isbn   ON books(isbn);
             \\CREATE INDEX IF NOT EXISTS idx_books_author ON books(author_sort);
+            \\CREATE INDEX IF NOT EXISTS idx_books_year   ON books(published_year);
+            \\CREATE INDEX IF NOT EXISTS idx_books_series ON books(series);
+            \\CREATE INDEX IF NOT EXISTS idx_books_status ON books(read_status);
         );
         try sql.exec(self.db,
             \\CREATE TABLE IF NOT EXISTS metadata_sources (
@@ -107,6 +137,11 @@ pub const Catalog = struct {
     pub fn upsertBook(self: *Catalog, allocator: std.mem.Allocator, book: BookInput) !i64 {
         const authors_json = try encodeAuthors(allocator, book.metadata.authors);
         defer allocator.free(authors_json);
+        const subjects_json: ?[]const u8 = if (book.metadata.subjects.len > 0)
+            try encodeStringArray(allocator, book.metadata.subjects)
+        else
+            null;
+        defer if (subjects_json) |s| allocator.free(s);
 
         // Try update first; if 0 rows changed, insert.
         var existing_id: ?i64 = null;
@@ -134,6 +169,7 @@ pub const Catalog = struct {
                 \\  language       = COALESCE(?, language),
                 \\  description    = COALESCE(?, description),
                 \\  cover_path     = COALESCE(?, cover_path),
+                \\  subjects_json  = COALESCE(?, subjects_json),
                 \\  source         = ?,
                 \\  confidence     = MAX(confidence, ?),
                 \\  updated_at     = ?
@@ -144,10 +180,11 @@ pub const Catalog = struct {
             try stmt.bindInt64(2, @intCast(book.size));
             try stmt.bindInt64(3, book.mtime);
             try bindMetadata(&stmt, 4, book.metadata, if (book.metadata.authors.len > 0) authors_json else null);
-            try stmt.bindText(15, @tagName(book.metadata.source));
-            try stmt.bindDouble(16, book.metadata.confidence);
-            try stmt.bindInt64(17, now);
-            try stmt.bindInt64(18, id);
+            try stmt.bindNullableText(15, subjects_json);
+            try stmt.bindText(16, @tagName(book.metadata.source));
+            try stmt.bindDouble(17, book.metadata.confidence);
+            try stmt.bindInt64(18, now);
+            try stmt.bindInt64(19, id);
             _ = try stmt.step();
             return id;
         }
@@ -157,8 +194,8 @@ pub const Catalog = struct {
             \\  path, sha256, size, format, mtime,
             \\  title, author_sort, authors_json, series, series_index,
             \\  publisher, published_year, isbn, language, description, cover_path,
-            \\  source, confidence, added_at, updated_at
-            \\) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            \\  subjects_json, source, confidence, added_at, updated_at
+            \\) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         );
         defer stmt.finalize();
         try stmt.bindText(1, book.path);
@@ -167,10 +204,11 @@ pub const Catalog = struct {
         try stmt.bindText(4, @tagName(book.format));
         try stmt.bindInt64(5, book.mtime);
         try bindMetadata(&stmt, 6, book.metadata, if (book.metadata.authors.len > 0) authors_json else null);
-        try stmt.bindText(17, @tagName(book.metadata.source));
-        try stmt.bindDouble(18, book.metadata.confidence);
-        try stmt.bindInt64(19, now);
+        try stmt.bindNullableText(17, subjects_json);
+        try stmt.bindText(18, @tagName(book.metadata.source));
+        try stmt.bindDouble(19, book.metadata.confidence);
         try stmt.bindInt64(20, now);
+        try stmt.bindInt64(21, now);
         _ = try stmt.step();
         return sql.lastInsertRowid(self.db);
     }
@@ -247,6 +285,18 @@ pub const Catalog = struct {
         return collectRows(&stmt, allocator);
     }
 
+    /// Books whose metadata is still untrusted: the file's own embedded
+    /// header is the only source, and either there's no ISBN to verify
+    /// against or the parser's confidence is low. Sorted with the least
+    /// trustworthy rows first so the user can fix them top-down.
+    pub fn listUnverified(self: *Catalog, allocator: std.mem.Allocator) ![]Book {
+        var stmt = try sql.prepare(self.db, SELECT_BOOK_BASE ++
+            "WHERE source = 'embedded' AND (isbn IS NULL OR confidence < 0.6) " ++
+            "ORDER BY confidence ASC, path");
+        defer stmt.finalize();
+        return collectRows(&stmt, allocator);
+    }
+
     pub fn findByHash(self: *Catalog, allocator: std.mem.Allocator, sha256: []const u8) ![]Book {
         var stmt = try sql.prepare(self.db, SELECT_BOOK_BASE ++ "WHERE sha256 = ?");
         defer stmt.finalize();
@@ -258,6 +308,263 @@ pub const Catalog = struct {
         sha256: []const u8,
         ids: []const i64,
     };
+
+    // ---- Search & filter ----------------------------------------------
+
+    /// One axis to sort matches by.
+    pub const Order = enum {
+        title,
+        author,
+        year_asc,
+        year_desc,
+        added_desc,
+        updated_desc,
+        series,
+        size_desc,
+    };
+
+    /// All filter knobs the API and CLI expose. Any field left null is
+    /// "no filter". `text` is a substring match against title or author.
+    pub const SearchQuery = struct {
+        text: ?[]const u8 = null,
+        author: ?[]const u8 = null,        // exact author_sort match
+        series: ?[]const u8 = null,        // exact series match
+        genre: ?[]const u8 = null,         // matches if subjects JSON contains it
+        format: ?meta.Format = null,
+        year_from: ?u16 = null,
+        year_to: ?u16 = null,
+        status: ?ReadStatus = null,
+        has_isbn: ?bool = null,
+        has_cover: ?bool = null,
+        has_series: ?bool = null,
+        missing_any: bool = false, // shorthand for "any of title/author/year/isbn null"
+        source: ?meta.Source = null,
+        order: Order = .author,
+        limit: ?usize = null,
+    };
+
+    /// Run a parametrised search against the books table.
+    pub fn searchBooks(
+        self: *Catalog,
+        allocator: std.mem.Allocator,
+        q: SearchQuery,
+    ) ![]Book {
+        var where: std.ArrayList(u8) = .empty;
+        defer where.deinit(allocator);
+        var binds: std.ArrayList([]const u8) = .empty; // textual binds, in order
+        defer binds.deinit(allocator);
+        var int_binds: std.ArrayList(i64) = .empty;
+        defer int_binds.deinit(allocator);
+
+        try where.appendSlice(allocator, "WHERE 1=1 ");
+
+        if (q.text) |t| {
+            try where.appendSlice(allocator, "AND (title LIKE ? OR author_sort LIKE ?) ");
+            const wrapped = try std.fmt.allocPrint(allocator, "%{s}%", .{t});
+            try binds.append(allocator, wrapped);
+            try binds.append(allocator, wrapped);
+        }
+        if (q.author) |a| {
+            try where.appendSlice(allocator, "AND author_sort = ? ");
+            try binds.append(allocator, a);
+        }
+        if (q.series) |s| {
+            try where.appendSlice(allocator, "AND series = ? ");
+            try binds.append(allocator, s);
+        }
+        if (q.genre) |g| {
+            // subjects_json is a JSON array; LIKE is fine for our scale.
+            try where.appendSlice(allocator, "AND subjects_json LIKE ? ");
+            try binds.append(allocator, try std.fmt.allocPrint(allocator, "%\"{s}\"%", .{g}));
+        }
+        if (q.format) |fmt| {
+            try where.appendSlice(allocator, "AND format = ? ");
+            try binds.append(allocator, @tagName(fmt));
+        }
+        if (q.year_from) |y| {
+            try where.appendSlice(allocator, "AND published_year >= ? ");
+            try int_binds.append(allocator, @intCast(y));
+        }
+        if (q.year_to) |y| {
+            try where.appendSlice(allocator, "AND published_year <= ? ");
+            try int_binds.append(allocator, @intCast(y));
+        }
+        if (q.status) |s| {
+            try where.appendSlice(allocator, "AND read_status = ? ");
+            try binds.append(allocator, @tagName(s));
+        }
+        if (q.source) |s| {
+            try where.appendSlice(allocator, "AND source = ? ");
+            try binds.append(allocator, @tagName(s));
+        }
+        if (q.has_isbn) |has| {
+            try where.appendSlice(allocator, if (has)
+                "AND isbn IS NOT NULL "
+            else
+                "AND isbn IS NULL ");
+        }
+        if (q.has_cover) |has| {
+            try where.appendSlice(allocator, if (has)
+                "AND cover_path IS NOT NULL "
+            else
+                "AND cover_path IS NULL ");
+        }
+        if (q.has_series) |has| {
+            try where.appendSlice(allocator, if (has)
+                "AND series IS NOT NULL "
+            else
+                "AND series IS NULL ");
+        }
+        if (q.missing_any) {
+            try where.appendSlice(allocator,
+                "AND (title IS NULL OR author_sort IS NULL OR published_year IS NULL OR isbn IS NULL) ",
+            );
+        }
+
+        const order_clause = switch (q.order) {
+            .title => "ORDER BY title COLLATE NOCASE ",
+            .author => "ORDER BY author_sort COLLATE NOCASE, series, series_index, title ",
+            .year_asc => "ORDER BY published_year ASC, author_sort ",
+            .year_desc => "ORDER BY published_year DESC, author_sort ",
+            .added_desc => "ORDER BY added_at DESC ",
+            .updated_desc => "ORDER BY updated_at DESC ",
+            .series => "ORDER BY series COLLATE NOCASE, series_index ASC, title ",
+            .size_desc => "ORDER BY size DESC ",
+        };
+
+        var sql_buf: std.ArrayList(u8) = .empty;
+        defer sql_buf.deinit(allocator);
+        try sql_buf.appendSlice(allocator, SELECT_BOOK_BASE);
+        try sql_buf.appendSlice(allocator, where.items);
+        try sql_buf.appendSlice(allocator, order_clause);
+        if (q.limit) |n| {
+            const lim = try std.fmt.allocPrint(allocator, "LIMIT {d} ", .{n});
+            try sql_buf.appendSlice(allocator, lim);
+        }
+
+        var stmt = try sql.prepare(self.db, sql_buf.items);
+        defer stmt.finalize();
+        var idx: c_int = 1;
+        for (binds.items) |b| {
+            try stmt.bindText(idx, b);
+            idx += 1;
+        }
+        for (int_binds.items) |i| {
+            try stmt.bindInt64(idx, i);
+            idx += 1;
+        }
+        return collectRows(&stmt, allocator);
+    }
+
+    // ---- Distinct-value queries (for sidebar facets) -------------------
+
+    pub const Facet = struct {
+        name: []const u8,
+        count: usize,
+    };
+
+    fn distinctValues(
+        self: *Catalog,
+        allocator: std.mem.Allocator,
+        comptime sql_text: []const u8,
+    ) ![]Facet {
+        var out: std.ArrayList(Facet) = .empty;
+        var stmt = try sql.prepare(self.db, sql_text);
+        defer stmt.finalize();
+        while (try stmt.step()) {
+            const name = stmt.columnText(0) orelse continue;
+            try out.append(allocator, .{
+                .name = try allocator.dupe(u8, name),
+                .count = @intCast(stmt.columnInt64(1)),
+            });
+        }
+        return out.toOwnedSlice(allocator);
+    }
+
+    pub fn distinctAuthors(self: *Catalog, allocator: std.mem.Allocator) ![]Facet {
+        return self.distinctValues(allocator,
+            "SELECT author_sort, COUNT(*) FROM books " ++
+            "WHERE author_sort IS NOT NULL " ++
+            "GROUP BY author_sort COLLATE NOCASE " ++
+            "ORDER BY COUNT(*) DESC, author_sort COLLATE NOCASE",
+        );
+    }
+
+    pub fn distinctSeries(self: *Catalog, allocator: std.mem.Allocator) ![]Facet {
+        return self.distinctValues(allocator,
+            "SELECT series, COUNT(*) FROM books " ++
+            "WHERE series IS NOT NULL " ++
+            "GROUP BY series COLLATE NOCASE " ++
+            "ORDER BY COUNT(*) DESC, series COLLATE NOCASE",
+        );
+    }
+
+    /// Genres are stored as a JSON array per row; we expand them in-app.
+    /// At catalog sizes <100k books this is fine; if it ever isn't,
+    /// promote subjects to a join table.
+    pub fn distinctGenres(self: *Catalog, allocator: std.mem.Allocator) ![]Facet {
+        var counts: std.StringHashMap(usize) = .init(allocator);
+        defer counts.deinit();
+
+        var stmt = try sql.prepare(self.db,
+            "SELECT subjects_json FROM books WHERE subjects_json IS NOT NULL",
+        );
+        defer stmt.finalize();
+        while (try stmt.step()) {
+            const json_text = stmt.columnText(0) orelse continue;
+            const items = decodeStringArray(allocator, json_text) catch continue;
+            for (items) |g| {
+                const gop = try counts.getOrPut(g);
+                if (!gop.found_existing) gop.value_ptr.* = 0;
+                gop.value_ptr.* += 1;
+            }
+            allocator.free(items);
+        }
+
+        var out: std.ArrayList(Facet) = .empty;
+        var it = counts.iterator();
+        while (it.next()) |entry| {
+            try out.append(allocator, .{ .name = entry.key_ptr.*, .count = entry.value_ptr.* });
+        }
+        // Sort by descending count, then name.
+        std.mem.sort(Facet, out.items, {}, struct {
+            fn lt(_: void, a: Facet, b: Facet) bool {
+                if (a.count != b.count) return a.count > b.count;
+                return std.ascii.lessThanIgnoreCase(a.name, b.name);
+            }
+        }.lt);
+        return out.toOwnedSlice(allocator);
+    }
+
+    // ---- Reading status ------------------------------------------------
+
+    pub fn setReadStatus(
+        self: *Catalog,
+        id: i64,
+        status: ReadStatus,
+    ) !void {
+        const now = clock.nowSeconds();
+        const set_started: ?i64 = if (status == .reading) now else null;
+        const set_finished: ?i64 = if (status == .finished) now else null;
+
+        var stmt = try sql.prepare(self.db,
+            \\UPDATE books SET
+            \\  read_status = ?,
+            \\  started_at  = COALESCE(started_at, ?),
+            \\  finished_at = CASE WHEN ?2 = 'finished' THEN ?
+            \\                     WHEN ?2 = 'unread'   THEN NULL
+            \\                     ELSE finished_at END,
+            \\  updated_at  = ?
+            \\WHERE id = ?
+        );
+        defer stmt.finalize();
+        try stmt.bindText(1, @tagName(status));
+        try stmt.bindNullableInt64(2, set_started);
+        try stmt.bindNullableInt64(3, set_finished);
+        try stmt.bindInt64(4, now);
+        try stmt.bindInt64(5, id);
+        _ = try stmt.step();
+    }
 
     pub fn listExactDuplicateGroups(
         self: *Catalog,
@@ -296,7 +603,9 @@ const SELECT_BOOK_BASE =
     "SELECT id, path, sha256, size, format, mtime, " ++
     "title, author_sort, authors_json, series, series_index, " ++
     "publisher, published_year, isbn, language, description, cover_path, " ++
-    "source, confidence FROM books ";
+    "source, confidence, " ++
+    "subjects_json, read_status, started_at, finished_at, added_at, updated_at " ++
+    "FROM books ";
 
 /// Bind the 11 metadata fields starting at parameter index `start`.
 /// Order matches the SQL placeholders.
@@ -352,6 +661,18 @@ fn rowToBook(stmt: *sql.Stmt, allocator: std.mem.Allocator) !Book {
     md.source = std.meta.stringToEnum(meta.Source, stmt.columnText(17) orelse "embedded") orelse .embedded;
     md.confidence = @floatCast(stmt.columnDouble(18));
 
+    // 19: subjects_json, 20: read_status, 21: started_at, 22: finished_at,
+    // 23: added_at, 24: updated_at
+    md.subjects = if (stmt.columnText(19)) |sj|
+        try decodeStringArray(allocator, sj)
+    else
+        &.{};
+    const status = ReadStatus.fromStr(stmt.columnText(20) orelse "unread");
+    const started: ?i64 = if (stmt.columnIsNull(21)) null else stmt.columnInt64(21);
+    const finished: ?i64 = if (stmt.columnIsNull(22)) null else stmt.columnInt64(22);
+    const added_at = stmt.columnInt64(23);
+    const updated_at = stmt.columnInt64(24);
+
     return .{
         .id = id,
         .path = path,
@@ -360,6 +681,11 @@ fn rowToBook(stmt: *sql.Stmt, allocator: std.mem.Allocator) !Book {
         .format = fmt,
         .mtime = mtime,
         .metadata = md,
+        .read_status = status,
+        .started_at = started,
+        .finished_at = finished,
+        .added_at = added_at,
+        .updated_at = updated_at,
     };
 }
 
@@ -423,7 +749,61 @@ fn escapeJson(s: []const u8) []const u8 {
     return s;
 }
 
+/// Encode a list of strings as a JSON array. Used for the `subjects_json`
+/// column (and is general enough that other multi-value columns can reuse
+/// it later).
+pub fn encodeStringArray(allocator: std.mem.Allocator, items: []const []const u8) ![]u8 {
+    if (items.len == 0) return allocator.dupe(u8, "[]");
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+    try buf.append(allocator, '[');
+    for (items, 0..) |s, i| {
+        if (i > 0) try buf.append(allocator, ',');
+        try buf.append(allocator, '"');
+        // Escape ", \, and control chars; otherwise emit the byte.
+        for (s) |ch| switch (ch) {
+            '"' => try buf.appendSlice(allocator, "\\\""),
+            '\\' => try buf.appendSlice(allocator, "\\\\"),
+            '\n' => try buf.appendSlice(allocator, "\\n"),
+            '\r' => try buf.appendSlice(allocator, "\\r"),
+            '\t' => try buf.appendSlice(allocator, "\\t"),
+            else => try buf.append(allocator, ch),
+        };
+        try buf.append(allocator, '"');
+    }
+    try buf.append(allocator, ']');
+    return buf.toOwnedSlice(allocator);
+}
+
+pub fn decodeStringArray(allocator: std.mem.Allocator, json_text: []const u8) ![]const []const u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, json_text, .{}) catch
+        return allocator.dupe([]const u8, &.{});
+    defer parsed.deinit();
+    if (parsed.value != .array) return allocator.dupe([]const u8, &.{});
+    var out: std.ArrayList([]const u8) = .empty;
+    for (parsed.value.array.items) |item| {
+        if (item != .string) continue;
+        try out.append(allocator, try allocator.dupe(u8, item.string));
+    }
+    return out.toOwnedSlice(allocator);
+}
+
 // ---- Path utilities ---------------------------------------------------
+
+/// Checks PRAGMA table_info(books) for `name`; runs ALTER TABLE only when
+/// absent. Robust against both fresh and pre-existing databases without
+/// relying on swallowing ExecFailed on every call.
+fn addColumnIfMissing(db: *c.sqlite3, name: []const u8, decl: []const u8) !void {
+    var stmt = try sql.prepare(db, "PRAGMA table_info(books)");
+    defer stmt.finalize();
+    while (try stmt.step()) {
+        const existing = stmt.columnText(1) orelse continue;
+        if (std.mem.eql(u8, existing, name)) return;
+    }
+    var buf: [256]u8 = undefined;
+    const alter = try std.fmt.bufPrint(&buf, "ALTER TABLE books ADD COLUMN {s} {s};", .{ name, decl });
+    try sql.exec(db, alter);
+}
 
 fn ensureParentDir(file_path: []const u8) !void {
     const dir_path = std.fs.path.dirname(file_path) orelse return;

@@ -1,7 +1,7 @@
 // booktool web UI — vanilla JS, no build step.
 //
 // State shape:
-//   view: 'all' | 'missing' | 'duplicates'
+//   view: 'all' | 'missing' | 'unverified' | 'duplicates'
 //   layout: 'gallery' | 'list'
 //   query: search term
 //   books: visible array (or [] in duplicates view)
@@ -73,7 +73,10 @@ async function refresh() {
       state.groups = await fetch('/api/duplicates').then(r => r.json());
       state.books = state.groups.flatMap(g => g.books);
     } else {
-      const url = state.view === 'missing' ? '/api/missing' : '/api/books';
+      const url = ({
+        missing: '/api/missing',
+        unverified: '/api/unverified',
+      })[state.view] ?? '/api/books';
       state.books = await fetch(url).then(r => r.json());
       state.groups = [];
     }
@@ -108,9 +111,32 @@ function render() {
   for (const b of filtered) grid.appendChild(bookCard(b));
 }
 
+// Heuristic trust grade based on (source, isbn, confidence). This is the
+// signal driving the card border + the small dot in the corner:
+//   high  — user-edited, or a provider lookup landed with high confidence
+//   med   — file's embedded header agrees with a real ISBN
+//   low   — file's embedded header only, and ISBN missing or confidence weak
+// The Unverified tab is the union of med + low; the gallery uses the
+// border colour so a glance over the grid surfaces the suspicious rows.
+function trustLevel(b) {
+  const conf = typeof b.confidence === 'number' ? b.confidence : 0;
+  if (b.source && b.source !== 'embedded' && b.source !== 'derived') {
+    return conf >= 0.7 ? 'high' : 'med';
+  }
+  if (b.source === 'manual') return 'high';
+  if (b.isbn && conf >= 0.6) return 'med';
+  return 'low';
+}
+
+function trustLabel(level) {
+  return ({ high: 'verified', med: 'partial', low: 'unverified' })[level];
+}
+
 function bookCard(b) {
   const card = document.createElement('div');
   card.className = 'book-card';
+  const trust = trustLevel(b);
+  card.classList.add('trust-' + trust);
   if (b.id === state.selectedId) card.classList.add('active');
   if (state.selection.has(b.id)) card.classList.add('selected');
   card.dataset.id = b.id;
@@ -155,7 +181,11 @@ function bookCard(b) {
   badges.className = 'badges';
   badges.appendChild(badge(b.format));
   if (b.year) badges.appendChild(badge(String(b.year)));
-  if (!b.isbn) badges.appendChild(badge('no isbn', 'warn'));
+  if (trust !== 'high') {
+    const b2 = badge(trustLabel(trust), trust === 'low' ? 'warn' : 'soft');
+    b2.title = `source: ${b.source || 'embedded'} · confidence: ${b.confidence ?? '?'}`;
+    badges.appendChild(b2);
+  }
   if (b.series) badges.appendChild(badge(`${b.series}${b.series_index ? ' #' + b.series_index : ''}`));
 
   card.append(frame, meta, badges);

@@ -9,6 +9,9 @@
   --accent: #ffb86c;
   --accent-dim: #d29465;
   --danger: #ff6b6b;
+  --trust-high: #50c878;
+  --trust-med:  #e8b765;
+  --trust-low:  #ff6b6b;
 }
 
 * { box-sizing: border-box; }
@@ -242,6 +245,27 @@ main:has(#detail:not([hidden])) {
   text-transform: uppercase;
 }
 .badge.warn { color: var(--danger); border-color: var(--danger); }
+.badge.soft { color: var(--trust-med); border-color: var(--trust-med); }
+
+/* Trust outline. Border around the cover frame in gallery mode and a
+   left bar on each row in list mode. High-trust rows stay neutral so
+   the eye is drawn to the amber/red ones. */
+#library[data-layout="gallery"] .book-card.trust-med .cover-frame {
+  box-shadow: inset 0 0 0 2px var(--trust-med);
+}
+#library[data-layout="gallery"] .book-card.trust-low .cover-frame {
+  box-shadow: inset 0 0 0 2px var(--trust-low);
+}
+#library[data-layout="list"] .book-card.trust-med  { border-left: 3px solid var(--trust-med); padding-left: 7px; }
+#library[data-layout="list"] .book-card.trust-low  { border-left: 3px solid var(--trust-low); padding-left: 7px; }
+#library[data-layout="list"] .book-card.trust-high { border-left: 3px solid transparent; padding-left: 7px; }
+
+/* The active/selected halo wins over the trust shadow so a red book the
+   user clicks on still gets the standard accent highlight. */
+#library[data-layout="gallery"] .book-card.active .cover-frame,
+#library[data-layout="gallery"] .book-card.selected .cover-frame {
+  box-shadow: 0 0 0 2px var(--accent);
+}
 
 /* ---- Duplicate groups ----------------------------------------- */
 
