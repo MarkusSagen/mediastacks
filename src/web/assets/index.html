@@ -25,6 +25,15 @@
     <div class="stats" id="stats"></div>
   </header>
 
+  <div id="selection-bar" hidden>
+    <span id="selection-count">0 selected</span>
+    <button id="bulk-enrich">Enrich all</button>
+    <button id="bulk-delete" class="danger">Delete…</button>
+    <button id="bulk-clear" class="ghost">Clear</button>
+  </div>
+
+  <div id="toast" hidden></div>
+
   <main id="main">
     <section id="library" data-layout="gallery">
       <div id="library-empty" class="empty-state" hidden>
@@ -45,6 +54,8 @@
     <div id="reader-area"></div>
     <button id="reader-next" class="page-nav next" aria-label="Next page">›</button>
   </div>
+
+  <input id="cover-file-input" type="file" accept="image/jpeg,image/png" hidden>
 
   <script src="/app.js"></script>
 </body>

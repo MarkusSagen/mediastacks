@@ -57,13 +57,35 @@ in-memory for the session.
 
 **Detail panel** slides in from the right when you click a card. It
 shows the cover from `/api/books/:id/cover`, all populated metadata
-fields, and two actions:
-- **Read** — opens an in-browser reader overlay (EPUB only). `Esc` to
-  close, `←`/`→` to page.
-- **Download** — streams the original file from `/api/books/:id/file`
-  with the correct `Content-Type`.
+fields, and per-book actions:
 
-Click the **← back** button at the top of the panel to dismiss it.
+- **Read** — in-browser reader overlay (EPUB only). `Esc` to close,
+  `←`/`→` to page.
+- **Download** — streams the original file from `/api/books/:id/file`.
+- **Edit** — flips the panel into edit mode. Inline inputs for title,
+  author, series, series index, year. Save rewrites the EPUB's OPF
+  (for EPUB) and updates the catalog row; Cancel discards changes.
+- **Fetch info** — POSTs to `/api/books/:id/enrich`, merging Open
+  Library results into the existing metadata.
+- **Change cover** (EPUB only) — file picker, base64-encodes the image
+  client-side and POSTs to `/api/books/:id/cover`. The existing cover
+  manifest entry is replaced and the archive is repacked.
+- **Convert ▾** — dropdown of target formats. Calls
+  `/api/books/:id/convert`; output lands next to the source file.
+- **Delete** — confirmation modal; optionally also unlink the file.
+
+Click **← back** to dismiss the panel.
+
+### Multi-select
+
+Hover over a card to reveal its checkbox in the top-left corner. Click
+to toggle. While any cards are selected, a toolbar appears at the top
+of the main area:
+
+- **Enrich all** — bulk Open Library lookups.
+- **Delete…** — removes the catalog rows for the selected books (files
+  are kept by default).
+- **Clear** — deselect everything.
 
 The reader is built on [epub.js](https://github.com/futurepress/epub.js/),
 loaded from a CDN. Paginated mode by default; the reader fetches
@@ -71,6 +93,8 @@ chapter blobs from `/api/books/:id/file` so it works against any
 catalogued EPUB without preprocessing.
 
 ## HTTP routes
+
+### Read
 
 | Method | Path | Body / Response |
 |---|---|---|
@@ -85,7 +109,20 @@ catalogued EPUB without preprocessing.
 | `GET` | `/api/books/:id/file` | raw bytes, `application/epub+zip` etc. |
 | `GET` | `/api/books/:id/cover` | image bytes, `image/jpeg` or `image/png` |
 
-Anything else returns `404 not found\n`.
+### Write
+
+| Method | Path | Body | Result |
+|---|---|---|---|
+| `PATCH` | `/api/books/:id` | `{title?, author?, series?, series_index?, year?}` | Rewrites embedded OPF (EPUB) + catalog row. Returns the updated book JSON. |
+| `POST` | `/api/books/:id/enrich` | (empty) | Open Library lookup + merge. Returns `{enriched: bool, book: {...}}`. |
+| `POST` | `/api/books/:id/convert` | `{to: "epub"\|"mobi"\|"azw3"\|"pdf"}` | Returns `{ok: true, path}`. Same engines as the CLI's `convert`. |
+| `POST` | `/api/books/:id/cover` | `{data_base64, content_type?}` | EPUB only. Replaces the cover-manifest entry bytes. |
+| `DELETE` | `/api/books/:id[?file=1]` | (empty) | Removes catalog row. With `?file=1`, also unlinks the file. |
+| `POST` | `/api/books/bulk/enrich` | `{ids: [...]}` | `{enriched, no_match, errors}` counts. |
+| `POST` | `/api/books/bulk/delete` | `{ids: [...], remove_files?: bool}` | `{deleted}` count. |
+
+Anything else returns `404 not found\n`. Errors from write endpoints
+return `400 Bad Request` with `{error: "...", detail?: "..."}` JSON.
 
 The JSON shape per book:
 
@@ -120,6 +157,23 @@ curl -s http://127.0.0.1:8787/api/books | jq 'length'
 curl -s http://127.0.0.1:8787/api/duplicates | jq '.[].books | length'
 curl -s -o cover.jpg http://127.0.0.1:8787/api/books/1/cover
 curl -s -o book.epub http://127.0.0.1:8787/api/books/1/file
+
+# Write side
+curl -sX PATCH -H 'content-type: application/json' \
+  -d '{"series":"Stormlight","series_index":"1"}' \
+  http://127.0.0.1:8787/api/books/1
+curl -sX POST http://127.0.0.1:8787/api/books/1/enrich
+curl -sX POST -H 'content-type: application/json' \
+  -d '{"to":"mobi"}' http://127.0.0.1:8787/api/books/1/convert
+curl -sX POST -H 'content-type: application/json' \
+  -d "$(jq -n --arg b "$(base64 cover.jpg)" '{data_base64:$b}')" \
+  http://127.0.0.1:8787/api/books/1/cover
+curl -sX DELETE 'http://127.0.0.1:8787/api/books/1?file=1'
+
+# Bulk
+curl -sX POST -H 'content-type: application/json' \
+  -d '{"ids":[1,2,3]}' \
+  http://127.0.0.1:8787/api/books/bulk/enrich
 ```
 
 ## Architecture
@@ -170,19 +224,21 @@ contract.
 
 - **EPUB only in the embedded reader.** MOBI/AZW3/PDF surface metadata
   and Download, but the in-browser reader doesn't render them. Convert
-  to EPUB first (`booktool convert FILE --to epub`) if you want to
-  read them in the browser.
-- **No mutations.** All API endpoints are `GET`. To edit metadata,
-  delete duplicates, or rename, use the CLI for now. Adding `POST`
-  routes that call into the same core modules is straightforward — see
-  `src/web/api.zig` for the pattern.
-- **No realtime updates.** Refresh the browser after running CLI
-  commands that change the catalog.
-- **TLS bundle bloats the binary.** `std.http.Client` (used by the
-  `enrich` command) embeds a CA bundle that's pulled into the same
-  binary as the server. The server doesn't speak HTTPS — bind it to
-  localhost and terminate TLS at a reverse proxy if you need remote
-  access.
+  to EPUB first (Convert ▾ menu) if you want to read them in the
+  browser.
+- **Cover upload is EPUB-only.** MOBI/AZW3 cover replacement happens
+  via `mobimeta` in the CLI's `set-cover` command and isn't exposed
+  on the web yet.
+- **PATCH is best-effort for non-EPUB.** The catalog row is updated,
+  but the file's embedded metadata is only rewritten for EPUB. For
+  MOBI/AZW3 use the CLI's `set-meta` (which shells out to `mobimeta`).
+- **No bulk convert / bulk rename.** These would tie up the server
+  for many seconds; do them from the CLI.
+- **No realtime updates.** Refresh the page after a CLI session that
+  changes the catalog out from under an open browser.
+- **No auth, no HTTPS.** Defaults bind to `127.0.0.1`. To expose
+  remotely, run behind a reverse proxy that terminates TLS and does
+  auth.
 - **Single-threaded acceptor.** Multiple browsers connecting at once
   will queue. Personal-use scale is fine; for anything else, replace
   the loop body with `io.concurrent`.
