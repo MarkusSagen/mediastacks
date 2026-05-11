@@ -16,6 +16,11 @@ const dedup_cmd = @import("commands/dedup.zig");
 const rename_cmd = @import("commands/rename.zig");
 const serve_cmd = @import("commands/serve.zig");
 const tui_cmd = @import("commands/tui.zig");
+const find_cmd = @import("commands/find.zig");
+const optimize_cmd = @import("commands/optimize.zig");
+const setcover_cmd = @import("commands/setcover.zig");
+const setmeta_cmd = @import("commands/setmeta.zig");
+const standardize_cmd = @import("commands/standardize.zig");
 
 pub const Context = struct {
     arena: std.mem.Allocator,
@@ -53,6 +58,11 @@ pub fn run(ctx: Context) !u8 {
     if (eq(cmd, "rename")) return rename_cmd.run(ctx, rest);
     if (eq(cmd, "serve")) return serve_cmd.run(ctx, rest);
     if (eq(cmd, "tui")) return tui_cmd.run(ctx, rest);
+    if (eq(cmd, "find")) return find_cmd.run(ctx, rest);
+    if (eq(cmd, "optimize")) return optimize_cmd.run(ctx, rest);
+    if (eq(cmd, "set-cover")) return setcover_cmd.run(ctx, rest);
+    if (eq(cmd, "set-meta")) return setmeta_cmd.run(ctx, rest);
+    if (eq(cmd, "standardize")) return standardize_cmd.run(ctx, rest);
 
     try ctx.stderr.print("unknown command: {s}\n", .{cmd});
     try printUsage(ctx.stderr);
@@ -72,6 +82,7 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\
         \\Commands:
         \\  info FILE              Show embedded metadata for a file
+        \\  find PATH [--glob P]   List ebook files (read-only, supports globs)
         \\  scan DIR               Walk DIR and ingest into the catalog
         \\  cover FILE             Render the cover in the terminal (chafa)
         \\  convert SRC --to FMT   Convert ebook to FMT (epub/mobi/azw3/pdf)
@@ -81,6 +92,10 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\  rename [--apply]       Show or perform canonical renames
         \\  serve [--port N]       Run the web UI (default http://127.0.0.1:8787)
         \\  tui                    Open the terminal UI (list + reader)
+        \\  optimize FILE...       Recompress EPUB(s) with max deflate
+        \\  set-cover FILE IMG     Replace embedded cover image
+        \\  set-meta FILE [...]    Edit embedded title/author/series/year
+        \\  standardize DIR        scan → enrich → dedup → rename → optimize
         \\  help                   Show this help
         \\  version                Print version
         \\

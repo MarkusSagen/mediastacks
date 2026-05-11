@@ -11,7 +11,10 @@ pub const cli = @import("cli.zig");
 pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
 pub const dedup = @import("core/dedup.zig");
+pub const quality = @import("core/quality.zig");
+pub const glob = @import("core/glob.zig");
 pub const rename = @import("core/rename.zig");
+pub const template = @import("core/template.zig");
 pub const score = @import("core/score.zig");
 
 // Formats
@@ -41,6 +44,9 @@ test {
     _ = dedup;
     _ = rename;
     _ = score;
+    _ = template;
+    _ = quality;
+    _ = glob;
     _ = format;
     _ = epub;
     _ = epub_chapters;

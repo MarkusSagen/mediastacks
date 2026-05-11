@@ -76,6 +76,78 @@ pub const ZipReader = struct {
         }
         return buf;
     }
+
+    /// Iterate every member in the archive, calling `cb(ctx, idx, name, uncomp_size)`.
+    /// `name` is valid only for the duration of the callback.
+    pub fn forEachMember(
+        self: *ZipReader,
+        ctx: anytype,
+        comptime cb: fn (@TypeOf(ctx), idx: u32, name: []const u8, uncomp_size: u64) anyerror!void,
+    ) !void {
+        const total = mz_zip_reader_get_num_files(&self.archive);
+        var idx: u32 = 0;
+        while (idx < total) : (idx += 1) {
+            var stat: [MZ_ZIP_FILE_STAT_SIZE]u8 align(8) = std.mem.zeroes([MZ_ZIP_FILE_STAT_SIZE]u8);
+            if (mz_zip_reader_file_stat(&self.archive, idx, &stat) == 0) return Error.ReadFailed;
+            var name_buf: [512]u8 = undefined;
+            const name_len = mz_zip_reader_get_filename(&self.archive, idx, &name_buf, name_buf.len);
+            if (name_len == 0) continue;
+            const name = name_buf[0 .. name_len - 1];
+            const uncomp: u64 = @as(
+                *const u64,
+                @ptrCast(@alignCast(stat[UNCOMP_SIZE_OFFSET..][0..@sizeOf(u64)].ptr)),
+            ).*;
+            try cb(ctx, idx, name, uncomp);
+        }
+    }
+};
+
+// ---- Writer -------------------------------------------------------------
+
+pub const ZipWriter = struct {
+    archive: [MZ_ZIP_ARCHIVE_SIZE]u8 align(8) = std.mem.zeroes([MZ_ZIP_ARCHIVE_SIZE]u8),
+
+    pub const Compression = enum(c_int) {
+        none = 0,
+        fastest = 1,
+        best = 9,
+        uber = 10,
+    };
+
+    pub fn create(self: *ZipWriter, path: []const u8) !void {
+        self.* = .{};
+        var path_buf: [4096]u8 = undefined;
+        const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return Error.OpenFailed;
+        if (mz_zip_writer_init_file(&self.archive, path_z.ptr, 0) == 0) return Error.OpenFailed;
+    }
+
+    pub fn finalizeAndClose(self: *ZipWriter) !void {
+        if (mz_zip_writer_finalize_archive(&self.archive) == 0) return Error.ReadFailed;
+        _ = mz_zip_writer_end(&self.archive);
+    }
+
+    pub fn abort(self: *ZipWriter) void {
+        _ = mz_zip_writer_end(&self.archive);
+    }
+
+    pub fn addBytes(
+        self: *ZipWriter,
+        name: []const u8,
+        bytes: []const u8,
+        level: Compression,
+    ) !void {
+        var name_buf: [1024]u8 = undefined;
+        const name_z = std.fmt.bufPrintZ(&name_buf, "{s}", .{name}) catch return Error.ReadFailed;
+        const level_int: c_uint = @intCast(@intFromEnum(level));
+        const ok = mz_zip_writer_add_mem(
+            &self.archive,
+            name_z.ptr,
+            if (bytes.len == 0) null else bytes.ptr,
+            bytes.len,
+            level_int,
+        );
+        if (ok == 0) return Error.ReadFailed;
+    }
 };
 
 // ---- C ABI (vendored miniz.c) ------------------------------------------
@@ -108,3 +180,26 @@ extern "c" fn mz_zip_reader_extract_to_mem(
     buf_size: usize,
     flags: c_uint,
 ) c_int;
+
+extern "c" fn mz_zip_reader_get_num_files(archive: *anyopaque) c_uint;
+extern "c" fn mz_zip_reader_get_filename(
+    archive: *anyopaque,
+    file_index: c_uint,
+    filename_buf: [*]u8,
+    filename_buf_size: c_uint,
+) c_uint;
+
+extern "c" fn mz_zip_writer_init_file(
+    archive: *anyopaque,
+    filename: [*:0]const u8,
+    size_to_reserve_at_beginning: u64,
+) c_int;
+extern "c" fn mz_zip_writer_add_mem(
+    archive: *anyopaque,
+    name: [*:0]const u8,
+    buf: ?[*]const u8,
+    buf_size: usize,
+    level_and_flags: c_uint,
+) c_int;
+extern "c" fn mz_zip_writer_finalize_archive(archive: *anyopaque) c_int;
+extern "c" fn mz_zip_writer_end(archive: *anyopaque) c_int;

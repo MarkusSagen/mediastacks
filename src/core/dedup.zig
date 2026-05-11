@@ -7,6 +7,9 @@
 
 const std = @import("std");
 const fuzzy = @import("../util/fuzzy.zig");
+const catalog_mod = @import("catalog.zig");
+const quality = @import("quality.zig");
+const meta = @import("metadata.zig");
 
 pub const FUZZY_THRESHOLD: f32 = 0.92;
 
@@ -101,4 +104,117 @@ test "compareTitles flags near-duplicates" {
     const alloc = std.testing.allocator;
     const score = try compareTitles(alloc, "The Way of Kings", "Way of Kings, The");
     try std.testing.expect(score > FUZZY_THRESHOLD);
+}
+
+// ---- Logical-identity grouping -----------------------------------------
+
+pub const Group = struct {
+    /// Ordered with the highest-quality book first ("keep" candidate).
+    books: []const catalog_mod.Book,
+    /// Reason this group was formed.
+    reason: enum { exact_sha, fuzzy_title } = .fuzzy_title,
+};
+
+/// Group books that represent the same logical work, regardless of
+/// format or edition: same author (first-author sort-name match) and
+/// near-identical normalized title. Books within a group are sorted
+/// best-first by `quality.scoreBook`.
+///
+/// Caller owns the returned slice; each group's `books` slice is allocated
+/// from the same allocator.
+pub fn groupByLogicalIdentity(
+    allocator: std.mem.Allocator,
+    books: []const catalog_mod.Book,
+) ![]Group {
+    var groups: std.ArrayList(Group) = .empty;
+    // Track which book indices have been claimed by some group already.
+    var claimed = try allocator.alloc(bool, books.len);
+    @memset(claimed, false);
+
+    var i: usize = 0;
+    while (i < books.len) : (i += 1) {
+        if (claimed[i]) continue;
+        const a = books[i];
+        if (a.metadata.title == null or a.metadata.authors.len == 0) continue;
+
+        var bucket: std.ArrayList(catalog_mod.Book) = .empty;
+        try bucket.append(allocator, a);
+        claimed[i] = true;
+
+        var j: usize = i + 1;
+        while (j < books.len) : (j += 1) {
+            if (claimed[j]) continue;
+            const b = books[j];
+            if (b.metadata.title == null or b.metadata.authors.len == 0) continue;
+            if (!std.ascii.eqlIgnoreCase(a.metadata.authors[0].sort, b.metadata.authors[0].sort)) continue;
+
+            const score = try compareTitles(allocator, a.metadata.title.?, b.metadata.title.?);
+            if (score < FUZZY_THRESHOLD) continue;
+
+            try bucket.append(allocator, b);
+            claimed[j] = true;
+        }
+        if (bucket.items.len < 2) {
+            bucket.deinit(allocator);
+            continue;
+        }
+
+        const owned = try bucket.toOwnedSlice(allocator);
+        sortByQualityDesc(owned);
+        try groups.append(allocator, .{ .books = owned });
+    }
+
+    allocator.free(claimed);
+    return groups.toOwnedSlice(allocator);
+}
+
+fn sortByQualityDesc(books: []catalog_mod.Book) void {
+    std.mem.sort(catalog_mod.Book, books, {}, scoreCmp);
+}
+fn scoreCmp(_: void, a: catalog_mod.Book, b: catalog_mod.Book) bool {
+    return quality.scoreBook(a) > quality.scoreBook(b);
+}
+
+test "groupByLogicalIdentity finds cross-format duplicates" {
+    const alloc = std.testing.allocator;
+    const author = [_]meta.Author{.{ .last = "Hobb", .first = "Robin", .sort = "Hobb, Robin" }};
+    const a = catalog_mod.Book{
+        .id = 1,
+        .path = "a.epub",
+        .sha256 = "aaa",
+        .size = 500_000,
+        .format = .epub,
+        .mtime = 0,
+        .metadata = .{ .title = "Assassin's Apprentice", .authors = &author, .confidence = 0.9 },
+    };
+    const b = catalog_mod.Book{
+        .id = 2,
+        .path = "b.mobi",
+        .sha256 = "bbb",
+        .size = 400_000,
+        .format = .mobi,
+        .mtime = 0,
+        .metadata = .{ .title = "Assassin's Apprentice", .authors = &author, .confidence = 0.9 },
+    };
+    const c = catalog_mod.Book{
+        .id = 3,
+        .path = "c.epub",
+        .sha256 = "ccc",
+        .size = 100_000,
+        .format = .epub,
+        .mtime = 0,
+        .metadata = .{ .title = "Royal Assassin", .authors = &author, .confidence = 0.9 },
+    };
+
+    const books = [_]catalog_mod.Book{ a, b, c };
+    const groups = try groupByLogicalIdentity(alloc, &books);
+    defer {
+        for (groups) |g| alloc.free(g.books);
+        alloc.free(groups);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), groups.len);
+    try std.testing.expectEqual(@as(usize, 2), groups[0].books.len);
+    // EPUB ranks above MOBI → first in the group.
+    try std.testing.expectEqual(meta.Format.epub, groups[0].books[0].format);
 }
