@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>booktool</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">booktool</div>
+    <input id="search" type="search" placeholder="search title or author…" autocomplete="off">
+    <nav>
+      <button class="tab active" data-view="all">All</button>
+      <button class="tab" data-view="missing">Missing</button>
+      <button class="tab" data-view="duplicates">Duplicates</button>
+    </nav>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <main>
+    <aside id="list" class="loading">loading…</aside>
+    <section id="detail" class="empty">
+      <p class="hint">Select a book on the left.</p>
+    </section>
+  </main>
+
+  <div id="reader-overlay" hidden>
+    <button id="reader-close" aria-label="Close reader">×</button>
+    <button id="reader-prev" class="page-nav prev" aria-label="Previous page">‹</button>
+    <div id="reader-area"></div>
+    <button id="reader-next" class="page-nav next" aria-label="Next page">›</button>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

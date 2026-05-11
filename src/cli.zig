@@ -14,6 +14,7 @@ const enrich_cmd = @import("commands/enrich.zig");
 const missing_cmd = @import("commands/missing.zig");
 const dedup_cmd = @import("commands/dedup.zig");
 const rename_cmd = @import("commands/rename.zig");
+const serve_cmd = @import("commands/serve.zig");
 
 pub const Context = struct {
     arena: std.mem.Allocator,
@@ -49,6 +50,7 @@ pub fn run(ctx: Context) !u8 {
     if (eq(cmd, "missing")) return missing_cmd.run(ctx, rest);
     if (eq(cmd, "dedup")) return dedup_cmd.run(ctx, rest);
     if (eq(cmd, "rename")) return rename_cmd.run(ctx, rest);
+    if (eq(cmd, "serve")) return serve_cmd.run(ctx, rest);
 
     try ctx.stderr.print("unknown command: {s}\n", .{cmd});
     try printUsage(ctx.stderr);
@@ -75,6 +77,7 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\  missing                List books with incomplete metadata
         \\  dedup [--apply]        Find (and optionally remove) duplicates
         \\  rename [--apply]       Show or perform canonical renames
+        \\  serve [--port N]       Run the web UI (default http://127.0.0.1:8787)
         \\  help                   Show this help
         \\  version                Print version
         \\
