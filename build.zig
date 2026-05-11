@@ -34,6 +34,13 @@ pub fn build(b: *std.Build) void {
 
     const c_module = translate_c.createModule();
 
+    // ---- libvaxis (TUI library) ---------------------------------------
+    const vaxis_dep = b.dependency("vaxis", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const vaxis_mod = vaxis_dep.module("vaxis");
+
     // ---- booktool library module ---------------------------------------
     const booktool_mod = b.addModule("booktool", .{
         .root_source_file = b.path("src/root.zig"),
@@ -42,6 +49,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .imports = &.{
             .{ .name = "c", .module = c_module },
+            .{ .name = "vaxis", .module = vaxis_mod },
         },
     });
 

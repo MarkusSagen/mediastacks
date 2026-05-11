@@ -441,7 +441,7 @@ fn ensureParentDir(file_path: []const u8) !void {
 /// `env` is the process environment map provided by `process.Init`.
 pub fn defaultPath(
     allocator: std.mem.Allocator,
-    env: *const std.process.Environ.Map,
+    env: *std.process.Environ.Map,
 ) ![]const u8 {
     if (env.get("XDG_DATA_HOME")) |xdg| {
         return std.fs.path.join(allocator, &.{ xdg, "booktool", "catalog.db" });

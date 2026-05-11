@@ -17,6 +17,7 @@ pub const score = @import("core/score.zig");
 // Formats
 pub const format = @import("formats/format.zig");
 pub const epub = @import("formats/epub.zig");
+pub const epub_chapters = @import("formats/epub_chapters.zig");
 pub const mobi = @import("formats/mobi.zig");
 
 // Providers
@@ -42,10 +43,12 @@ test {
     _ = score;
     _ = format;
     _ = epub;
+    _ = epub_chapters;
     _ = mobi;
     _ = openlibrary;
     _ = isbn;
     _ = fuzzy;
     _ = hash;
     _ = convert;
+    _ = @import("tui/reflow.zig");
 }
