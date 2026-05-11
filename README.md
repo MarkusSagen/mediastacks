@@ -32,11 +32,25 @@ in one SQLite file.
 
 ```sh
 mise install            # installs Zig 0.16 + zls
-zig build               # produces ./zig-out/bin/booktool
+zig build               # produces ./zig-out/bin/booktool (also re-links on rebuild)
+zig build -Doptimize=ReleaseFast   # optimized build
 zig build run -- info SOMEFILE.epub
 zig build test          # runs the unit-test suite (66 tests)
 ./scripts/smoke.sh      # end-to-end checks against tests/fixtures (19)
 ```
+
+To force a clean rebuild: `rm -rf .zig-cache zig-out && zig build`.
+
+### Dev loop (watch + incremental)
+
+```sh
+zig build --watch -fincremental --summary none
+```
+
+Rebuilds on file change, reuses the incremental cache between runs, and
+suppresses the per-step summary so only errors surface. Incremental is
+still flagged experimental in Zig 0.16 — if you hit a weird cache state,
+wipe `.zig-cache` and re-run.
 
 ## Common commands
 

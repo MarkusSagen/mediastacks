@@ -14,12 +14,15 @@ pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
 
+    // stdout/stderr must be streaming, not positional. /dev/null and
+    // pipes can't be seeked — pwrite into them returns INVAL and Zig's
+    // debug-build panics with "programmer bug caused syscall error".
     var stdout_buf: [4096]u8 = undefined;
-    var stdout_fw: std.Io.File.Writer = .init(.stdout(), init.io, &stdout_buf);
+    var stdout_fw: std.Io.File.Writer = .initStreaming(.stdout(), init.io, &stdout_buf);
     const stdout = &stdout_fw.interface;
 
     var stderr_buf: [4096]u8 = undefined;
-    var stderr_fw: std.Io.File.Writer = .init(.stderr(), init.io, &stderr_buf);
+    var stderr_fw: std.Io.File.Writer = .initStreaming(.stderr(), init.io, &stderr_buf);
     const stderr = &stderr_fw.interface;
 
     const exit_code = booktool.cli.run(.{

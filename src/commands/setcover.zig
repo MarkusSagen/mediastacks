@@ -55,58 +55,61 @@ fn setMobiCover(ctx: cli.Context, book_path: []const u8, image_path: []const u8)
 }
 
 fn setEpubCover(ctx: cli.Context, book_path: []const u8, image_path: []const u8) !u8 {
+    const new_image = try readWhole(ctx.arena, image_path);
+    applyToEpub(ctx.arena, book_path, new_image) catch |err| {
+        try ctx.stderr.print("{s}: {s}\n", .{ book_path, @errorName(err) });
+        return 2;
+    };
+    try ctx.stdout.print("replaced cover in {s}\n", .{book_path});
+    return 0;
+}
+
+/// I/O-free EPUB cover replacement for use by the web API. `image_bytes`
+/// is the raw bytes of the new cover (JPEG/PNG); the existing OPF's
+/// declared cover-image entry is overwritten with them and the archive
+/// is repacked.
+pub fn applyToEpub(arena: std.mem.Allocator, book_path: []const u8, image_bytes: []const u8) !void {
     var reader: zip.ZipReader = .{};
     try reader.open(book_path);
     defer reader.close();
 
-    // Find the cover manifest entry path.
-    const container_bytes = try reader.readMember(ctx.arena, "META-INF/container.xml");
+    const container_bytes = try reader.readMember(arena, "META-INF/container.xml");
     var container = try xml.Doc.parseMemory(container_bytes);
     defer container.deinit();
     const opf_path = (try container.firstString(
-        ctx.arena,
+        arena,
         "c",
         "urn:oasis:names:tc:opendocument:xmlns:container",
         "//c:rootfile/@full-path",
-    )) orelse {
-        try ctx.stderr.print("no OPF found in {s}\n", .{book_path});
-        return 2;
-    };
+    )) orelse return error.NoOpf;
     const opf_dir = std.fs.path.dirname(opf_path) orelse "";
 
-    const opf_bytes = try reader.readMember(ctx.arena, opf_path);
+    const opf_bytes = try reader.readMember(arena, opf_path);
     var opf = try xml.Doc.parseMemory(opf_bytes);
     defer opf.deinit();
 
     var cover_href = try opf.firstString(
-        ctx.arena,
+        arena,
         "p",
         OPF_NS,
         "//p:item[contains(@properties,'cover-image')]/@href",
     );
     if (cover_href == null) {
-        const cover_id = try opf.firstString(ctx.arena, "p", OPF_NS, "//p:meta[@name='cover']/@content");
+        const cover_id = try opf.firstString(arena, "p", OPF_NS, "//p:meta[@name='cover']/@content");
         if (cover_id) |id| {
             var xp: [256]u8 = undefined;
             const xpath = try std.fmt.bufPrint(&xp, "//p:item[@id='{s}']/@href", .{id});
-            cover_href = try opf.firstString(ctx.arena, "p", OPF_NS, xpath);
+            cover_href = try opf.firstString(arena, "p", OPF_NS, xpath);
         }
     }
-    if (cover_href == null) {
-        try ctx.stderr.print("no cover-image item in OPF; cannot replace\n", .{});
-        return 2;
-    }
+    const href = cover_href orelse return error.NoCoverItem;
 
     const cover_member_path = if (opf_dir.len > 0)
-        try std.fs.path.join(ctx.arena, &.{ opf_dir, cover_href.? })
+        try std.fs.path.join(arena, &.{ opf_dir, href })
     else
-        try ctx.arena.dupe(u8, cover_href.?);
+        try arena.dupe(u8, href);
 
-    // Read the new image.
-    const new_image = try readWhole(ctx.arena, image_path);
-
-    // Rebuild the EPUB: copy every entry, replacing the cover member.
-    const tmp_path = try std.fmt.allocPrint(ctx.arena, "{s}.cover.tmp", .{book_path});
+    const tmp_path = try std.fmt.allocPrint(arena, "{s}.cover.tmp", .{book_path});
     var writer: zip.ZipWriter = .{};
     try writer.create(tmp_path);
     errdefer writer.abort();
@@ -132,20 +135,18 @@ fn setEpubCover(ctx: cli.Context, book_path: []const u8, image_path: []const u8)
             }
         }
     };
-
     var walk_ctx = Walk{
-        .arena = ctx.arena,
+        .arena = arena,
         .reader = &reader,
         .writer = &writer,
         .cover_path = cover_member_path,
-        .new_image = new_image,
+        .new_image = image_bytes,
     };
     try reader.forEachMember(&walk_ctx, Walk.add);
     if (!walk_ctx.replaced) {
         writer.abort();
         unlinkPath(tmp_path);
-        try ctx.stderr.print("cover member {s} not found in archive\n", .{cover_member_path});
-        return 2;
+        return error.CoverMemberMissing;
     }
     try writer.finalizeAndClose();
 
@@ -157,8 +158,6 @@ fn setEpubCover(ctx: cli.Context, book_path: []const u8, image_path: []const u8)
         unlinkPath(tmp_path);
         return error.RenameFailed;
     }
-    try ctx.stdout.print("replaced cover in {s}\n", .{book_path});
-    return 0;
 }
 
 fn unlinkPath(path: []const u8) void {

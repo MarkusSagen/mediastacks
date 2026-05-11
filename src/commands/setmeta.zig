@@ -16,7 +16,7 @@ const cli = @import("../cli.zig");
 const format_mod = @import("../formats/format.zig");
 const zip = @import("../ffi/miniz.zig");
 
-const Update = struct {
+pub const Update = struct {
     title: ?[]const u8 = null,
     author: ?[]const u8 = null,
     series: ?[]const u8 = null,
@@ -120,20 +120,28 @@ fn setMobiMeta(ctx: cli.Context, path: []const u8, u: Update) !u8 {
 }
 
 fn setEpubMeta(ctx: cli.Context, path: []const u8, u: Update) !u8 {
+    applyToEpub(ctx.arena, path, u) catch |err| {
+        try ctx.stderr.print("{s}: {s}\n", .{ path, @errorName(err) });
+        return 2;
+    };
+    try ctx.stdout.print("updated metadata in {s}\n", .{path});
+    return 0;
+}
+
+/// I/O-free version of the EPUB metadata update suitable for use by the
+/// web API (it has no `Context` to print to). Rewrites the OPF in-place
+/// and atomically replaces the archive.
+pub fn applyToEpub(arena: std.mem.Allocator, path: []const u8, u: Update) !void {
     var reader: zip.ZipReader = .{};
     try reader.open(path);
     defer reader.close();
 
-    const container = try reader.readMember(ctx.arena, "META-INF/container.xml");
-    const opf_path = (try findOpfPath(ctx.arena, container)) orelse {
-        try ctx.stderr.print("no OPF in {s}\n", .{path});
-        return 2;
-    };
-    const opf_bytes = try reader.readMember(ctx.arena, opf_path);
-    const new_opf = try rewriteOpf(ctx.arena, opf_bytes, u);
+    const container = try reader.readMember(arena, "META-INF/container.xml");
+    const opf_path = (try findOpfPath(arena, container)) orelse return error.NoOpf;
+    const opf_bytes = try reader.readMember(arena, opf_path);
+    const new_opf = try rewriteOpf(arena, opf_bytes, u);
 
-    // Rebuild archive, swapping in the new OPF.
-    const tmp_path = try std.fmt.allocPrint(ctx.arena, "{s}.meta.tmp", .{path});
+    const tmp_path = try std.fmt.allocPrint(arena, "{s}.meta.tmp", .{path});
     var writer: zip.ZipWriter = .{};
     try writer.create(tmp_path);
     errdefer writer.abort();
@@ -158,7 +166,7 @@ fn setEpubMeta(ctx: cli.Context, path: []const u8, u: Update) !u8 {
         }
     };
     var walk_ctx = Walk{
-        .arena = ctx.arena,
+        .arena = arena,
         .reader = &reader,
         .writer = &writer,
         .opf_path = opf_path,
@@ -172,8 +180,6 @@ fn setEpubMeta(ctx: cli.Context, path: []const u8, u: Update) !u8 {
     const src_z = try std.fmt.bufPrintZ(&src_buf, "{s}", .{tmp_path});
     const dst_z = try std.fmt.bufPrintZ(&dst_buf, "{s}", .{path});
     if (std.c.rename(src_z.ptr, dst_z.ptr) != 0) return error.RenameFailed;
-    try ctx.stdout.print("updated metadata in {s}\n", .{path});
-    return 0;
 }
 
 fn findOpfPath(arena: std.mem.Allocator, container: []const u8) !?[]const u8 {

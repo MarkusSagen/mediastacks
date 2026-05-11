@@ -30,8 +30,7 @@ pub fn serve(
 
     while (true) {
         var stream = server.accept(io) catch |err| {
-            try log.print("accept error: {s}\n", .{@errorName(err)});
-            try log.flush();
+            std.log.warn("accept error: {s}", .{@errorName(err)});
             continue;
         };
         defer stream.socket.close(io);
@@ -42,11 +41,8 @@ pub fn serve(
         var stream_writer = stream.writer(io, &out_buf);
         var http_server = std.http.Server.init(&stream_reader.interface, &stream_writer.interface);
 
-        // One request per connection — keep-alive is fine but pinning
-        // a worker to each socket isn't worth the complexity here.
         var request = http_server.receiveHead() catch |err| {
-            try log.print("recv head: {s}\n", .{@errorName(err)});
-            try log.flush();
+            std.log.warn("recv head: {s}", .{@errorName(err)});
             continue;
         };
 
@@ -54,19 +50,27 @@ pub fn serve(
         defer arena_state.deinit();
         const arena = arena_state.allocator();
 
+        // Snapshot the request line before handling — the head's slices
+        // are tied to the receive buffer and the act of responding can
+        // invalidate them.
+        var target_buf: [512]u8 = undefined;
+        const target_snapshot = std.fmt.bufPrint(
+            &target_buf,
+            "{s}",
+            .{request.head.target[0..@min(request.head.target.len, target_buf.len)]},
+        ) catch "?";
+        const method_tag = @tagName(request.head.method);
+
         handle(arena, io, cat, &request) catch |err| {
-            try log.print("{s} {s}: {s}\n", .{
-                @tagName(request.head.method),
-                request.head.target,
-                @errorName(err),
-            });
-            try log.flush();
-            // Best-effort 500. If the body was already streamed, this fails silently.
-            request.respond("internal error\n", .{ .status = .internal_server_error }) catch {};
+            std.log.warn("{s} {s}: {s}", .{ method_tag, target_snapshot, @errorName(err) });
+            request.respond("internal error\n", .{
+                .status = .internal_server_error,
+                .keep_alive = false,
+            }) catch {};
+            continue;
         };
 
-        try log.print("{s} {s}\n", .{ @tagName(request.head.method), request.head.target });
-        try log.flush();
+        std.log.info("{s} {s}", .{ method_tag, target_snapshot });
     }
 }
 
