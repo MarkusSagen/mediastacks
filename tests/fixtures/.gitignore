@@ -1,0 +1,15 @@
+# Ebook fixtures are copyrighted material — track the directory
+# structure but not the bytes. Re-populate locally with the script in
+# scripts/populate-fixtures.sh, or copy your own files into the
+# matching subdirectories.
+
+*.epub
+*.mobi
+*.azw3
+*.azw
+*.prc
+*.pdf
+
+# Keep the structural docs.
+!.gitignore
+!README.md
