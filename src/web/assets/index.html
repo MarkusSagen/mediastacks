@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>booktool</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
 </head>
@@ -12,19 +13,30 @@
   <header>
     <div class="brand">booktool</div>
     <input id="search" type="search" placeholder="search title or author…" autocomplete="off">
-    <nav>
+    <nav class="tabs">
       <button class="tab active" data-view="all">All</button>
       <button class="tab" data-view="missing">Missing</button>
       <button class="tab" data-view="duplicates">Duplicates</button>
     </nav>
+    <nav class="layout-toggle" aria-label="Layout">
+      <button class="layout active" data-layout="gallery" title="Gallery">▦</button>
+      <button class="layout" data-layout="list" title="List">▤</button>
+    </nav>
     <div class="stats" id="stats"></div>
   </header>
 
-  <main>
-    <aside id="list" class="loading">loading…</aside>
-    <section id="detail" class="empty">
-      <p class="hint">Select a book on the left.</p>
+  <main id="main">
+    <section id="library" data-layout="gallery">
+      <div id="library-empty" class="empty-state" hidden>
+        <h2>your catalog is empty</h2>
+        <p>Run <code>booktool scan DIR</code> in a terminal to ingest a directory of ebooks, then refresh.</p>
+      </div>
+      <div id="library-grid"></div>
     </section>
+    <aside id="detail" hidden>
+      <button id="detail-close" class="ghost" aria-label="Back to library">← back</button>
+      <div id="detail-body"></div>
+    </aside>
   </main>
 
   <div id="reader-overlay" hidden>

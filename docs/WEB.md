@@ -27,34 +27,43 @@ binding beyond localhost as careful, manual exposure.
 
 ## What's in the UI
 
+The default landing view is a **gallery** of covers. Toggle to a
+**list** layout (thumbnail + author + title + badges) from the header.
+
 ```
- ┌───────────────────────────────────────────────────────────────┐
- │  booktool   [search…]    [All] [Missing] [Duplicates]   12 b  │
- ├───────────────┬───────────────────────────────────────────────┤
- │  thumb  title │   ┌───────┐  Title                            │
- │  thumb  title │   │ cover │  Author · Year · Series · ISBN    │
- │  thumb  title │   └───────┘  [Read] [Download]                │
- │  ▶ ...        │   description…                                │
- │               │                                               │
- │               │   /path/to/the/book.epub                      │
- └───────────────┴───────────────────────────────────────────────┘
+ ┌──────────────────────────────────────────────────────────────────┐
+ │  booktool   [search…]   [All][Missing][Duplicates]  [▦][▤]  12 b │
+ ├──────────────────────────────────────────────────────────────────┤
+ │  ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐                 │
+ │  │   │ │   │ │   │ │   │ │   │ │   │ │   │ │   │                 │
+ │  │   │ │   │ │   │ │   │ │   │ │   │ │   │ │   │                 │
+ │  └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘ └───┘                 │
+ │  Title  Title  Title  Title  Title  Title  Title  Title          │
+ │  Auth   Auth   Auth   Auth   Auth   Auth   Auth   Auth           │
+ └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Tabs** (top right):
+**View tabs** (top middle):
 - **All** — every catalogued book
 - **Missing** — books with one or more missing key fields (title,
   author, year, ISBN). Same query as `booktool missing`.
-- **Duplicates** — exact SHA-256 dup groups. Each group is shown with
-  its sha256 prefix and the books that share it.
+- **Duplicates** — exact SHA-256 dup groups. Each group is rendered as
+  a labeled mini-list regardless of the active layout.
 
-**Search** filters the sidebar live by title or author substring.
+**Layout toggle** (▦ Gallery / ▤ List): defaults to gallery. Persists
+in-memory for the session.
 
-**Detail pane** (selecting a book on the left) shows the cover from
-`/api/books/:id/cover`, all populated metadata fields, and two actions:
-- **Read** — opens an in-browser reader overlay (EPUB only — see
-  below). `Esc` to close, `←`/`→` to page.
+**Search** filters the visible books live by title or author substring.
+
+**Detail panel** slides in from the right when you click a card. It
+shows the cover from `/api/books/:id/cover`, all populated metadata
+fields, and two actions:
+- **Read** — opens an in-browser reader overlay (EPUB only). `Esc` to
+  close, `←`/`→` to page.
 - **Download** — streams the original file from `/api/books/:id/file`
   with the correct `Content-Type`.
+
+Click the **← back** button at the top of the panel to dismiss it.
 
 The reader is built on [epub.js](https://github.com/futurepress/epub.js/),
 loaded from a CDN. Paginated mode by default; the reader fetches
@@ -67,6 +76,8 @@ catalogued EPUB without preprocessing.
 |---|---|---|
 | `GET` | `/` | SPA `index.html` |
 | `GET` | `/app.js`, `/styles.css` | embedded static assets |
+| `GET` | `/favicon.svg`, `/favicon.ico` | embedded favicon (both routes return the SVG) |
+| `GET` | `/.well-known/...` | `204 No Content` (silences Chrome DevTools probes) |
 | `GET` | `/api/books` | JSON array of every book |
 | `GET` | `/api/missing` | JSON array — same shape, only incomplete |
 | `GET` | `/api/duplicates` | `[{ "sha256": "...", "books": [...] }, ...]` |

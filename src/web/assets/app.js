@@ -1,18 +1,21 @@
-// booktool web UI — vanilla JS, no build.
-// Data flow: fetch /api/books or /api/missing or /api/duplicates,
-// render a list on the left, click a row to populate the detail pane,
-// click "Read" to open the embedded epub.js reader overlay.
-
-const state = {
-  view: 'all',          // 'all' | 'missing' | 'duplicates'
-  query: '',
-  books: [],            // current list
-  selectedId: null,
-};
+// booktool web UI — vanilla JS, no build step.
+//
+// Fetches /api/books (or /missing, /duplicates), renders a covers
+// gallery (default) or a list, and shows a detail panel with cover,
+// metadata, and download/read actions on selection.
 
 const $ = (sel) => document.querySelector(sel);
 
-// ---- View routing ------------------------------------------------------
+const state = {
+  view: 'all',        // 'all' | 'missing' | 'duplicates'
+  layout: 'gallery',  // 'gallery' | 'list'
+  query: '',
+  books: [],          // flat list of currently visible books
+  groups: [],         // duplicate groups (when view === 'duplicates')
+  selectedId: null,
+};
+
+// ---- View / layout switches -------------------------------------------
 
 document.querySelectorAll('.tab').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -23,68 +26,97 @@ document.querySelectorAll('.tab').forEach(btn => {
   });
 });
 
-$('#search').addEventListener('input', (e) => {
-  state.query = e.target.value.trim().toLowerCase();
-  renderList();
+document.querySelectorAll('.layout').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.layout').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.layout = btn.dataset.layout;
+    $('#library').dataset.layout = state.layout;
+    render();
+  });
 });
 
+$('#search').addEventListener('input', (e) => {
+  state.query = e.target.value.trim().toLowerCase();
+  render();
+});
+
+// ---- Data fetch -------------------------------------------------------
+
 async function refresh() {
-  const list = $('#list');
-  list.classList.add('loading');
-  list.innerHTML = '';
+  const grid = $('#library-grid');
+  grid.innerHTML = '<p style="color:var(--fg-dim);padding:24px">loading…</p>';
   try {
     if (state.view === 'duplicates') {
-      const groups = await fetch('/api/duplicates').then(r => r.json());
-      state.books = [];
-      renderDuplicates(groups);
+      state.groups = await fetch('/api/duplicates').then(r => r.json());
+      state.books = state.groups.flatMap(g => g.books);
     } else {
       const url = state.view === 'missing' ? '/api/missing' : '/api/books';
       state.books = await fetch(url).then(r => r.json());
-      renderList();
+      state.groups = [];
     }
-    $('#stats').textContent = `${state.books.length} book${state.books.length === 1 ? '' : 's'}`;
+    $('#stats').textContent =
+      `${state.books.length} book${state.books.length === 1 ? '' : 's'}`;
+    render();
   } catch (err) {
-    list.innerHTML = `<p class="hint">failed to load: ${err.message}</p>`;
-  } finally {
-    list.classList.remove('loading');
+    grid.innerHTML =
+      `<p style="color:var(--danger);padding:24px">failed to load: ${err.message}</p>`;
   }
 }
 
-// ---- Rendering ---------------------------------------------------------
+// ---- Render -----------------------------------------------------------
 
-function renderList() {
-  const list = $('#list');
-  list.innerHTML = '';
+function render() {
+  const grid = $('#library-grid');
+  grid.innerHTML = '';
+  $('#library-empty').hidden = state.books.length > 0;
+
+  if (state.view === 'duplicates' && state.groups.length > 0) {
+    for (const g of state.groups) grid.appendChild(dupGroupEl(g));
+    return;
+  }
+
   const q = state.query;
   const filtered = q
     ? state.books.filter(b =>
         (b.title || '').toLowerCase().includes(q) ||
         (b.author_sort || '').toLowerCase().includes(q))
     : state.books;
-  for (const b of filtered) list.appendChild(rowEl(b));
+
+  for (const b of filtered) grid.appendChild(bookCard(b));
 }
 
-function rowEl(b) {
-  const row = document.createElement('div');
-  row.className = 'book-row';
-  if (b.id === state.selectedId) row.classList.add('active');
+function bookCard(b) {
+  const card = document.createElement('div');
+  card.className = 'book-card';
+  if (b.id === state.selectedId) card.classList.add('active');
+  card.dataset.id = b.id;
 
+  const frame = document.createElement('div');
+  frame.className = 'cover-frame';
   const img = document.createElement('img');
   img.className = 'thumb';
   img.loading = 'lazy';
+  img.alt = b.title || '';
   img.src = `/api/books/${b.id}/cover`;
-  img.onerror = () => { img.style.visibility = 'hidden'; };
+  img.onerror = () => {
+    img.remove();
+    const ph = document.createElement('span');
+    ph.className = 'placeholder';
+    ph.textContent = 'no cover';
+    frame.appendChild(ph);
+  };
+  frame.appendChild(img);
 
   const meta = document.createElement('div');
   meta.className = 'meta';
-
   const title = document.createElement('div');
   title.className = 'title';
   title.textContent = b.title || b.path.split('/').pop();
-
   const author = document.createElement('div');
   author.className = 'author';
   author.textContent = b.author_sort || '(unknown author)';
+  meta.append(title, author);
 
   const badges = document.createElement('div');
   badges.className = 'badges';
@@ -93,10 +125,9 @@ function rowEl(b) {
   if (!b.isbn) badges.appendChild(badge('no isbn', 'warn'));
   if (b.series) badges.appendChild(badge(`${b.series}${b.series_index ? ' #' + b.series_index : ''}`));
 
-  meta.append(title, author, badges);
-  row.append(img, meta);
-  row.addEventListener('click', () => selectBook(b.id));
-  return row;
+  card.append(frame, meta, badges);
+  card.addEventListener('click', () => selectBook(b.id));
+  return card;
 }
 
 function badge(text, kind) {
@@ -106,62 +137,54 @@ function badge(text, kind) {
   return el;
 }
 
-function renderDuplicates(groups) {
-  const list = $('#list');
-  list.innerHTML = '';
-  if (groups.length === 0) {
-    list.innerHTML = '<p class="hint" style="padding:20px">No duplicates.</p>';
-    return;
-  }
-  for (const g of groups) {
-    const box = document.createElement('div');
-    box.className = 'dup-group';
-    const h = document.createElement('h3');
-    h.textContent = `sha256 ${g.sha256.slice(0, 12)} · ${g.books.length} copies`;
-    box.append(h);
-    for (const b of g.books) box.appendChild(rowEl(b));
-    list.appendChild(box);
-  }
+function dupGroupEl(g) {
+  const box = document.createElement('div');
+  box.className = 'dup-group';
+  const h = document.createElement('h3');
+  h.textContent = `sha256 ${g.sha256.slice(0, 12)} · ${g.books.length} copies`;
+  box.appendChild(h);
+  const members = document.createElement('div');
+  members.className = 'members';
+  // Duplicates listing always renders as a flat list for clarity, even
+  // when the gallery layout is active.
+  members.dataset.layout = 'list';
+  members.style.cssText = 'display:flex;flex-direction:column;gap:2px';
+  for (const b of g.books) members.appendChild(bookCard(b));
+  box.appendChild(members);
+  return box;
 }
 
-// ---- Detail pane -------------------------------------------------------
+// ---- Detail panel -----------------------------------------------------
 
 async function selectBook(id) {
   state.selectedId = id;
-  document.querySelectorAll('.book-row.active').forEach(r => r.classList.remove('active'));
-  // Find and highlight the row.
-  for (const r of document.querySelectorAll('.book-row')) {
-    const title = r.querySelector('.title')?.textContent;
-    if (title && state.books.find(b => b.id === id && (b.title || '').includes(title))) {
-      r.classList.add('active');
-      break;
-    }
-  }
+  document.querySelectorAll('.book-card.active').forEach(r => r.classList.remove('active'));
+  document.querySelectorAll(`.book-card[data-id="${id}"]`).forEach(c => c.classList.add('active'));
 
   const detail = $('#detail');
-  detail.classList.remove('empty');
-  detail.innerHTML = '<p class="hint">loading…</p>';
+  detail.hidden = false;
+  const body = $('#detail-body');
+  body.innerHTML = '<p style="color:var(--fg-dim)">loading…</p>';
 
   const b = await fetch(`/api/books/${id}`).then(r => r.json());
-
-  detail.innerHTML = '';
-  const head = document.createElement('div');
-  head.className = 'detail-head';
+  body.innerHTML = '';
 
   const cover = document.createElement('img');
   cover.className = 'detail-cover';
   cover.src = `/api/books/${id}/cover`;
-  cover.onerror = () => { cover.style.visibility = 'hidden'; };
+  cover.alt = b.title || '';
+  cover.onerror = () => { cover.style.display = 'none'; };
+  body.appendChild(cover);
 
   const info = document.createElement('div');
   info.className = 'detail-info';
 
   const title = document.createElement('h1');
   title.textContent = b.title || '(untitled)';
-
   const authorLine = document.createElement('div');
   authorLine.className = 'author-line';
   authorLine.textContent = (b.authors || []).join('; ') || b.author_sort || 'unknown author';
+  info.append(title, authorLine);
 
   const fields = document.createElement('div');
   for (const [label, val] of [
@@ -172,14 +195,15 @@ async function selectBook(id) {
     ['ISBN', b.isbn],
     ['Format', b.format],
     ['SHA-256', b.sha256?.slice(0, 16) + '…'],
-    ['Source', b.source ? `${b.source} (confidence ${b.confidence})` : null],
+    ['Source', b.source ? `${b.source} (conf ${b.confidence})` : null],
   ]) {
     if (val == null || val === '') continue;
     const row = document.createElement('div');
     row.className = 'field';
-    row.innerHTML = `<b>${label}</b>${val}`;
+    row.innerHTML = `<b>${label}</b>${escapeHtml(String(val))}`;
     fields.appendChild(row);
   }
+  info.appendChild(fields);
 
   const actions = document.createElement('div');
   actions.className = 'actions';
@@ -194,36 +218,52 @@ async function selectBook(id) {
   dlBtn.textContent = 'Download';
   dlBtn.onclick = () => { window.location.href = `/api/books/${id}/file`; };
   actions.appendChild(dlBtn);
+  info.appendChild(actions);
 
-  info.append(title, authorLine, fields, actions);
-  head.append(cover, info);
-  detail.appendChild(head);
+  body.appendChild(info);
 
   if (b.description) {
     const desc = document.createElement('div');
     desc.className = 'description';
     desc.innerHTML = b.description;
-    detail.appendChild(desc);
+    body.appendChild(desc);
   }
 
-  const pathLine = document.createElement('div');
-  pathLine.className = 'path-line';
-  pathLine.textContent = b.path;
-  detail.appendChild(pathLine);
+  const path = document.createElement('div');
+  path.className = 'path-line';
+  path.textContent = b.path;
+  body.appendChild(path);
 }
 
-// ---- Reader overlay ----------------------------------------------------
+$('#detail-close').addEventListener('click', () => {
+  $('#detail').hidden = true;
+  state.selectedId = null;
+  document.querySelectorAll('.book-card.active').forEach(r => r.classList.remove('active'));
+});
+
+function escapeHtml(s) {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ---- Reader overlay ---------------------------------------------------
 
 let currentRendition = null;
 
 function openReader(book) {
-  const overlay = $('#reader-overlay');
-  overlay.hidden = false;
+  $('#reader-overlay').hidden = false;
   const area = $('#reader-area');
   area.innerHTML = '';
 
   const ebook = ePub(`/api/books/${book.id}/file`);
-  currentRendition = ebook.renderTo(area, { width: '100%', height: '100%', flow: 'paginated' });
+  currentRendition = ebook.renderTo(area, {
+    width: '100%',
+    height: '100%',
+    flow: 'paginated',
+  });
   currentRendition.display();
 
   document.addEventListener('keydown', readerKeys);

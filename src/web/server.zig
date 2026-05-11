@@ -88,6 +88,15 @@ fn handle(
     if (std.mem.eql(u8, path, "/styles.css")) {
         return respondStatic(request, static.styles_css, "text/css");
     }
+    if (std.mem.eql(u8, path, "/favicon.svg") or std.mem.eql(u8, path, "/favicon.ico")) {
+        return respondStatic(request, static.favicon_svg, "image/svg+xml");
+    }
+    if (std.mem.startsWith(u8, path, "/.well-known/")) {
+        // Browser-injected probes (Chrome DevTools workspace discovery
+        // etc). Return 204 quietly so they don't show up as 404s.
+        try request.respond("", .{ .status = .no_content });
+        return;
+    }
     if (std.mem.eql(u8, path, "/api/books")) {
         return api.handleBooksList(arena, cat, request);
     }
