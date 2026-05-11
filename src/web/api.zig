@@ -373,18 +373,17 @@ fn handleEnrich(
     const book = (try cat.getBookById(arena, id)) orelse return notFound(request);
 
     var ol = openlibrary.OpenLibrary{};
-    const provider = ol.provider();
     const q = provider_iface.Query{
         .isbn = book.metadata.isbn,
         .title = book.metadata.title,
         .author = if (book.metadata.authors.len > 0) book.metadata.authors[0].sort else null,
     };
-    const remote = (try provider.lookup(arena, io, q)) orelse {
+    const rich = (try ol.lookupRich(arena, io, q)) orelse {
         try respondJson(request, "{\"enriched\":false,\"reason\":\"no match\"}");
         return;
     };
 
-    const merged = try meta.BookMetadata.merge(arena, book.metadata, remote);
+    const merged = try meta.BookMetadata.merge(arena, book.metadata, rich.metadata);
     _ = try cat.upsertBook(arena, .{
         .path = book.path,
         .sha256 = book.sha256,
@@ -398,8 +397,64 @@ fn handleEnrich(
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(arena, "{\"enriched\":true,\"book\":");
     try writeBookJson(arena, &out, fresh);
-    try out.append(arena, '}');
+    if (rich.work_key) |wk| {
+        try out.appendSlice(arena, ",\"work_key\":");
+        try writeJsonString(arena, &out, wk);
+    }
+    try out.appendSlice(arena, ",\"alt_covers\":[");
+    for (rich.alt_cover_urls, 0..) |u, i| {
+        if (i > 0) try out.append(arena, ',');
+        try writeJsonString(arena, &out, u);
+    }
+    try out.appendSlice(arena, "],\"editions\":[");
+    for (rich.editions, 0..) |e, i| {
+        if (i > 0) try out.append(arena, ',');
+        try writeEditionJson(arena, &out, e);
+    }
+    try out.appendSlice(arena, "]}");
     try respondJson(request, out.items);
+}
+
+fn writeEditionJson(
+    arena: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    e: openlibrary.Edition,
+) !void {
+    try out.append(arena, '{');
+    var first = true;
+    if (e.ol_key) |k| try writeFieldString(arena, out, "ol_key", k, &first);
+    if (e.isbn) |v| try writeFieldString(arena, out, "isbn", v, &first);
+    if (e.publisher) |v| try writeFieldString(arena, out, "publisher", v, &first);
+    if (e.published_year) |y| {
+        if (!first) try out.append(arena, ',');
+        first = false;
+        try out.appendSlice(arena, "\"year\":");
+        try out.appendSlice(arena, try std.fmt.allocPrint(arena, "{d}", .{y}));
+    }
+    if (e.language) |v| try writeFieldString(arena, out, "language", v, &first);
+    if (e.pages) |p| {
+        if (!first) try out.append(arena, ',');
+        first = false;
+        try out.appendSlice(arena, "\"pages\":");
+        try out.appendSlice(arena, try std.fmt.allocPrint(arena, "{d}", .{p}));
+    }
+    if (e.cover_url) |v| try writeFieldString(arena, out, "cover_url", v, &first);
+    try out.append(arena, '}');
+}
+
+fn writeFieldString(
+    arena: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    key: []const u8,
+    value: []const u8,
+    first: *bool,
+) !void {
+    if (!first.*) try out.append(arena, ',');
+    first.* = false;
+    try out.append(arena, '"');
+    try out.appendSlice(arena, key);
+    try out.appendSlice(arena, "\":");
+    try writeJsonString(arena, out, value);
 }
 
 /// POST /api/books/:id/convert

@@ -153,8 +153,7 @@ pub const OpenLibrary = struct {
             defer allocator.free(det_url);
             if (httpGetOk(allocator, io, det_url)) |body| {
                 defer allocator.free(body);
-                const det = parseDetailsPayload(allocator, isbn, body) catch
-                    .{ .work_key = null, .md = null };
+                const det = parseDetailsPayload(allocator, isbn, body) catch DetailsResult{};
                 work_key = det.work_key;
                 if (det.md) |dm| {
                     if (base_md) |bm| {
@@ -459,23 +458,28 @@ pub fn parseIsbnPayload(
 
 // ---- Rich enrichment ----------------------------------------------------
 
+pub const DetailsResult = struct {
+    work_key: ?[]const u8 = null,
+    md: ?meta.BookMetadata = null,
+};
+
 /// Parse a `jscmd=details` response and pull out the work key plus
-/// anything we don't already get from `jscmd=data`. Returns null if the
-/// requested ISBN is absent. The returned metadata is partial — callers
-/// merge it with parseIsbnPayload's result for the final picture.
+/// anything we don't already get from `jscmd=data`. The returned
+/// metadata is partial — callers merge it with parseIsbnPayload's
+/// result for the final picture.
 pub fn parseDetailsPayload(
     allocator: std.mem.Allocator,
     isbn: []const u8,
     body: []const u8,
-) !struct { work_key: ?[]const u8, md: ?meta.BookMetadata } {
+) !DetailsResult {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch
-        return .{ .work_key = null, .md = null };
+        return .{};
     defer parsed.deinit();
     if (parsed.value != .object) return .{ .work_key = null, .md = null };
 
     var key_buf: [128]u8 = undefined;
     const key = std.fmt.bufPrint(&key_buf, "ISBN:{s}", .{isbn}) catch
-        return .{ .work_key = null, .md = null };
+        return .{};
     const outer = parsed.value.object.get(key) orelse return .{ .work_key = null, .md = null };
     if (outer != .object) return .{ .work_key = null, .md = null };
 

@@ -12,13 +12,23 @@
 <body>
   <header>
     <div class="brand">booktool</div>
-    <input id="search" type="search" placeholder="search title or author…" autocomplete="off">
+    <input id="search" type="search" placeholder="search title / author…  (try: author:hobb year:2010-2020 status:reading)" autocomplete="off">
     <nav class="tabs">
       <button class="tab active" data-view="all">All</button>
       <button class="tab" data-view="missing">Missing</button>
       <button class="tab" data-view="unverified">Unverified</button>
       <button class="tab" data-view="duplicates">Duplicates</button>
     </nav>
+    <select id="sort-select" title="Sort order">
+      <option value="author">Author</option>
+      <option value="title">Title</option>
+      <option value="year_desc">Year (newest)</option>
+      <option value="year_asc">Year (oldest)</option>
+      <option value="added_desc">Recently added</option>
+      <option value="updated_desc">Recently updated</option>
+      <option value="series">Series</option>
+      <option value="size_desc">File size</option>
+    </select>
     <nav class="layout-toggle" aria-label="Layout">
       <button class="layout active" data-layout="gallery" title="Gallery">▦</button>
       <button class="layout" data-layout="list" title="List">▤</button>
@@ -29,13 +39,48 @@
   <div id="selection-bar" hidden>
     <span id="selection-count">0 selected</span>
     <button id="bulk-enrich">Enrich all</button>
+    <button id="bulk-status-reading">Mark reading</button>
+    <button id="bulk-status-finished">Mark finished</button>
     <button id="bulk-delete" class="danger">Delete…</button>
     <button id="bulk-clear" class="ghost">Clear</button>
   </div>
 
+  <div id="active-filters" hidden></div>
+
   <div id="toast" hidden></div>
 
   <main id="main">
+    <aside id="facets">
+      <div class="facet-group" data-key="status">
+        <h4>Status</h4>
+        <ul>
+          <li data-value="unread">Unread</li>
+          <li data-value="reading">Reading</li>
+          <li data-value="finished">Finished</li>
+        </ul>
+      </div>
+      <div class="facet-group" data-key="has">
+        <h4>Has</h4>
+        <ul>
+          <li data-value="isbn">ISBN</li>
+          <li data-value="cover">Cover</li>
+          <li data-value="series">Series</li>
+        </ul>
+      </div>
+      <details class="facet-group" data-key="author" open>
+        <summary><h4>Authors</h4></summary>
+        <ul id="facet-authors" class="facet-scroll"><li class="hint">loading…</li></ul>
+      </details>
+      <details class="facet-group" data-key="series">
+        <summary><h4>Series</h4></summary>
+        <ul id="facet-series" class="facet-scroll"><li class="hint">loading…</li></ul>
+      </details>
+      <details class="facet-group" data-key="genre">
+        <summary><h4>Genres</h4></summary>
+        <ul id="facet-genres" class="facet-scroll"><li class="hint">loading…</li></ul>
+      </details>
+    </aside>
+
     <section id="library" data-layout="gallery">
       <div id="library-empty" class="empty-state" hidden>
         <h2>your catalog is empty</h2>
@@ -43,6 +88,7 @@
       </div>
       <div id="library-grid"></div>
     </section>
+
     <aside id="detail" hidden>
       <button id="detail-close" class="ghost" aria-label="Back to library">← back</button>
       <div id="detail-body"></div>

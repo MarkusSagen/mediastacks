@@ -83,9 +83,58 @@ to toggle. While any cards are selected, a toolbar appears at the top
 of the main area:
 
 - **Enrich all** — bulk Open Library lookups.
+- **Mark reading / Mark finished** — bulk read-status updates.
 - **Delete…** — removes the catalog rows for the selected books (files
   are kept by default).
 - **Clear** — deselect everything.
+
+### Search, filter, and sort
+
+**Search box** (top centre) accepts free text plus `key:value` tokens.
+Plain words match title or author substring. Tokens narrow the result
+set:
+
+```
+hobb                       free-text against title + author
+author:"Hobb, Robin"       quoted values for multi-word authors
+series:"Farseer Trilogy"
+status:reading             unread | reading | finished
+format:epub                epub | mobi | azw3 | pdf
+year:2010                  exact year
+year:2010-2020             year range
+has:isbn                   only books with an ISBN
+missing:cover              books without a cover
+genre:Fantasy
+```
+
+Plain text and tokens combine: `hobb status:reading year:1995-2005`.
+
+**Sort dropdown** (top right): author / title / year (newest|oldest) /
+recently added / recently updated / series / file size.
+
+**Facet sidebar** (left column):
+
+- **Status** — Unread / Reading / Finished
+- **Has** — ISBN / Cover / Series
+- **Authors** — every author in the catalog with book counts, click to
+  filter; click again to clear.
+- **Series** — same for series.
+- **Genres** — extracted from EPUB `<dc:subject>` or MOBI subject EXTH.
+
+Active filters render as **chips** above the library — click a chip to
+remove that filter, or **clear all** to reset everything.
+
+### Reading status
+
+Each card carries a coloured dot in the top-right corner:
+- *(invisible)* — Unread
+- 🟠 — Reading
+- 🟢 — Finished
+
+The dot is set/unset from the **status toggle** in the detail panel
+(three-button group: Unread · Reading · Finished). Transitions stamp
+`started_at` (first move to Reading) and `finished_at` (move to
+Finished); both are exposed via `/api/books/:id`.
 
 The reader is built on [epub.js](https://github.com/futurepress/epub.js/),
 loaded from a CDN. Paginated mode by default; the reader fetches
@@ -102,12 +151,35 @@ catalogued EPUB without preprocessing.
 | `GET` | `/app.js`, `/styles.css` | embedded static assets |
 | `GET` | `/favicon.svg`, `/favicon.ico` | embedded favicon (both routes return the SVG) |
 | `GET` | `/.well-known/...` | `204 No Content` (silences Chrome DevTools probes) |
-| `GET` | `/api/books` | JSON array of every book |
-| `GET` | `/api/missing` | JSON array — same shape, only incomplete |
+| `GET` | `/api/books?...` | JSON array — see "Query parameters" below |
+| `GET` | `/api/missing` | JSON array — only incomplete books |
+| `GET` | `/api/unverified` | JSON array — only books still on embedded metadata with low confidence |
 | `GET` | `/api/duplicates` | `[{ "sha256": "...", "books": [...] }, ...]` |
+| `GET` | `/api/authors` | `[{ "name": "Hobb, Robin", "count": 5 }, ...]` |
+| `GET` | `/api/series` | same shape, distinct series |
+| `GET` | `/api/genres` | same shape, distinct subjects/genres |
 | `GET` | `/api/books/:id` | JSON for one book (full metadata) |
 | `GET` | `/api/books/:id/file` | raw bytes, `application/epub+zip` etc. |
 | `GET` | `/api/books/:id/cover` | image bytes, `image/jpeg` or `image/png` |
+
+#### Query parameters for `/api/books`
+
+All optional, combinable. Filtering is server-side SQL.
+
+| Param | Effect |
+|---|---|
+| `q=text` | substring match against title and author_sort |
+| `author=Hobb,+Robin` | exact `author_sort` |
+| `series=Farseer+Trilogy` | exact `series` |
+| `genre=Fantasy` | substring match against subjects JSON |
+| `format=epub` | one of `epub` / `mobi` / `azw3` / `pdf` |
+| `year_from=2010`, `year_to=2020` | numeric range, inclusive |
+| `status=reading` | `unread` / `reading` / `finished` |
+| `source=openlibrary` | enrichment source name |
+| `has_isbn=1`, `has_cover=1`, `has_series=1` | only books that have it; `0` for the inverse |
+| `missing=1` | shorthand for "any of title/author/year/isbn missing" |
+| `order=year_desc` | `author` (default) / `title` / `year_asc` / `year_desc` / `added_desc` / `updated_desc` / `series` / `size_desc` |
+| `limit=50` | cap the result count |
 
 ### Write
 
@@ -118,6 +190,7 @@ catalogued EPUB without preprocessing.
 | `POST` | `/api/books/:id/convert` | `{to: "epub"\|"mobi"\|"azw3"\|"pdf"}` | Returns `{ok: true, path}`. Same engines as the CLI's `convert`. |
 | `POST` | `/api/books/:id/cover` | `{data_base64, content_type?}` | EPUB only. Replaces the cover-manifest entry bytes. |
 | `DELETE` | `/api/books/:id[?file=1]` | (empty) | Removes catalog row. With `?file=1`, also unlinks the file. |
+| `PATCH` | `/api/books/:id/status` | `{status: "unread"\|"reading"\|"finished"}` | Sets reading state; stamps `started_at` / `finished_at`. Returns the updated book. |
 | `POST` | `/api/books/bulk/enrich` | `{ids: [...]}` | `{enriched, no_match, errors}` counts. |
 | `POST` | `/api/books/bulk/delete` | `{ids: [...], remove_files?: bool}` | `{deleted}` count. |
 

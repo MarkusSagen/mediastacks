@@ -80,19 +80,181 @@ header {
 }
 .layout { padding: 6px 10px; font-size: 16px; }
 
+#sort-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+#sort-select:focus { outline: 1px solid var(--accent); }
+
 .stats { margin-left: auto; color: var(--fg-dim); font-size: 12px; }
+
+/* ---- Facet sidebar --------------------------------------------- */
+
+#facets {
+  width: 220px;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--border);
+  padding: 12px 0;
+}
+.facet-group {
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.facet-group:last-child { border-bottom: none; }
+.facet-group h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--fg-dim);
+  margin: 0 0 4px;
+  font-weight: 600;
+  display: inline-block;
+}
+.facet-group summary {
+  cursor: pointer;
+  list-style: none;
+}
+.facet-group summary::-webkit-details-marker { display: none; }
+.facet-group summary::before {
+  content: '▸ ';
+  color: var(--fg-dim);
+  margin-right: 4px;
+  display: inline-block;
+}
+.facet-group[open] summary::before { content: '▾ '; }
+.facet-group ul {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+}
+.facet-group li {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--fg);
+  font-size: 13px;
+  gap: 8px;
+  align-items: center;
+}
+.facet-group li:hover { background: var(--bg-hover); }
+.facet-group li.active {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+.facet-group li.hint { color: var(--fg-dim); cursor: default; font-size: 12px; }
+.facet-group li.hint:hover { background: transparent; }
+.facet-group li .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.facet-group li .count {
+  color: var(--fg-dim);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.facet-scroll {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* ---- Active filter chips --------------------------------------- */
+
+#active-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 24px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+.filter-chip {
+  background: var(--bg);
+  border: 1px solid var(--accent-dim);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.filter-chip:hover { border-color: var(--danger); color: var(--danger); }
+.filter-chip .key { color: var(--fg-dim); }
+.clear-all-btn {
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 12px;
+  cursor: pointer;
+  margin-left: 8px;
+}
+.clear-all-btn:hover { color: var(--fg); }
+
+/* ---- Read-status indicator on cards ---------------------------- */
+
+.book-card { position: relative; }
+.status-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  z-index: 1;
+  box-shadow: 0 0 0 2px var(--bg-elev);
+}
+.status-dot.unread { display: none; }
+.status-dot.reading { background: var(--accent); }
+.status-dot.finished { background: var(--trust-high, #50c878); }
+
+/* ---- Status toggle in detail panel ----------------------------- */
+
+.status-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.status-toggle button {
+  background: var(--bg);
+  border: none;
+  color: var(--fg-dim);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.status-toggle button + button { border-left: 1px solid var(--border); }
+.status-toggle button:hover { background: var(--bg-hover); color: var(--fg); }
+.status-toggle button.active {
+  background: var(--accent-dim);
+  color: #16161d;
+}
 
 /* ---- Main ------------------------------------------------------- */
 
 main {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 220px 1fr;
   overflow: hidden;
 }
 
 main:has(#detail:not([hidden])) {
-  grid-template-columns: 1fr 420px;
+  grid-template-columns: 220px 1fr 420px;
 }
 
 #library {
@@ -532,3 +694,78 @@ main:has(#detail:not([hidden])) {
   border-radius: 50%;
   z-index: 10000;
 }
+
+/* ---- Rich enrich: alt covers + editions ------------------------- */
+
+.rich-section {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.rich-section h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.cover-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 6px;
+}
+.cover-strip img {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.cover-strip img.clickable {
+  cursor: pointer;
+  transition: transform 0.08s ease, border-color 0.08s ease;
+}
+.cover-strip img.clickable:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+}
+.cover-strip img.busy { opacity: 0.4; }
+
+.editions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.editions-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--fg-dim);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.editions-table td {
+  padding: 4px 6px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+}
+.editions-table tr:last-child td { border-bottom: none; }
+.editions-table tr.current-edition td {
+  background: rgba(255, 184, 108, 0.08);
+  font-weight: 600;
+}
+.editions-table .edition-thumb {
+  width: 28px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.editions-table a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.editions-table a:hover { text-decoration: underline; }
