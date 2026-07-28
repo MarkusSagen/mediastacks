@@ -31,7 +31,6 @@ pub fn open(allocator: std.mem.Allocator, path: []const u8) !Book {
     try reader.open(path);
     defer reader.close();
 
-    // 1) container.xml → OPF location.
     const container_bytes = try reader.readMember(allocator, "META-INF/container.xml");
     defer allocator.free(container_bytes);
 
@@ -46,7 +45,6 @@ pub fn open(allocator: std.mem.Allocator, path: []const u8) !Book {
     defer allocator.free(opf_path);
     const opf_dir = std.fs.path.dirname(opf_path) orelse "";
 
-    // 2) Parse OPF.
     const opf_bytes = try reader.readMember(allocator, opf_path);
     defer allocator.free(opf_bytes);
     var opf = try xml.Doc.parseMemory(opf_bytes);
@@ -55,15 +53,12 @@ pub fn open(allocator: std.mem.Allocator, path: []const u8) !Book {
     const title = try opf.firstString(allocator, "dc", DC_NS, "//dc:title");
     const author = try opf.firstString(allocator, "dc", DC_NS, "//dc:creator");
 
-    // 3) Walk the spine. We use XPath to fetch ordered itemref/@idref,
-    // then resolve each idref → manifest/@href.
     const itemrefs = try collectAttribute(opf, allocator, "p", OPF_NS, "//p:spine/p:itemref/@idref");
     defer freeStringList(allocator, itemrefs);
 
     var chapters: std.ArrayList(Chapter) = .empty;
 
     for (itemrefs) |idref| {
-        // Look up href for this id.
         var xpath_buf: [256]u8 = undefined;
         const xpath = std.fmt.bufPrint(&xpath_buf, "//p:item[@id='{s}']/@href", .{idref}) catch continue;
         const href = (try opf.firstString(allocator, "p", OPF_NS, xpath)) orelse continue;
@@ -79,7 +74,6 @@ pub fn open(allocator: std.mem.Allocator, path: []const u8) !Book {
         defer allocator.free(raw_bytes);
 
         const plaintext = try htmlToText(allocator, raw_bytes);
-        // Skip empty/near-empty fragments (cover image pages, nav-only pages).
         if (countNonWhitespace(plaintext) < 20) {
             allocator.free(plaintext);
             continue;
@@ -96,7 +90,9 @@ pub fn open(allocator: std.mem.Allocator, path: []const u8) !Book {
 
 fn countNonWhitespace(s: []const u8) usize {
     var n: usize = 0;
-    for (s) |ch| if (!std.ascii.isWhitespace(ch)) { n += 1; };
+    for (s) |ch| if (!std.ascii.isWhitespace(ch)) {
+        n += 1;
+    };
     return n;
 }
 
@@ -151,8 +147,6 @@ fn collectAttribute(
     return list.toOwnedSlice(allocator);
 }
 
-// ---- HTML → plaintext ---------------------------------------------------
-
 /// Convert XHTML/HTML to plaintext: strip tags, decode the handful of
 /// entities that matter for narrative text. Paragraph breaks (`</p>`,
 /// `<br>`, headings) are normalised to `\n\n`. Whitespace inside text
@@ -174,7 +168,6 @@ pub fn htmlToText(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
             if (ch == '>') {
                 const tag = lastTag(input, i);
                 in_tag = false;
-                // Block-level elements introduce paragraph breaks.
                 if (isBlockTag(tag)) {
                     appendParagraphBreak(allocator, &out, &prev_was_space) catch {};
                 }
@@ -207,11 +200,10 @@ pub fn htmlToText(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
         if (ch == '&') {
             if (decodeEntity(input[i..])) |dec| {
                 try out.appendSlice(allocator, dec.text);
-                i += dec.skip - 1; // -1 because loop increments
+                i += dec.skip - 1;
                 prev_was_space = false;
                 continue;
             }
-            // Unknown entity — emit literally.
             try out.append(allocator, ch);
             prev_was_space = false;
             continue;
@@ -229,7 +221,6 @@ pub fn htmlToText(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
         prev_was_space = false;
     }
 
-    // Collapse 3+ consecutive newlines into exactly 2.
     return collapseBlankLines(allocator, out.items);
 }
 
@@ -238,14 +229,12 @@ fn appendParagraphBreak(
     out: *std.ArrayList(u8),
     prev_was_space: *bool,
 ) !void {
-    // Ensure exactly one \n\n boundary regardless of prior whitespace.
     while (out.items.len > 0 and (out.items[out.items.len - 1] == ' ' or
         out.items[out.items.len - 1] == '\n'))
     {
         if (out.items[out.items.len - 1] == '\n' and out.items.len >= 2 and
             out.items[out.items.len - 2] == '\n')
         {
-            // Already at \n\n — keep as-is.
             break;
         }
         _ = out.pop();
@@ -268,7 +257,6 @@ fn collapseBlankLines(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
         newline_run = 0;
         try out.append(allocator, ch);
     }
-    // Trim leading/trailing whitespace.
     var slice: []const u8 = out.items;
     while (slice.len > 0 and std.ascii.isWhitespace(slice[0])) slice = slice[1..];
     while (slice.len > 0 and std.ascii.isWhitespace(slice[slice.len - 1])) slice = slice[0 .. slice.len - 1];
@@ -282,26 +270,22 @@ fn lastTag(input: []const u8, gt_index: usize) []const u8 {
     }
     if (lt == 0) return "";
     var tag = input[lt..gt_index];
-    // Trim attributes — keep just the tag name (with optional leading '/').
     var end: usize = 0;
     while (end < tag.len) : (end += 1) {
         if (tag[end] == ' ' or tag[end] == '\t' or tag[end] == '/' and end > 0) break;
     }
     if (end > 0 and tag.len > 0 and tag[0] == '/') {
-        // Keep the slash for closing tags.
         return tag[0..end];
     }
     return tag[0..end];
 }
 
 fn isBlockTag(tag: []const u8) bool {
-    // Compare against a small static list, case-insensitive.
     const blocks = [_][]const u8{
-        "p",  "/p",  "div",     "/div", "br",   "h1", "h2",     "h3",
-        "h4", "h5",  "h6",      "/h1",  "/h2",  "/h3", "/h4",   "/h5",
-        "/h6", "li", "/li",    "tr",   "/tr", "ul", "/ul",     "ol",
-        "/ol", "blockquote", "/blockquote", "section", "/section",
-        "article", "/article", "hr",
+        "p",   "/p",         "div",         "/div",    "br",       "h1",      "h2",       "h3",
+        "h4",  "h5",         "h6",          "/h1",     "/h2",      "/h3",     "/h4",      "/h5",
+        "/h6", "li",         "/li",         "tr",      "/tr",      "ul",      "/ul",      "ol",
+        "/ol", "blockquote", "/blockquote", "section", "/section", "article", "/article", "hr",
     };
     for (blocks) |b| if (std.ascii.eqlIgnoreCase(tag, b)) return true;
     return false;
@@ -310,7 +294,6 @@ fn isBlockTag(tag: []const u8) bool {
 const EntityHit = struct { text: []const u8, skip: usize };
 
 fn decodeEntity(src: []const u8) ?EntityHit {
-    // Named entities.
     const map = [_]struct { name: []const u8, val: []const u8 }{
         .{ .name = "&amp;", .val = "&" },
         .{ .name = "&lt;", .val = "<" },
@@ -332,14 +315,19 @@ fn decodeEntity(src: []const u8) ?EntityHit {
             return .{ .text = e.val, .skip = e.name.len };
         }
     }
-    // Numeric entities: &#dddd; or &#xhhhh;
     if (src.len > 3 and src[1] == '#') {
         var idx: usize = 2;
         var hex = false;
-        if (src[idx] == 'x' or src[idx] == 'X') { hex = true; idx += 1; }
+        if (src[idx] == 'x' or src[idx] == 'X') {
+            hex = true;
+            idx += 1;
+        }
         var codepoint: u21 = 0;
         var digits: usize = 0;
-        while (idx < src.len and digits < 6) : ({ idx += 1; digits += 1; }) {
+        while (idx < src.len and digits < 6) : ({
+            idx += 1;
+            digits += 1;
+        }) {
             const ch = src[idx];
             if (ch == ';') break;
             if (hex) {
@@ -356,27 +344,18 @@ fn decodeEntity(src: []const u8) ?EntityHit {
             }
         }
         if (idx >= src.len or src[idx] != ';') return null;
-        // Encode codepoint as UTF-8.
         var buf: [4]u8 = undefined;
         const n = std.unicode.utf8Encode(codepoint, &buf) catch return null;
-        // We can't return a stack slice — leak into a static-lifetime buffer is wrong.
-        // Caller copies during appendSlice; pass back a slice into a static lookup.
-        // Workaround: small static buffer threadlocal.
         return .{ .text = staticUtf8(buf[0..n]), .skip = idx + 1 };
     }
     return null;
 }
 
-// Thread-local static buffer for numeric entity output — htmlToText
-// only reads `text` immediately after this call to appendSlice into a
-// growable ArrayList, so a 4-byte rotating buffer is safe.
 threadlocal var entity_buf: [4]u8 = undefined;
 fn staticUtf8(bytes: []const u8) []const u8 {
     @memcpy(entity_buf[0..bytes.len], bytes);
     return entity_buf[0..bytes.len];
 }
-
-// ---- Tests --------------------------------------------------------------
 
 test "htmlToText strips tags and decodes basic entities" {
     const alloc = std.testing.allocator;

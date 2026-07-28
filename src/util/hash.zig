@@ -37,8 +37,6 @@ pub fn fileSha256Hex(io: std.Io, path: []const u8, out: []u8) ![]const u8 {
 }
 
 test "sha256 hex output is correctly formatted" {
-    // Hashing of an empty buffer via the algorithm directly — file I/O
-    // tests live in tests/integration once we have a fake Io.
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var digest: [32]u8 = undefined;
     hasher.final(&digest);

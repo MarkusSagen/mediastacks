@@ -55,8 +55,6 @@ const Result = struct { old_size: u64, new_size: u64 };
 fn optimizeOne(arena: std.mem.Allocator, path: []const u8) !Result {
     const old_size = try fileSize(path);
 
-    // Write into "<path>.opt.tmp", then atomically rename over the original
-    // only if smaller.
     const tmp_path = try std.fmt.allocPrint(arena, "{s}.opt.tmp", .{path});
 
     var reader: zip.ZipReader = .{};
@@ -79,7 +77,6 @@ fn optimizeOne(arena: std.mem.Allocator, path: []const u8) !Result {
             const bytes = try self.reader.readMember(self.arena, name);
             defer self.arena.free(bytes);
 
-            // mimetype MUST be first and stored uncompressed per OCF.
             const level: zip.ZipWriter.Compression = if (std.mem.eql(u8, name, "mimetype"))
                 .none
             else
@@ -96,12 +93,10 @@ fn optimizeOne(arena: std.mem.Allocator, path: []const u8) !Result {
     const new_size = try fileSize(tmp_path);
 
     if (new_size >= old_size) {
-        // Optimization didn't help — discard tmp, leave original alone.
         cleanup(tmp_path);
         return .{ .old_size = old_size, .new_size = old_size };
     }
 
-    // Atomic rename: new file replaces original.
     var src_buf: [4096]u8 = undefined;
     var dst_buf: [4096]u8 = undefined;
     const src_z = try std.fmt.bufPrintZ(&src_buf, "{s}", .{tmp_path});

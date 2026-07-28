@@ -66,6 +66,23 @@ pub fn build(b: *std.Build) void {
         .flags = &.{"-std=c99"},
     });
 
+    // Cover thumbnailer (stb_image + stb_image_resize2 + stb_image_write).
+    // Compiled with `-fno-sanitize=undefined` because stb's JPEG writer
+    // performs signed left-shifts on `int bitBuf` that Clang's UBSAN
+    // flags — even though the wrapping behaviour is intentional. The
+    // generated JPEG is correct; UBSAN is overly conservative here.
+    booktool_mod.addCSourceFile(.{
+        .file = b.path("lib/booktool_c/cover_resize.c"),
+        .flags = &.{
+            "-std=c11",
+            "-fno-sanitize=undefined",
+            "-Wno-unused-function",
+            "-Wno-unused-but-set-variable",
+            "-Wno-sign-compare",
+            "-Wno-missing-field-initializers",
+        },
+    });
+
     // Link system libraries.
     for (library_dirs) |dir| booktool_mod.addLibraryPath(.{ .cwd_relative = dir });
     for (include_dirs) |dir| booktool_mod.addIncludePath(.{ .cwd_relative = dir });

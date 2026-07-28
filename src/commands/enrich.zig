@@ -11,6 +11,7 @@ const catalog_mod = @import("../core/catalog.zig");
 const meta = @import("../core/metadata.zig");
 const openlibrary = @import("../providers/openlibrary.zig");
 const provider_iface = @import("../providers/provider.zig");
+const http = @import("../util/http.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     var only_missing = false;
@@ -35,7 +36,8 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     else
         try cat.listBooks(ctx.arena);
 
-    var ol = openlibrary.OpenLibrary{};
+    var real_http = http.RealHttpClient{ .io = ctx.io };
+    var ol = openlibrary.OpenLibrary{ .http_client = real_http.client() };
     const provider = ol.provider();
 
     var counters: struct { queried: u32 = 0, enriched: u32 = 0, no_hit: u32 = 0, errors: u32 = 0 } = .{};

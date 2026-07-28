@@ -7,54 +7,67 @@ const std = @import("std");
 
 pub const cli = @import("cli.zig");
 
-// Core domain
 pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
 pub const dedup = @import("core/dedup.zig");
 pub const quality = @import("core/quality.zig");
 pub const glob = @import("core/glob.zig");
-pub const rename = @import("core/rename.zig");
 pub const template = @import("core/template.zig");
 pub const score = @import("core/score.zig");
+pub const standardize = @import("core/standardize.zig");
+pub const jobs = @import("core/jobs.zig");
+pub const job_runner = @import("core/job_runner.zig");
 
-// Formats
 pub const format = @import("formats/format.zig");
 pub const epub = @import("formats/epub.zig");
 pub const epub_chapters = @import("formats/epub_chapters.zig");
 pub const mobi = @import("formats/mobi.zig");
+pub const pdf = @import("formats/pdf.zig");
+pub const cbz = @import("formats/cbz.zig");
+pub const cbr = @import("formats/cbr.zig");
+pub const cb7 = @import("formats/cb7.zig");
+pub const cbt = @import("formats/cbt.zig");
+pub const comic_archive = @import("formats/comic_archive.zig");
+pub const format_handler = @import("formats/handler.zig");
+pub const format_registry = @import("formats/registry.zig");
 
-// Providers
 pub const provider = @import("providers/provider.zig");
 pub const openlibrary = @import("providers/openlibrary.zig");
 
-// Conversion
 pub const convert = @import("convert/convert.zig");
 
-// Utilities
 pub const hash = @import("util/hash.zig");
 pub const isbn = @import("util/isbn.zig");
 pub const fuzzy = @import("util/fuzzy.zig");
 pub const http = @import("util/http.zig");
+pub const shutdown = @import("util/shutdown.zig");
+
+pub const web_api = @import("web/api.zig");
 
 test {
-    // Pulls in tests from every submodule.
     std.testing.refAllDecls(@This());
     _ = metadata;
     _ = catalog;
     _ = dedup;
-    _ = rename;
     _ = score;
     _ = template;
+    _ = jobs;
+    _ = job_runner;
     _ = quality;
     _ = glob;
     _ = format;
     _ = epub;
     _ = epub_chapters;
     _ = mobi;
+    _ = pdf;
+    _ = cbz;
+    _ = format_handler;
+    _ = format_registry;
     _ = openlibrary;
     _ = isbn;
     _ = fuzzy;
     _ = hash;
     _ = convert;
+    _ = web_api;
     _ = @import("tui/reflow.zig");
 }

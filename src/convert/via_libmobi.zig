@@ -43,5 +43,5 @@ fn mobitoolAvailable(allocator: std.mem.Allocator, io: std.Io) bool {
     }) catch return false;
     allocator.free(result.stdout);
     allocator.free(result.stderr);
-    return true; // mobitool prints usage with exit 1; getting here means it ran.
+    return true;
 }

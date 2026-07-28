@@ -76,7 +76,7 @@ pub const MobiBook = struct {
 
 fn dupeIfPresent(allocator: std.mem.Allocator, ptr: [*c]u8) !?[]const u8 {
     if (ptr == null) return null;
-    defer c.free(ptr);
+    defer std.c.free(ptr);
     const len = std.mem.len(ptr);
     if (len == 0) return null;
     return try allocator.dupe(u8, ptr[0..len]);

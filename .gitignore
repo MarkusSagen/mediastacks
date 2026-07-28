@@ -9,5 +9,16 @@ zig-pkg/
 # Test artifacts
 tests/fixtures/output/
 
+# Stray catalog DBs from runs where XDG_DATA_HOME wasn't isolated.
+/booktool/
+
+# Playwright MCP snapshots from local UI-test sessions.
+.playwright-mcp/
+
+# Local Playwright install (test-only, not a runtime dep).
+/node_modules/
+/package.json
+/package-lock.json
+
 # OS
 .DS_Store

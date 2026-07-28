@@ -17,21 +17,18 @@ pub fn match(pattern: []const u8, path: []const u8) bool {
 }
 
 fn matchInner(pat: []const u8, str: []const u8) bool {
-    // Iterative match with one back-track point for `*`.
     var pi: usize = 0;
     var si: usize = 0;
-    var star_pat: ?usize = null;  // pattern index of the `*` we'd retry
-    var star_str: usize = 0;       // string index it tried matching against
+    var star_pat: ?usize = null;
+    var star_str: usize = 0;
 
     while (si < str.len) {
         if (pi < pat.len) {
             const pc = pat[pi];
 
-            // `**` — recurse so we can cross `/`.
             if (pc == '*' and pi + 1 < pat.len and pat[pi + 1] == '*') {
                 const after = pi + 2;
                 const after_slash = if (after < pat.len and pat[after] == '/') after + 1 else after;
-                // Try matching the rest against every suffix of str.
                 var k: usize = si;
                 while (k <= str.len) : (k += 1) {
                     if (matchInner(pat[after_slash..], str[k..])) return true;
@@ -52,9 +49,7 @@ fn matchInner(pat: []const u8, str: []const u8) bool {
                     si += 1;
                     continue;
                 }
-                // Class didn't match — fall through to back-track logic.
             } else if (pc == '*') {
-                // Mark a back-track point and try matching empty first.
                 star_pat = pi + 1;
                 star_str = si;
                 pi += 1;
@@ -65,9 +60,7 @@ fn matchInner(pat: []const u8, str: []const u8) bool {
                 continue;
             }
         }
-        // Back-track to the last `*` (single-segment — cannot cross `/`).
         if (star_pat) |sp| {
-            // If the char we'd consume is `/`, single-star can't grow over it.
             if (str[star_str] == '/') return false;
             pi = sp;
             star_str += 1;
@@ -76,7 +69,6 @@ fn matchInner(pat: []const u8, str: []const u8) bool {
         }
         return false;
     }
-    // Consume trailing `*`s.
     while (pi < pat.len and pat[pi] == '*') {
         if (pi + 1 < pat.len and pat[pi + 1] == '*') {
             pi += 2;
@@ -88,7 +80,7 @@ fn matchInner(pat: []const u8, str: []const u8) bool {
 }
 
 fn matchCharClass(pat: []const u8, pi: *usize, ch: u8) bool {
-    var idx = pi.* + 1; // skip '['
+    var idx = pi.* + 1;
     var negate = false;
     if (idx < pat.len and (pat[idx] == '!' or pat[idx] == '^')) {
         negate = true;
@@ -109,8 +101,6 @@ fn matchCharClass(pat: []const u8, pi: *usize, ch: u8) bool {
     pi.* = idx;
     return if (negate) !hit else hit;
 }
-
-// ---- Tests --------------------------------------------------------------
 
 const t = std.testing;
 

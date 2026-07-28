@@ -31,11 +31,10 @@ fn formatScore(fmt: meta.Format) f32 {
         .azw3 => 25,
         .mobi => 20,
         .pdf => 10,
+        .cbz, .cbr, .cb7, .cbt => 10,
         .unknown => 0,
     };
 }
-
-// ---- Tests --------------------------------------------------------------
 
 const t = std.testing;
 
@@ -60,8 +59,6 @@ test "EPUB beats MOBI when all else equal" {
 test "metadata gap narrows the format gap" {
     const epub_no_isbn = book(.epub, null, 500_000);
     const mobi_with_isbn = book(.mobi, "9780000000001", 500_000);
-    // EPUB still wins on format, but adding ISBN to the MOBI should
-    // reduce the gap by exactly the ISBN bonus.
     const gap_no_isbn = scoreBook(book(.epub, null, 500_000)) - scoreBook(book(.mobi, null, 500_000));
     const gap_with_isbn = scoreBook(epub_no_isbn) - scoreBook(mobi_with_isbn);
     try t.expect(gap_with_isbn < gap_no_isbn);

@@ -3,8 +3,7 @@
 const std = @import("std");
 const cli = @import("../cli.zig");
 const format_mod = @import("../formats/format.zig");
-const epub_reader = @import("../formats/epub.zig");
-const mobi_reader = @import("../formats/mobi.zig");
+const format_registry = @import("../formats/registry.zig");
 const meta = @import("../core/metadata.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
@@ -19,18 +18,11 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         return 2;
     };
 
-    const md: meta.BookMetadata = switch (fmt) {
-        .epub => try epub_reader.readMetadata(ctx.arena, path),
-        .mobi, .azw3 => try mobi_reader.readMetadata(ctx.arena, path),
-        .pdf => {
-            try ctx.stderr.print("PDF metadata reading not implemented yet\n", .{});
-            return 2;
-        },
-        .unknown => {
-            try ctx.stderr.print("unknown format: {s}\n", .{path});
-            return 2;
-        },
+    const h = format_registry.forFormat(fmt) orelse {
+        try ctx.stderr.print("info not supported for {s}\n", .{@tagName(fmt)});
+        return 2;
     };
+    const md: meta.BookMetadata = try h.readMetadata(ctx.arena, ctx.io, path);
 
     try printMetadata(ctx.stdout, path, fmt, md);
     return 0;

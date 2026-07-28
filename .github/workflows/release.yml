@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # for creating the GitHub Release
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos-arm64
+            zig_target: aarch64-macos
+            brew_prefix: /opt/homebrew
+          - os: macos-13          # Intel runner — Apple's macOS-13 image is x86_64
+            target: macos-x86_64
+            zig_target: x86_64-macos
+            brew_prefix: /usr/local
+          - os: ubuntu-latest
+            target: linux-x86_64
+            zig_target: x86_64-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install Zig 0.16 via mise (matches the pinned dev environment).
+      - uses: jdx/mise-action@v2
+        with:
+          version: 2025.5.6
+          install: true
+
+      # System deps (libmobi, libxml2, sqlite3). On macOS via Homebrew,
+      # on Linux via apt. The build.zig probes both prefixes.
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update >/dev/null
+          brew install libmobi sqlite
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmobi-dev libxml2-dev libsqlite3-dev
+
+      - name: Build (Release)
+        run: |
+          zig build install -Doptimize=ReleaseFast
+
+      # Quick sanity: binary exists and runs --help.
+      - name: Verify binary
+        run: |
+          ls -lh zig-out/bin/booktool
+          ./zig-out/bin/booktool --help | head -20
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          tar -czf dist/booktool-${{ matrix.target }}.tar.gz -C zig-out/bin booktool
+          shasum -a 256 dist/booktool-${{ matrix.target }}.tar.gz \
+            > dist/booktool-${{ matrix.target }}.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: booktool-${{ matrix.target }}
+          path: dist/*
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

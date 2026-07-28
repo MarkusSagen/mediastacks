@@ -6,21 +6,20 @@
 const std = @import("std");
 
 pub const Source = enum {
-    embedded, // From the file's own metadata block
+    embedded,
     openlibrary,
     google_books,
     goodreads,
     manual,
-    derived, // Computed from filename/path heuristics
+    derived,
 
     pub fn rank(self: Source) u8 {
-        // Higher = trusted more during merge
         return switch (self) {
             .manual => 100,
             .embedded => 80,
             .openlibrary => 60,
             .google_books => 55,
-            .goodreads => 70, // Best for series
+            .goodreads => 70,
             .derived => 20,
         };
     }
@@ -29,12 +28,11 @@ pub const Source = enum {
 pub const Author = struct {
     last: []const u8,
     first: []const u8,
-    sort: []const u8, // "Last, First" — pre-computed for sorting
+    sort: []const u8,
 
     pub fn fromDisplay(allocator: std.mem.Allocator, display_name: []const u8) !Author {
         const trimmed = std.mem.trim(u8, display_name, " \t\r\n");
         if (std.mem.indexOfScalar(u8, trimmed, ',')) |comma| {
-            // "Last, First" — already in sort order
             const last = std.mem.trim(u8, trimmed[0..comma], " \t");
             const first = std.mem.trim(u8, trimmed[comma + 1 ..], " \t");
             return .{
@@ -43,7 +41,6 @@ pub const Author = struct {
                 .sort = try allocator.dupe(u8, trimmed),
             };
         } else if (std.mem.lastIndexOfScalar(u8, trimmed, ' ')) |sp| {
-            // "First [Middle] Last" — split on last space
             const first = std.mem.trim(u8, trimmed[0..sp], " \t");
             const last = std.mem.trim(u8, trimmed[sp + 1 ..], " \t");
             const sort = try std.fmt.allocPrint(allocator, "{s}, {s}", .{ last, first });
@@ -53,7 +50,6 @@ pub const Author = struct {
                 .sort = sort,
             };
         } else {
-            // Single token
             const dup = try allocator.dupe(u8, trimmed);
             return .{ .last = dup, .first = "", .sort = dup };
         }
@@ -65,6 +61,10 @@ pub const Format = enum {
     mobi,
     azw3,
     pdf,
+    cbz,
+    cbr,
+    cb7,
+    cbt,
     unknown,
 
     pub fn extension(self: Format) []const u8 {
@@ -73,6 +73,10 @@ pub const Format = enum {
             .mobi => "mobi",
             .azw3 => "azw3",
             .pdf => "pdf",
+            .cbz => "cbz",
+            .cbr => "cbr",
+            .cb7 => "cb7",
+            .cbt => "cbt",
             .unknown => "",
         };
     }
@@ -85,7 +89,22 @@ pub const Format = enum {
         if (std.ascii.eqlIgnoreCase(lower_buf, "azw3")) return .azw3;
         if (std.ascii.eqlIgnoreCase(lower_buf, "prc")) return .mobi;
         if (std.ascii.eqlIgnoreCase(lower_buf, "pdf")) return .pdf;
+        if (std.ascii.eqlIgnoreCase(lower_buf, "cbz")) return .cbz;
+        if (std.ascii.eqlIgnoreCase(lower_buf, "cbr")) return .cbr;
+        if (std.ascii.eqlIgnoreCase(lower_buf, "cb7")) return .cb7;
+        if (std.ascii.eqlIgnoreCase(lower_buf, "cbt")) return .cbt;
         return .unknown;
+    }
+
+    /// True for any comic/manga archive format (CBZ/CBR/CB7/CBT).
+    /// Used by the UI to pick the comic format-chip colour and by the
+    /// reader dispatch to decide between foliate-js and the "open
+    /// externally" CTA.
+    pub fn isComic(self: Format) bool {
+        return switch (self) {
+            .cbz, .cbr, .cb7, .cbt => true,
+            else => false,
+        };
     }
 };
 
@@ -134,7 +153,6 @@ pub const BookMetadata = struct {
         const hi: BookMetadata = if (prefer_b) b else a;
         _ = allocator;
 
-        // The "winner" provides everything it has; loser fills nulls.
         return .{
             .title = hi.title orelse lo.title,
             .authors = if (hi.authors.len > 0) hi.authors else lo.authors,
@@ -152,8 +170,6 @@ pub const BookMetadata = struct {
         };
     }
 };
-
-// ---- Tests --------------------------------------------------------------
 
 test "Author.fromDisplay handles 'Last, First'" {
     const alloc = std.testing.allocator;

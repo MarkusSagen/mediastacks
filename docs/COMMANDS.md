@@ -13,6 +13,10 @@ write.
 
 Print embedded metadata of a single ebook. No catalog interaction.
 
+Works for every supported format: **EPUB / MOBI / AZW3 / PDF** and the
+comic archives **CBZ / CBR / CB7 / CBT**. For comic archives the values
+come from a sibling `ComicInfo.xml` inside the archive (when present).
+
 ```
 $ booktool info "Sanderson, Brandon - The Way of Kings.epub"
 Path:        Sanderson, Brandon - The Way of Kings.epub
@@ -34,7 +38,7 @@ ebook by absolute path. Does not touch the catalog.
 | Flag | Effect |
 |---|---|
 | `--glob PATTERN` | Filter by shell-style glob. Supports `*`, `**`, `?`, `[abc]`, `[a-z]`, `[!a-z]`. Path matching is relative to `PATH`. |
-| `--format FMT` | One of `epub`, `mobi`, `azw3`, `pdf`. |
+| `--format FMT` | One of `epub`, `mobi`, `azw3`, `pdf`, `cbz`, `cbr`, `cb7`, `cbt`. |
 | `-0`, `--null` | NUL-separated output for safe `xargs -0`. |
 
 Examples:
@@ -51,10 +55,11 @@ Exit code is `1` if no matches.
 
 ## `booktool scan DIR`
 
-Walk `DIR` recursively, hash every ebook file (SHA-256), extract
-embedded metadata, and upsert into the catalog. Re-scanning is
-idempotent — files with unchanged SHA are reported as `[=]` and not
-re-processed.
+Walk `DIR` recursively, hash every supported file (SHA-256), extract
+embedded metadata, and upsert into the catalog. Picks up every format
+booktool knows about: **EPUB / MOBI / AZW3 / PDF** and the comic
+archives **CBZ / CBR / CB7 / CBT**. Re-scanning is idempotent — files
+with unchanged SHA are reported as `[=]` and not re-processed.
 
 ```
 $ booktool scan ~/Books
@@ -231,17 +236,33 @@ booktool set-meta book.epub --series "Stormlight" --series-index 1
 
 ## `booktool set-cover FILE IMAGE`
 
-Replace the embedded cover image. The image bytes are dropped into the
-existing cover manifest entry (EPUB) or set via `mobimeta`
-(MOBI/AZW3). Content type is auto-detected from magic bytes.
+Replace the cover image. Behaviour depends on format:
+
+- **EPUB** — image bytes are dropped into the existing `cover-image`
+  manifest entry and the archive is repacked. The same bytes are also
+  mirrored into `$XDG_DATA_HOME/booktool/covers/<id>.<ext>` so the web
+  UI / TUI render the chosen cover instantly without re-extracting
+  from the archive.
+- **MOBI / AZW3** — libmobi exposes no cover-write API, so the source
+  file is left untouched. The image is written *only* as a library-side
+  override at `$XDG_DATA_HOME/booktool/covers/<id>.<ext>`, where every
+  booktool surface picks it up. The command prints the override path
+  and reminds you to run `booktool convert --to epub` if you want the
+  change baked into the file itself. **Requires the book to already
+  be in the catalog** (`booktool scan` it first) so the override file
+  has a stable id to key off of.
 
 ```sh
 booktool set-cover book.epub ~/Pictures/new-cover.jpg
+booktool set-cover book.mobi ~/Pictures/new-cover.jpg   # override only
 ```
 
-EPUB requires the existing archive to declare a `cover-image` item;
+For EPUBs the archive must already declare a `cover-image` item;
 booktool refuses to fabricate a cover entry from scratch (use a tool
 like Calibre or Sigil to set one initially).
+
+Content type (`image/jpeg` vs `image/png`) is auto-detected from magic
+bytes; the override file is named accordingly.
 
 ---
 
@@ -291,8 +312,65 @@ planned but not yet wired up.
 ## `booktool serve [--port N] [--bind IP]`
 
 Run the web UI on the given address (default `http://127.0.0.1:8787`).
-The SPA serves the same catalog the CLI sees: list, search, missing,
-duplicates, in-browser reader for EPUBs via epub.js.
+The SPA serves the same catalog the CLI sees: list, search, facets,
+triage queue, rename / standardize lenses, batch enrich, command
+palette (⌘K), and an in-browser reader for **EPUB / MOBI / AZW3 / FB2
+/ CBZ** via foliate-js and **PDF** via pdf.js.
+
+See [`WEB.md`](./WEB.md) for the full feature tour and HTTP route
+table.
+
+---
+
+## `booktool schedule <sub>`
+
+Manage scheduled maintenance jobs. Definitions live in the catalog
+DB so both `booktool serve` (in-process scheduler thread) and
+`booktool schedule daemon` (standalone) execute the same list.
+
+| Subcommand | Effect |
+|---|---|
+| `list` | Show every scheduled job: id, name, spec, type, enabled, next run |
+| `add NAME SPEC TYPE` | Create a job |
+| `rm ID` | Delete a job |
+| `enable ID` / `disable ID` | Toggle whether the job fires on its tick |
+| `run ID` | Run a job NOW (synchronous, ignores schedule) |
+| `daemon` | Run the scheduler loop without the HTTP server (Ctrl+C to stop) |
+
+Specs supported:
+
+| Spec | Fires |
+|---|---|
+| `@hourly` | Top of every hour |
+| `@daily` | Every day at 03:00 UTC |
+| `@weekly` | Every Monday at 03:00 UTC |
+| `@monthly` | First of every month at 03:00 UTC |
+| `every Nm` | Every N minutes from last run (N ≥ 1) |
+| `every Nh` | Every N hours from last run (N ≥ 1) |
+
+Job types:
+
+| Type | What it does |
+|---|---|
+| `rescan-all` | Walk every tracked library source for new / removed files |
+| `enrich-missing` | Open Library lookup for every catalog row with `enrich_status` null or `error`. Idempotent — already-OK rows are skipped |
+| `backfill-paths` | Parse series / index from filenames; write back where the catalog row has none |
+| `standardize-dry` | Build the canonical-rename plan and report counts only (no file mutations) |
+
+Examples:
+
+```sh
+booktool schedule add nightly-rescan @daily rescan-all
+booktool schedule add backfill-6h "every 6h" backfill-paths
+booktool schedule run 1            # fire now, regardless of schedule
+booktool schedule daemon           # run the loop without the web server
+```
+
+Concurrency: only one job runs at a time, guarded by a process-local
+mutex inside the executor. Both `booktool serve` and
+`booktool schedule daemon` can be running simultaneously without
+double-firing if they share a catalog — the second one's tick will
+skip jobs the first already claimed via `last_run_status='running'`.
 
 ---
 

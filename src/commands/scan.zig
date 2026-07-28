@@ -6,9 +6,11 @@ const cli = @import("../cli.zig");
 const catalog_mod = @import("../core/catalog.zig");
 const meta = @import("../core/metadata.zig");
 const format_mod = @import("../formats/format.zig");
+const registry = @import("../formats/registry.zig");
 const epub_reader = @import("../formats/epub.zig");
 const mobi_reader = @import("../formats/mobi.zig");
 const hash_util = @import("../util/hash.zig");
+const path_meta = @import("../core/path_meta.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len < 1) {
@@ -88,7 +90,6 @@ fn ingestOne(
     const sha = try hash_util.fileSha256Hex(ctx.io, path, &hex_buf);
     const sha_owned = try ctx.arena.dupe(u8, sha);
 
-    // mtime + size — read via Io.File.stat
     const cwd = std.Io.Dir.cwd();
     var f = try cwd.openFile(ctx.io, path, .{});
     defer f.close(ctx.io);
@@ -96,18 +97,27 @@ fn ingestOne(
     const size = stat.size;
     const mtime: i64 = @intCast(@divTrunc(stat.mtime.nanoseconds, std.time.ns_per_s));
 
-    // Skip re-read if nothing material changed.
     if (try cat.getBookByPath(ctx.arena, path)) |existing| {
         if (std.mem.eql(u8, existing.sha256, sha_owned)) {
             return .{ .skipped_unchanged = existing.id };
         }
     }
 
-    const md = switch (fmt) {
-        .epub => try epub_reader.readMetadata(ctx.arena, path),
-        .mobi, .azw3 => try mobi_reader.readMetadata(ctx.arena, path),
-        else => meta.BookMetadata{ .source = .derived, .confidence = 0.1 },
-    };
+    var md = if (registry.forFormat(fmt)) |h|
+        try h.readMetadata(ctx.arena, ctx.io, path)
+    else
+        meta.BookMetadata{ .source = .derived, .confidence = 0.1 };
+
+    const derived = path_meta.fromPath(ctx.arena, path) catch path_meta.Derived{};
+    if (md.series == null and derived.series != null) {
+        md.series = derived.series;
+        if (derived.series_index) |idx| md.series_index = idx;
+    } else if (md.series_index == null and derived.series_index != null and
+        md.series != null and derived.series != null and
+        std.ascii.eqlIgnoreCase(md.series.?, derived.series.?))
+    {
+        md.series_index = derived.series_index;
+    }
 
     const id = try cat.upsertBook(ctx.arena, .{
         .path = path,

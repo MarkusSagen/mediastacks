@@ -15,12 +15,6 @@ pub const Error = error{
     ReadFailed,
 };
 
-// `mz_zip_archive` is treated as opaque bytes. We over-allocate slightly
-// vs. the actual struct so an ABI bump in a later miniz revision is
-// less likely to bite. Verified sizes from miniz 3.0.2, 64-bit:
-//   sizeof(mz_zip_archive)            = 112
-//   sizeof(mz_zip_archive_file_stat)  = 1112
-//   offsetof(m_uncomp_size)           = 40
 const MZ_ZIP_ARCHIVE_SIZE = 128;
 const MZ_ZIP_FILE_STAT_SIZE = 1200;
 const UNCOMP_SIZE_OFFSET = 40;
@@ -102,8 +96,6 @@ pub const ZipReader = struct {
     }
 };
 
-// ---- Writer -------------------------------------------------------------
-
 pub const ZipWriter = struct {
     archive: [MZ_ZIP_ARCHIVE_SIZE]u8 align(8) = std.mem.zeroes([MZ_ZIP_ARCHIVE_SIZE]u8),
 
@@ -149,8 +141,6 @@ pub const ZipWriter = struct {
         if (ok == 0) return Error.ReadFailed;
     }
 };
-
-// ---- C ABI (vendored miniz.c) ------------------------------------------
 
 extern "c" fn mz_zip_reader_init_file(
     archive: *anyopaque,

@@ -76,7 +76,6 @@ fn reportExact(ctx: cli.Context, cat: *catalog_mod.Catalog, apply: bool) !u32 {
     for (groups) |group| {
         try ctx.stdout.print("\nsha256 {s}…  ({d} copies)\n", .{ group.sha256[0..12], group.ids.len });
 
-        // Materialize Book rows so we can score and order them.
         var books: std.ArrayList(catalog_mod.Book) = .empty;
         for (group.ids) |id| {
             if (try cat.getBookById(ctx.arena, id)) |b| try books.append(ctx.arena, b);
@@ -99,8 +98,6 @@ fn reportFuzzy(ctx: cli.Context, cat: *catalog_mod.Catalog, apply: bool) !u32 {
     const books = try cat.listBooks(ctx.arena);
     const groups = try dedup_mod.groupByLogicalIdentity(ctx.arena, books);
 
-    // Filter out groups that are 100% exact-SHA matches (already
-    // reported in the exact section).
     var meaningful: std.ArrayList(dedup_mod.Group) = .empty;
     for (groups) |g| {
         var all_same_hash = true;
@@ -150,6 +147,6 @@ fn scoreDesc(_: void, a: catalog_mod.Book, b: catalog_mod.Book) bool {
 fn removeBook(cat: *catalog_mod.Catalog, book: catalog_mod.Book) !void {
     var path_buf: [4096]u8 = undefined;
     const path_z = try std.fmt.bufPrintZ(&path_buf, "{s}", .{book.path});
-    _ = std.c.unlink(path_z.ptr); // tolerate already-missing file
+    _ = std.c.unlink(path_z.ptr);
     try cat.deleteBook(book.id);
 }

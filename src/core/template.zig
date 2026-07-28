@@ -67,7 +67,6 @@ pub fn render(
             i += 1;
             continue;
         }
-        // Find matching '}'.
         const close_off = std.mem.indexOfScalarPos(u8, template, i + 1, '}') orelse
             return Error.UnclosedPlaceholder;
         const inside = template[i + 1 .. close_off];
@@ -78,9 +77,6 @@ pub fn render(
         const value: ?[]const u8 = if (rendered) |r| r else null;
 
         if (value == null or value.?.len == 0) {
-            // Collapse: if the placeholder was bounded by spaces and the
-            // result is empty, drop one of those spaces so we don't get
-            // "Author  - Title".
             if (out.items.len > 0 and out.items[out.items.len - 1] == ' ' and
                 i < template.len and template[i] == ' ')
             {
@@ -89,7 +85,6 @@ pub fn render(
                 i < template.len and template[i] == '-' and
                 i + 1 < template.len and template[i + 1] == ' ')
             {
-                // Drop "- " when the field that fed it is empty.
                 _ = out.pop();
                 i += 2;
             }
@@ -111,7 +106,6 @@ fn renderPlaceholder(
     md: meta.BookMetadata,
     fmt: meta.Format,
 ) !?[]u8 {
-    // Split "field:format".
     var field = spec;
     var fmt_spec: []const u8 = "";
     if (std.mem.indexOfScalar(u8, spec, ':')) |colon| {
@@ -160,19 +154,15 @@ fn renderPlaceholder(
         return try allocator.dupe(u8, fmt.extension());
     }
 
-    // Unknown field — emit literally so users see what's wrong.
     return try std.fmt.allocPrint(allocator, "{{{s}}}", .{field});
 }
 
 fn renderNumeric(allocator: std.mem.Allocator, value: f32, fmt_spec: []const u8) ![]u8 {
-    // Fractional indices keep one decimal.
     const has_frac = @floor(value) != value;
     if (has_frac) return std.fmt.allocPrint(allocator, "{d:.1}", .{value});
 
-    // Default: at-least-2-digits.
     var width: usize = 2;
     if (fmt_spec.len > 0) {
-        // Forms we accept: "02", "0>3", "3".
         if (fmt_spec.len == 2 and fmt_spec[0] == '0') {
             width = std.fmt.parseInt(usize, fmt_spec[1..], 10) catch return Error.InvalidFormatSpec;
         } else if (std.mem.indexOf(u8, fmt_spec, "0>")) |_| {
@@ -186,7 +176,6 @@ fn renderNumeric(allocator: std.mem.Allocator, value: f32, fmt_spec: []const u8)
     var buf: [16]u8 = undefined;
     var s = try std.fmt.bufPrint(&buf, "{d}", .{int_val});
     while (s.len < width and s.len + 1 < buf.len) {
-        // Manual left-pad with '0'.
         std.mem.copyBackwards(u8, buf[1 .. s.len + 1], buf[0..s.len]);
         buf[0] = '0';
         s = buf[0 .. s.len + 1];
@@ -195,9 +184,6 @@ fn renderNumeric(allocator: std.mem.Allocator, value: f32, fmt_spec: []const u8)
 }
 
 const ILLEGAL = [_]u8{ '\\', ':', '?', '*', '|', '<', '>', '"', '\x00' };
-// Note: '/' is illegal too, but only when not used as a path separator.
-// We leave '/' alone here so the SERIES_DIR_TEMPLATE works; the rename
-// command treats the entire rendered result as a relative path.
 
 fn sanitize(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
@@ -224,7 +210,6 @@ fn sanitize(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
 }
 
 fn collapseSpaces(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
-    // Pass 1: collapse runs of spaces.
     var spaced: std.ArrayList(u8) = .empty;
     defer spaced.deinit(allocator);
     var prev_space = false;
@@ -238,8 +223,6 @@ fn collapseSpaces(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
         }
     }
 
-    // Pass 2: collapse runs of '/' (a path with `{series}` removed leaves
-    // `Author//Title` — flatten to `Author/Title`).
     var unslashed: std.ArrayList(u8) = .empty;
     defer unslashed.deinit(allocator);
     var prev_slash = false;
@@ -253,8 +236,6 @@ fn collapseSpaces(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
         }
     }
 
-    // Pass 3: collapse " - " adjacent to `/` (path boundary).
-    //   "/ - " → "/" ; " - /" → "/"
     var stripped: std.ArrayList(u8) = .empty;
     defer stripped.deinit(allocator);
     var i: usize = 0;
@@ -279,12 +260,10 @@ fn collapseSpaces(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
         i += 1;
     }
 
-    // Pass 4: trim trailing separators and leading `/`.
     var slice = stripped.items;
     while (slice.len > 0 and (slice[slice.len - 1] == ' ' or slice[slice.len - 1] == '-' or slice[slice.len - 1] == '/'))
         slice = slice[0 .. slice.len - 1];
     while (slice.len > 0 and slice[0] == '/') slice = slice[1..];
-    // Drop " -" / "- " sitting just before the extension separator.
     if (std.mem.indexOfScalar(u8, slice, '.')) |dot| {
         var head = slice[0..dot];
         while (head.len > 0 and (head[head.len - 1] == ' ' or head[head.len - 1] == '-'))
@@ -293,8 +272,6 @@ fn collapseSpaces(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
     }
     return allocator.dupe(u8, slice);
 }
-
-// ---- Tests --------------------------------------------------------------
 
 const test_alloc = std.testing.allocator;
 const expectEqualStrings = std.testing.expectEqualStrings;

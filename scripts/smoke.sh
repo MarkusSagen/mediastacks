@@ -27,6 +27,9 @@ if [[ ! -d tests/fixtures/epub && ! -d tests/fixtures/mobi ]]; then
     exit 2
 fi
 
+# Build any generated fixtures (sample.cbz, etc.) — idempotent.
+"$ROOT/scripts/build-fixtures.sh"
+
 # Isolated state so the user's real catalog isn't touched.
 SMOKE_HOME="$(mktemp -d -t booktool-smoke.XXXXXX)"
 export XDG_DATA_HOME="$SMOKE_HOME"
@@ -93,11 +96,24 @@ info_out=$("$BOOKTOOL" info "$sample" 2>&1)
 assert "info prints Title" grep -q "^Title:" <<<"$info_out"
 assert "info prints Format" grep -q "^Format:" <<<"$info_out"
 
+# ---- comic (CBZ) -------------------------------------------------------
+
+section "comic (CBZ)"
+cbz_fixture="$ROOT/tests/fixtures/sample.cbz"
+cbz_info=$("$BOOKTOOL" info "$cbz_fixture" 2>&1)
+assert "info on CBZ reports Format: cbz" grep -q "^Format:.*cbz" <<<"$cbz_info"
+assert "info on CBZ reads ComicInfo title"  grep -q "^Title:.*Sample Issue" <<<"$cbz_info"
+assert "info on CBZ reads ComicInfo series" grep -q "^Series:.*Test Series" <<<"$cbz_info"
+assert "info on CBZ reads ComicInfo year"   grep -q "^Year:.*2024" <<<"$cbz_info"
+
 # ---- scan --------------------------------------------------------------
 
 section "scan"
 scan_out=$("$BOOKTOOL" scan tests/fixtures 2>&1)
 assert "scan reports ingestion summary" grep -q "ingested=" <<<"$scan_out"
+assert "scan picked up the CBZ fixture" bash -c "
+    '$BOOKTOOL' find tests/fixtures --format cbz 2>/dev/null | grep -q sample.cbz
+"
 
 scan_again=$("$BOOKTOOL" scan tests/fixtures 2>&1)
 assert "scan re-run reports unchanged > 0" grep -E "unchanged=[1-9]" -q <<<"$scan_again"

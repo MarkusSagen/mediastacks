@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: build + test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          version: 2025.5.6
+          install: true
+
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update >/dev/null
+          brew install libmobi sqlite
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmobi-dev libxml2-dev libsqlite3-dev
+
+      - name: zig build
+        run: zig build install
+
+      - name: zig build test
+        run: zig build test
+
+      # The smoke scripts need a few sample ebooks. tests/fixtures/
+      # contains tiny public-domain stubs in the repo; if it's empty
+      # CI will skip per the smoke script's own guard.
+      - name: smoke (CLI)
+        run: bash scripts/smoke.sh --offline
+
+      - name: smoke (web)
+        run: bash scripts/smoke-web.sh
+
+      # Browser smoke. Only runs when Playwright + Chromium are
+      # installable on the runner; the script skips itself otherwise.
+      - name: setup node (for Playwright)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: install Playwright + Chromium
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: test-e2e (Playwright)
+        run: bash scripts/test-e2e.sh

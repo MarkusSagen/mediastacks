@@ -28,13 +28,15 @@ pub fn open(path: []const u8) !*c.sqlite3 {
     const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return Error.OpenFailed;
 
     var db: ?*c.sqlite3 = null;
-    const rc = c.sqlite3_open(path_z.ptr, &db);
+    const flags: c_int =
+        c.SQLITE_OPEN_READWRITE |
+        c.SQLITE_OPEN_CREATE |
+        c.SQLITE_OPEN_FULLMUTEX;
+    const rc = c.sqlite3_open_v2(path_z.ptr, &db, flags, null);
     if (rc != c.SQLITE_OK or db == null) {
         if (db) |d| _ = c.sqlite3_close(d);
         return Error.OpenFailed;
     }
-    // Reasonable pragmas: WAL keeps writers from blocking readers, and
-    // foreign keys are off by default — turn them on.
     _ = c.sqlite3_exec(db.?, "PRAGMA journal_mode=WAL;PRAGMA foreign_keys=ON;", null, null, null);
     return db.?;
 }
@@ -50,8 +52,6 @@ pub fn exec(db: *c.sqlite3, sql: []const u8) !void {
     if (rc != c.SQLITE_OK) return Error.ExecFailed;
 }
 
-// ---- Prepared statements ------------------------------------------------
-
 pub const Stmt = struct {
     db: *c.sqlite3,
     ptr: *c.sqlite3_stmt,
@@ -62,9 +62,6 @@ pub const Stmt = struct {
 
     /// 1-based parameter index (matches SQLite convention).
     pub fn bindText(self: *Stmt, idx: c_int, value: []const u8) !void {
-        // SQLITE_TRANSIENT is a function-pointer sentinel value Zig
-        // refuses to construct from -1 (the literal address fails the
-        // alignment check). Routed through a tiny C helper instead.
         const rc = booktool_bind_text(self.ptr, idx, value.ptr, @intCast(value.len));
         if (rc != c.SQLITE_OK) return Error.BindFailed;
     }

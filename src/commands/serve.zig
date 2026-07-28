@@ -30,6 +30,6 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     var cat = try catalog_mod.Catalog.open(catalog_path);
     defer cat.close();
 
-    try web.serve(ctx.arena, ctx.io, &cat, opts, ctx.stdout);
+    try web.serve(ctx.arena, ctx.io, &cat, ctx.env, opts, ctx.stdout);
     return 0;
 }

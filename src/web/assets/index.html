@@ -4,41 +4,61 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>booktool</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+
 </head>
 <body>
   <header>
+
+    <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Open sidebar" aria-expanded="false">
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </button>
     <div class="brand">booktool</div>
     <input id="search" type="search" placeholder="search title / author…  (try: author:hobb year:2010-2020 status:reading)" autocomplete="off">
     <nav class="tabs">
       <button class="tab active" data-view="all">All</button>
+      <button class="tab" data-view="series">Series</button>
+      <button class="tab" data-view="variants">Variants</button>
       <button class="tab" data-view="missing">Missing</button>
       <button class="tab" data-view="unverified">Unverified</button>
       <button class="tab" data-view="duplicates">Duplicates</button>
-    </nav>
-    <select id="sort-select" title="Sort order">
-      <option value="author">Author</option>
-      <option value="title">Title</option>
-      <option value="year_desc">Year (newest)</option>
-      <option value="year_asc">Year (oldest)</option>
-      <option value="added_desc">Recently added</option>
-      <option value="updated_desc">Recently updated</option>
-      <option value="series">Series</option>
-      <option value="size_desc">File size</option>
-    </select>
-    <nav class="layout-toggle" aria-label="Layout">
-      <button class="layout active" data-layout="gallery" title="Gallery">▦</button>
-      <button class="layout" data-layout="list" title="List">▤</button>
+      <button class="tab" data-view="rename">Rename</button>
+      <button class="tab" data-view="triage">Triage</button>
+      <button class="tab" data-view="stats">Stats</button>
     </nav>
     <div class="stats" id="stats"></div>
   </header>
 
+  <div id="lib-toolbar">
+    <button id="sort-pill" class="sort-pill" aria-haspopup="menu" aria-expanded="false" type="button">
+
+      <svg class="sort-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M3 4h10M3 8h7M3 12h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <span class="sort-label">Sort: Author ↑</span>
+      <span class="caret" aria-hidden="true">▾</span>
+    </button>
+    <div id="sort-menu" class="popover" hidden role="menu" aria-label="Sort order">
+
+    </div>
+    <div class="lib-toolbar-spacer"></div>
+    <nav class="layout-toggle" aria-label="Layout">
+      <button class="layout active" data-layout="gallery" title="Gallery (grouped)" type="button">▦</button>
+      <button class="layout" data-layout="compact" title="Compact grid (no grouping)" type="button">▪</button>
+      <button class="layout" data-layout="list" title="List" type="button">▤</button>
+    </nav>
+  </div>
+
   <div id="selection-bar" hidden>
     <span id="selection-count">0 selected</span>
     <button id="bulk-enrich">Enrich all</button>
+    <button id="bulk-edit">Edit metadata…</button>
     <button id="bulk-status-reading">Mark reading</button>
     <button id="bulk-status-finished">Mark finished</button>
     <button id="bulk-delete" class="danger">Delete…</button>
@@ -51,33 +71,86 @@
 
   <main id="main">
     <aside id="facets">
-      <div class="facet-group" data-key="status">
-        <h4>Status</h4>
+
+      <div class="facet-group library-card" data-key="library">
+        <button id="add-books-btn" class="facet-action primary-action" type="button"
+                title="Pick a folder of ebooks/comics/PDFs and add it to your library">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 4a1 1 0 0 1 1-1h3l1 1.5h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"
+                  stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            <path d="M8 7v4M6 9h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          Add books from a folder…
+        </button>
+        <details class="library-fold">
+          <summary>
+            <span class="library-fold-label">Library</span>
+            <span id="library-fold-meta" class="library-fold-meta"></span>
+          </summary>
+          <div id="sources-list" class="sources-list">
+            <span class="hint">loading folders…</span>
+          </div>
+          <div class="library-card-actions">
+            <button id="rescan-all-btn" class="ghost facet-action" type="button"
+                    title="Re-walk every tracked folder for new and removed files">Rescan all</button>
+            <button id="enrich-batch-btn" class="ghost facet-action" type="button"
+                    title="Fetch missing metadata for every book from Open Library">Fetch metadata…</button>
+            <div class="library-card-row">
+              <button id="import-btn" class="ghost facet-action half" type="button"
+                      title="Import catalog metadata from a JSON / CSV file">Import…</button>
+              <button id="export-btn" class="ghost facet-action half" type="button"
+                      title="Download the full catalog as JSON or CSV">Export…</button>
+            </div>
+            <button id="open-sources-btn" class="ghost-link library-card-manage" type="button"
+                    title="Open the full sources manager">Manage tracked folders…</button>
+            <button id="open-jobs-btn" class="ghost-link library-card-manage" type="button"
+                    title="Schedule rescans / backfills / metadata refreshes">Scheduled jobs…</button>
+          </div>
+          <p id="enrich-batch-summary" class="hint enrich-summary"></p>
+        </details>
+      </div>
+
+      <details class="facet-group" data-key="status">
+        <summary><h4>Status</h4></summary>
         <ul>
           <li data-value="unread">Unread</li>
           <li data-value="reading">Reading</li>
           <li data-value="finished">Finished</li>
         </ul>
-      </div>
-      <div class="facet-group" data-key="has">
-        <h4>Has</h4>
+      </details>
+      <details class="facet-group" data-key="has">
+        <summary><h4>Has</h4></summary>
         <ul>
           <li data-value="isbn">ISBN</li>
           <li data-value="cover">Cover</li>
           <li data-value="series">Series</li>
         </ul>
-      </div>
-      <details class="facet-group" data-key="author" open>
+      </details>
+      <details class="facet-group" data-key="format">
+        <summary><h4>Format</h4></summary>
+        <ul id="facet-formats"><li class="hint">loading…</li></ul>
+      </details>
+      <details class="facet-group" data-key="author">
         <summary><h4>Authors</h4></summary>
         <ul id="facet-authors" class="facet-scroll"><li class="hint">loading…</li></ul>
       </details>
       <details class="facet-group" data-key="series">
         <summary><h4>Series</h4></summary>
         <ul id="facet-series" class="facet-scroll"><li class="hint">loading…</li></ul>
+        <button id="derive-paths-btn" class="ghost facet-action" title="Parse series / index from every book's filename">
+          Backfill from filenames
+        </button>
       </details>
       <details class="facet-group" data-key="genre">
         <summary><h4>Genres</h4></summary>
         <ul id="facet-genres" class="facet-scroll"><li class="hint">loading…</li></ul>
+      </details>
+      <details class="facet-group" data-key="tag">
+        <summary><h4>Tags</h4></summary>
+        <ul id="facet-tags" class="facet-scroll"><li class="hint">no tags yet</li></ul>
+        <div class="facet-action">
+          <input id="new-tag-input" type="text" placeholder="new tag…" class="facet-input">
+        </div>
       </details>
     </aside>
 
@@ -95,6 +168,21 @@
     </aside>
   </main>
 
+  <div id="cmdk-overlay" hidden>
+    <div class="cmdk-backdrop"></div>
+    <div class="cmdk-panel" role="dialog" aria-label="Command palette">
+      <div class="cmdk-input-row">
+        <svg class="cmdk-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.4"/>
+          <path d="M11 11l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <input id="cmdk-input" type="text" autocomplete="off" placeholder="Run a command…">
+        <span class="cmdk-hint">esc</span>
+      </div>
+      <ul id="cmdk-list"></ul>
+    </div>
+  </div>
+
   <div id="reader-overlay" hidden>
     <button id="reader-close" aria-label="Close reader">×</button>
     <button id="reader-prev" class="page-nav prev" aria-label="Previous page">‹</button>
@@ -103,6 +191,193 @@
   </div>
 
   <input id="cover-file-input" type="file" accept="image/jpeg,image/png" hidden>
+
+  <div id="sources-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-labelledby="sources-modal-title">
+      <header class="modal-head">
+        <h2 id="sources-modal-title">Add books from your folders</h2>
+        <button class="modal-close" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <section class="modal-section">
+          <h3>Add a new folder</h3>
+          <p class="modal-sub">Pick a folder containing ebooks, PDFs, or comics. Booktool walks the directory recursively, remembers the location, and tracks new / removed files.</p>
+          <div class="add-source-row">
+            <button id="modal-browse-btn" class="primary" type="button">Browse…</button>
+            <input id="modal-path-input" type="text" placeholder="…or paste a path" autocomplete="off">
+            <input id="modal-name-input" type="text" placeholder="Optional label" autocomplete="off">
+            <button id="modal-add-btn" type="button">Add</button>
+          </div>
+          <p id="modal-add-error" class="modal-error" hidden></p>
+        </section>
+        <section class="modal-section">
+          <div class="modal-section-head">
+            <h3>Tracked folders <span id="sources-count" class="muted"></span></h3>
+            <button id="modal-rescan-all" class="ghost-link" type="button">Rescan all</button>
+          </div>
+          <div id="sources-modal-list" class="sources-cards">
+            <p class="hint">loading…</p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="enrich-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-labelledby="enrich-modal-title">
+      <header class="modal-head">
+        <h2 id="enrich-modal-title">Enrich library metadata</h2>
+        <button class="modal-close" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body" id="enrich-modal-body">
+        <p class="hint">loading…</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="bulk-edit-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-labelledby="bulk-edit-title">
+      <header class="modal-head">
+        <h2 id="bulk-edit-title">Edit metadata for <span id="bulk-edit-count">0</span> books</h2>
+        <button class="modal-close" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <p class="modal-sub">For each field, choose <b>Leave alone</b> (no change), <b>Set to</b> (apply the value to every selected book), or <b>Clear</b> (blank the field). <b>Subjects</b> appends to the existing list (dedup case-insensitively).</p>
+        <form id="bulk-edit-form" class="bulk-edit-form">
+          <div class="bulk-edit-row" data-field="author">
+            <label for="bulk-edit-author">Author</label>
+            <select class="bulk-edit-mode" data-field="author">
+              <option value="leave" selected>Leave alone</option>
+              <option value="set">Set to</option>
+              <option value="clear">Clear</option>
+            </select>
+            <input id="bulk-edit-author" type="text" placeholder='e.g. "Hobb, Robin"' disabled autocomplete="off">
+          </div>
+          <div class="bulk-edit-row" data-field="series">
+            <label for="bulk-edit-series">Series</label>
+            <select class="bulk-edit-mode" data-field="series">
+              <option value="leave" selected>Leave alone</option>
+              <option value="set">Set to</option>
+              <option value="clear">Clear</option>
+            </select>
+            <input id="bulk-edit-series" type="text" placeholder="e.g. The Farseer Trilogy" disabled autocomplete="off">
+          </div>
+          <div class="bulk-edit-row" data-field="year">
+            <label for="bulk-edit-year">Year</label>
+            <select class="bulk-edit-mode" data-field="year">
+              <option value="leave" selected>Leave alone</option>
+              <option value="set">Set to</option>
+              <option value="clear">Clear</option>
+            </select>
+            <input id="bulk-edit-year" type="text" placeholder="e.g. 1995" disabled autocomplete="off" inputmode="numeric">
+          </div>
+          <div class="bulk-edit-row" data-field="publisher">
+            <label for="bulk-edit-publisher">Publisher</label>
+            <select class="bulk-edit-mode" data-field="publisher">
+              <option value="leave" selected>Leave alone</option>
+              <option value="set">Set to</option>
+              <option value="clear">Clear</option>
+            </select>
+            <input id="bulk-edit-publisher" type="text" placeholder="e.g. Bantam" disabled autocomplete="off">
+          </div>
+          <div class="bulk-edit-row" data-field="language">
+            <label for="bulk-edit-language">Language</label>
+            <select class="bulk-edit-mode" data-field="language">
+              <option value="leave" selected>Leave alone</option>
+              <option value="set">Set to</option>
+              <option value="clear">Clear</option>
+            </select>
+            <input id="bulk-edit-language" type="text" placeholder='e.g. "en"' disabled autocomplete="off">
+          </div>
+          <div class="bulk-edit-row" data-field="subjects">
+            <label for="bulk-edit-subjects">Subjects</label>
+            <span class="bulk-edit-mode-label">Append</span>
+            <input id="bulk-edit-subjects" type="text" placeholder="e.g. Fantasy, Adventure (comma-separated)" autocomplete="off">
+          </div>
+          <div class="bulk-edit-actions">
+            <button type="button" class="ghost" id="bulk-edit-cancel">Cancel</button>
+            <button type="submit" class="primary" id="bulk-edit-apply">Apply to <span id="bulk-edit-apply-count">0</span> books</button>
+          </div>
+          <p id="bulk-edit-error" class="modal-error" hidden></p>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="jobs-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-labelledby="jobs-modal-title">
+      <header class="modal-head">
+        <h2 id="jobs-modal-title">Scheduled maintenance jobs</h2>
+        <button class="modal-close" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <section class="modal-section">
+          <h3>Add a job</h3>
+          <p class="modal-sub">Schedule a periodic rescan / metadata refresh / filename backfill. Runs automatically while <code>booktool serve</code> is open (or <code>booktool schedule daemon</code>).</p>
+          <div class="jobs-add-row">
+            <input id="job-name-input" type="text" placeholder="name (e.g. nightly-rescan)" autocomplete="off">
+            <select id="job-type-select">
+              <option value="rescan-all">Rescan all folders</option>
+              <option value="enrich-missing">Enrich missing metadata</option>
+              <option value="backfill-paths">Backfill series from filenames</option>
+              <option value="standardize-dry">Standardize preview (counts only)</option>
+            </select>
+            <select id="job-spec-select">
+              <option value="@hourly">Every hour</option>
+              <option value="@daily" selected>Every day (03:00)</option>
+              <option value="@weekly">Every Monday (03:00)</option>
+              <option value="@monthly">First of every month (03:00)</option>
+              <option value="every 6h">Every 6 hours</option>
+              <option value="every 30m">Every 30 minutes</option>
+            </select>
+            <button id="job-add-btn" type="button">Add</button>
+          </div>
+          <p id="job-add-error" class="modal-error" hidden></p>
+        </section>
+        <section class="modal-section">
+          <h3>Configured jobs <span id="jobs-count" class="muted"></span></h3>
+          <div id="jobs-modal-list" class="jobs-list">
+            <p class="hint">loading…</p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="transfer-modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-labelledby="transfer-modal-title">
+      <header class="modal-head">
+        <h2 id="transfer-modal-title">Import / Export library</h2>
+        <button class="modal-close" aria-label="Close">×</button>
+      </header>
+      <div class="modal-tabs" role="tablist">
+        <button class="modal-tab active" data-tab="export" role="tab">Export</button>
+        <button class="modal-tab" data-tab="import" role="tab">Import</button>
+      </div>
+      <div class="modal-body">
+        <section id="transfer-export" class="modal-section transfer-pane">
+          <p class="modal-sub">Download the full catalog (every book, every field) as JSON or CSV. The file is generated on-demand from SQLite — no caching, always fresh. Useful for backups, scripting, or piping into another tool.</p>
+          <div class="transfer-actions">
+            <button id="transfer-export-json" class="primary" type="button">Download JSON</button>
+            <button id="transfer-export-csv" type="button">Download CSV</button>
+          </div>
+          <p id="transfer-export-status" class="hint"></p>
+        </section>
+        <section id="transfer-import" class="modal-section transfer-pane" hidden>
+          <p class="modal-sub">Drop or pick a JSON / CSV file containing rows with a <code>path</code> column. Matching books in the catalog have their non-empty fields updated. Books not in the catalog are skipped — run <strong>Add books from a folder</strong> first if you need to ingest new files.</p>
+          <label class="transfer-drop" for="transfer-file-input">
+            <input id="transfer-file-input" type="file" accept=".json,.csv,application/json,text/csv" hidden>
+            <span>Drop a file here, or <span class="link-like">click to choose</span></span>
+            <span class="hint" id="transfer-file-name"></span>
+          </label>
+          <div class="transfer-actions">
+            <button id="transfer-import-go" class="primary" type="button" disabled>Import</button>
+          </div>
+          <p id="transfer-import-status" class="hint"></p>
+        </section>
+      </div>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
 </body>

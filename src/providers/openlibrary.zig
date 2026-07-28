@@ -16,12 +16,39 @@ const std = @import("std");
 const meta = @import("../core/metadata.zig");
 const provider_iface = @import("provider.zig");
 const http = @import("../util/http.zig");
+const shutdown = @import("../util/shutdown.zig");
+const fuzzy = @import("../util/fuzzy.zig");
+
+const log = std.log.scoped(.ol);
+
+/// One variant tried by the title-search ladder. The detail-panel
+/// surfaces this so the user can see *why* a lookup either succeeded
+/// (and which sanitization step won) or returned "no match" — without
+/// having to crack open the server log.
+///
+/// All string slices are owned by the allocator passed to
+/// `lookupRichDiag` (the per-request arena in the web layer).
+pub const SearchAttempt = struct {
+    title: []const u8,
+    author: []const u8,
+    num_docs: usize,
+    chosen_title: ?[]const u8 = null,
+    chosen_key: ?[]const u8 = null,
+    /// `scoreDoc` of the chosen doc, or 0 when num_docs == 0.
+    /// Useful as a confidence signal — author surname match = +1000.
+    score: i64 = 0,
+};
+
+pub const DiagnosticResult = struct {
+    result: ?EnrichResult,
+    attempts: []SearchAttempt,
+};
 
 /// A single edition of a work — one printing/imprint with its own ISBN.
 /// Returned as part of `EnrichResult.editions`; not persisted on the
 /// `books` row (those store the *user's* edition).
 pub const Edition = struct {
-    ol_key: ?[]const u8 = null, // e.g. "/books/OL12345M"
+    ol_key: ?[]const u8 = null,
     isbn: ?[]const u8 = null,
     publisher: ?[]const u8 = null,
     published_year: ?u16 = null,
@@ -35,15 +62,42 @@ pub const Edition = struct {
 /// UI needs in order to surface alternatives.
 pub const EnrichResult = struct {
     metadata: meta.BookMetadata,
-    work_key: ?[]const u8 = null, // e.g. "/works/OL12345W"
+    work_key: ?[]const u8 = null,
     /// Cover URLs gathered from the work record and from every edition
     /// in the work; de-duplicated, primary cover excluded.
     alt_cover_urls: []const []const u8 = &.{},
     /// Sibling editions of the same work.
     editions: []const Edition = &.{},
+    /// Top-N candidates from the winning search variant. The first
+    /// candidate is always the chosen one (its metadata matches
+    /// `EnrichResult.metadata`); the rest are alternates the user can
+    /// click in the UI to override the diff editor's suggested column.
+    candidates: []const Candidate = &.{},
+};
+
+/// One Open Library search-result candidate — enough fields for the
+/// alternate-match picker (cover + title + author + year + score).
+pub const Candidate = struct {
+    title: ?[]const u8 = null,
+    author: ?[]const u8 = null,
+    work_key: ?[]const u8 = null,
+    year: ?u16 = null,
+    isbn: ?[]const u8 = null,
+    cover_url: ?[]const u8 = null,
+    score: i64 = 0,
+    /// Full metadata for this candidate (subset of what
+    /// `parseSearchPayloadAt` returns). When the user picks this
+    /// candidate, the diff editor swaps its "suggested" column to
+    /// these values.
+    metadata: meta.BookMetadata = .{},
 };
 
 pub const OpenLibrary = struct {
+    /// HTTP client used for every outbound call. Production wires
+    /// `http.RealHttpClient` here; tests stash a `http.MockClient` so
+    /// `lookup*` are exercised without real network traffic.
+    http_client: http.HttpClient,
+
     pub fn provider(self: *OpenLibrary) provider_iface.Provider {
         return .{
             .ctx = self,
@@ -68,7 +122,7 @@ pub const OpenLibrary = struct {
         io: std.Io,
         q: provider_iface.Query,
     ) !?meta.BookMetadata {
-        _ = self;
+        _ = io;
 
         if (q.isbn) |isbn| {
             const url = try std.fmt.allocPrint(
@@ -77,7 +131,7 @@ pub const OpenLibrary = struct {
                 .{isbn},
             );
             defer allocator.free(url);
-            var resp = http.get(allocator, io, url, .{}) catch |err| switch (err) {
+            var resp = self.http_client.fetchGet(allocator, url, .{}) catch |err| switch (err) {
                 error.HttpError, error.NotImplemented => return null,
                 else => return err,
             };
@@ -95,18 +149,18 @@ pub const OpenLibrary = struct {
 
             const url = try std.fmt.allocPrint(
                 allocator,
-                "https://openlibrary.org/search.json?title={s}&author={s}&limit=1",
+                "https://openlibrary.org/search.json?title={s}&author={s}&limit=10",
                 .{ escaped_title, escaped_author },
             );
             defer allocator.free(url);
 
-            var resp = http.get(allocator, io, url, .{}) catch |err| switch (err) {
+            var resp = self.http_client.fetchGet(allocator, url, .{}) catch |err| switch (err) {
                 error.HttpError, error.NotImplemented => return null,
                 else => return err,
             };
             defer resp.deinit(allocator);
             if (resp.status != 200) return null;
-            return parseSearchPayload(allocator, resp.body);
+            return parseSearchPayload(allocator, resp.body, q);
         }
 
         return null;
@@ -122,14 +176,32 @@ pub const OpenLibrary = struct {
         io: std.Io,
         q: provider_iface.Query,
     ) !?EnrichResult {
-        _ = self;
+        const diag = try self.lookupRichDiag(allocator, io, q);
+        return diag.result;
+    }
 
-        // Step 1: get a starting BookMetadata + (when possible) the
-        // work key. ISBN path uses both `jscmd=data` and `jscmd=details`
-        // — data has nice human strings, details has the work pointer.
+    /// Diagnostic variant of `lookupRich`. Returns the same result plus
+    /// the list of search variants we tried (empty for the ISBN path —
+    /// ISBN lookups are deterministic, no retry ladder needed).
+    ///
+    /// Callers that want to surface "we tried X then Y then Z" in the
+    /// UI use this; the simpler `lookupRich` discards `attempts`.
+    pub fn lookupRichDiag(
+        self: *OpenLibrary,
+        allocator: std.mem.Allocator,
+        _: std.Io,
+        q: provider_iface.Query,
+    ) !DiagnosticResult {
+        log.debug(
+            "lookupRichDiag isbn={?s} title={?s} author={?s}",
+            .{ q.isbn, q.title, q.author },
+        );
+
         var base_md: ?meta.BookMetadata = null;
         var work_key: ?[]const u8 = null;
         var isbn_for_followup: ?[]const u8 = null;
+        var attempts: []SearchAttempt = &.{};
+        var search_candidates: []const Candidate = &.{};
 
         if (q.isbn) |isbn| {
             isbn_for_followup = isbn;
@@ -140,9 +212,12 @@ pub const OpenLibrary = struct {
                 .{isbn},
             );
             defer allocator.free(data_url);
-            if (httpGetOk(allocator, io, data_url)) |body| {
+            if (httpGetOk(self.http_client, allocator, data_url)) |body| {
                 defer allocator.free(body);
                 base_md = parseIsbnPayload(allocator, isbn, body) catch null;
+                if (base_md == null) {
+                    log.debug("ISBN {s} (jscmd=data): no `ISBN:{s}` key in payload", .{ isbn, isbn });
+                }
             }
 
             const det_url = try std.fmt.allocPrint(
@@ -151,7 +226,7 @@ pub const OpenLibrary = struct {
                 .{isbn},
             );
             defer allocator.free(det_url);
-            if (httpGetOk(allocator, io, det_url)) |body| {
+            if (httpGetOk(self.http_client, allocator, det_url)) |body| {
                 defer allocator.free(body);
                 const det = parseDetailsPayload(allocator, isbn, body) catch DetailsResult{};
                 work_key = det.work_key;
@@ -163,29 +238,22 @@ pub const OpenLibrary = struct {
                     }
                 }
             }
-        } else if (q.title) |title| {
-            // Search path. Pull the first doc and lift the work key from it.
-            const author_q = q.author orelse "";
-            const et = try urlEncode(allocator, title);
-            defer allocator.free(et);
-            const ea = try urlEncode(allocator, author_q);
-            defer allocator.free(ea);
-            const url = try std.fmt.allocPrint(
-                allocator,
-                "https://openlibrary.org/search.json?title={s}&author={s}&limit=1",
-                .{ et, ea },
-            );
-            defer allocator.free(url);
-            if (httpGetOk(allocator, io, url)) |body| {
+        } else if (q.title != null) {
+            const ladder = try searchLadder(self.http_client, allocator, q);
+            attempts = ladder.attempts;
+            if (ladder.body) |body| {
                 defer allocator.free(body);
-                base_md = parseSearchPayload(allocator, body) catch null;
-                work_key = extractFirstWorkKey(allocator, body) catch null;
+                base_md = parseSearchPayloadAt(allocator, body, ladder.idx) catch null;
+                work_key = extractWorkKeyAt(allocator, body, ladder.idx) catch null;
+                search_candidates = parseSearchCandidates(allocator, body, q, ladder.idx, 6) catch &.{};
             }
         }
 
-        if (base_md == null and work_key == null) return null;
+        if (base_md == null and work_key == null) {
+            log.debug("lookupRichDiag: no match (attempts={d})", .{attempts.len});
+            return .{ .result = null, .attempts = attempts };
+        }
 
-        // Step 2 (optional): work record for subjects/description/series.
         var alt_covers: std.ArrayList([]const u8) = .empty;
         if (work_key) |wk| {
             const wk_path = stripWorksPrefix(wk);
@@ -195,7 +263,7 @@ pub const OpenLibrary = struct {
                 .{wk_path},
             );
             defer allocator.free(url);
-            if (httpGetOk(allocator, io, url)) |body| {
+            if (httpGetOk(self.http_client, allocator, url)) |body| {
                 defer allocator.free(body);
                 const info = parseWorkPayload(allocator, body) catch WorkInfo{};
                 if (base_md == null) base_md = .{ .source = .openlibrary, .confidence = 0.7 };
@@ -205,9 +273,8 @@ pub const OpenLibrary = struct {
                 if (bm.subjects.len == 0 and info.subjects.len > 0) bm.subjects = info.subjects;
                 base_md = bm;
 
-                // Collect alt cover URLs from the work, skipping the
-                // primary cover so we don't show it twice.
                 for (info.cover_ids) |cid| {
+                    if (alt_covers.items.len >= 3) break;
                     const cover_url = try std.fmt.allocPrint(
                         allocator,
                         "https://covers.openlibrary.org/b/id/{d}-M.jpg",
@@ -224,7 +291,6 @@ pub const OpenLibrary = struct {
             }
         }
 
-        // Step 3 (optional): editions list.
         var editions: []const Edition = &.{};
         if (work_key) |wk| {
             const wk_path = stripWorksPrefix(wk);
@@ -234,45 +300,453 @@ pub const OpenLibrary = struct {
                 .{wk_path},
             );
             defer allocator.free(url);
-            if (httpGetOk(allocator, io, url)) |body| {
+            if (httpGetOk(self.http_client, allocator, url)) |body| {
                 defer allocator.free(body);
                 editions = parseEditionsPayload(allocator, body, 50) catch &.{};
 
-                // Promote a few unique edition covers into alt_covers
-                // so the user gets visual alternatives even when the
-                // work record has only one cover_id.
                 var seen: std.StringHashMap(void) = .init(allocator);
                 defer seen.deinit();
                 for (alt_covers.items) |u| try seen.put(u, {});
                 for (editions) |e| {
+                    if (alt_covers.items.len >= 3) break;
                     const u = e.cover_url orelse continue;
                     if (seen.contains(u)) continue;
                     try seen.put(u, {});
                     try alt_covers.append(allocator, u);
-                    if (alt_covers.items.len >= 12) break;
                 }
             }
         }
 
-        return .{
+        const enriched: EnrichResult = .{
             .metadata = base_md orelse .{ .source = .openlibrary, .confidence = 0.6 },
             .work_key = work_key,
             .alt_cover_urls = try alt_covers.toOwnedSlice(allocator),
             .editions = editions,
+            .candidates = search_candidates,
+        };
+        log.debug(
+            "lookupRichDiag: ok work_key={?s} editions={d} alt_covers={d}",
+            .{ enriched.work_key, enriched.editions.len, enriched.alt_cover_urls.len },
+        );
+        return .{ .result = enriched, .attempts = attempts };
+    }
+
+    /// Page through `/works/<key>/editions.json` and return the next
+    /// batch of unique cover URLs. Backs the `GET /api/books/:id/covers`
+    /// endpoint — lookupRich() only returns 3 covers up front so the
+    /// detail strip stays one tidy row; this fetches more on demand.
+    ///
+    /// Walks editions in fetch batches of `batch` (default 25). Stops as
+    /// soon as we have `limit` URLs that aren't in `seen`, or after
+    /// `max_batches` rounds (so a pathological work can't lock up the
+    /// request).
+    pub fn lookupMoreCovers(
+        self: *OpenLibrary,
+        allocator: std.mem.Allocator,
+        _: std.Io,
+        work_key: []const u8,
+        offset: usize,
+        limit: usize,
+        seen: []const []const u8,
+    ) !MoreCoversResult {
+        const batch: usize = 25;
+        const max_batches: usize = 3;
+
+        const wk_path = stripWorksPrefix(work_key);
+
+        var seen_map: std.StringHashMap(void) = .init(allocator);
+        defer seen_map.deinit();
+        for (seen) |s| try seen_map.put(s, {});
+
+        var urls: std.ArrayList([]const u8) = .empty;
+        var cur_offset: usize = offset;
+        var rounds: usize = 0;
+        var exhausted = false;
+
+        while (rounds < max_batches and urls.items.len < limit) : (rounds += 1) {
+            const url = try std.fmt.allocPrint(
+                allocator,
+                "https://openlibrary.org/works/{s}/editions.json?limit={d}&offset={d}",
+                .{ wk_path, batch, cur_offset },
+            );
+            defer allocator.free(url);
+
+            const body = httpGetOk(self.http_client, allocator, url) orelse break;
+            defer allocator.free(body);
+
+            const batch_result = parseEditionCoverBatch(allocator, body) catch break;
+            cur_offset += batch_result.entry_count;
+
+            for (batch_result.urls) |u| {
+                if (seen_map.contains(u)) {
+                    allocator.free(u);
+                    continue;
+                }
+                try seen_map.put(u, {});
+                try urls.append(allocator, u);
+                if (urls.items.len >= limit) break;
+            }
+            allocator.free(batch_result.urls);
+
+            if (batch_result.entry_count < batch) {
+                exhausted = true;
+                break;
+            }
+        }
+
+        return .{
+            .urls = try urls.toOwnedSlice(allocator),
+            .next_offset = cur_offset,
+            .exhausted = exhausted,
         };
     }
 };
 
-/// Convenience: HTTP GET, return the body on 200, null on anything else.
-/// We keep error handling internal so callers don't have to thread
-/// error unions through every step of the orchestrator.
-fn httpGetOk(allocator: std.mem.Allocator, io: std.Io, url: []const u8) ?[]u8 {
-    var resp = http.get(allocator, io, url, .{}) catch return null;
-    if (resp.status != 200) {
-        resp.deinit(allocator);
-        return null;
+pub const MoreCoversResult = struct {
+    urls: []const []const u8,
+    next_offset: usize,
+    exhausted: bool,
+};
+
+/// Outcome of one variant in the search ladder.
+const SearchVariantOutcome = struct {
+    /// Owned response body if the request hit 200, else null. Caller
+    /// frees if it doesn't keep the body for downstream use.
+    body: ?[]u8,
+    /// Index into `body.docs[]` chosen by `chooseBestSearchDoc`. Only
+    /// meaningful when `body != null`.
+    idx: usize,
+    /// What the user-facing diagnostic should show for this variant.
+    attempt: SearchAttempt,
+};
+
+const LadderResult = struct {
+    body: ?[]u8,
+    idx: usize,
+    attempts: []SearchAttempt,
+};
+
+/// Run the title-search retry ladder. Stops at the first variant that
+/// returns ≥1 doc — the assumption is that Open Library's `search.json`
+/// returns zero docs only when the query is decorated beyond its
+/// fuzzy-match tolerance (subtitle + trailing parens are the usual
+/// culprits), not when there's a "soft" mismatch we should fall through.
+///
+/// Variants tried (in order):
+///   1. Title as given + author.
+///   2. Normalized title (subtitle stripped, trailing parens stripped) +
+///      author — only when normalization actually changed the title.
+///   3. Normalized title with no `author=` filter — only when an author
+///      *was* supplied (otherwise variant 3 == variant 2).
+///
+/// Returns the body from the first variant that yielded docs (caller
+/// owns and must free), or null if all variants returned 0 docs.
+fn searchLadder(
+    client: http.HttpClient,
+    allocator: std.mem.Allocator,
+    q: provider_iface.Query,
+) !LadderResult {
+    var attempts: std.ArrayList(SearchAttempt) = .empty;
+    errdefer attempts.deinit(allocator);
+
+    const title_orig = q.title orelse return .{
+        .body = null,
+        .idx = 0,
+        .attempts = try attempts.toOwnedSlice(allocator),
+    };
+    const author_orig = q.author orelse "";
+
+    const normalized = try normalizeQueryTitle(allocator, title_orig);
+    defer allocator.free(normalized);
+    const normalized_differs = normalized.len > 0 and !std.mem.eql(u8, normalized, title_orig);
+
+    if (try runSearchVariant(client, allocator, title_orig, author_orig, q)) |outcome| {
+        try attempts.append(allocator, outcome.attempt);
+        if (outcome.body) |b| return .{
+            .body = b,
+            .idx = outcome.idx,
+            .attempts = try attempts.toOwnedSlice(allocator),
+        };
     }
-    return resp.body;
+
+    if (normalized_differs) {
+        if (try runSearchVariant(client, allocator, normalized, author_orig, q)) |outcome| {
+            try attempts.append(allocator, outcome.attempt);
+            if (outcome.body) |b| return .{
+                .body = b,
+                .idx = outcome.idx,
+                .attempts = try attempts.toOwnedSlice(allocator),
+            };
+        }
+    }
+
+    if (author_orig.len > 0) {
+        const search_title = if (normalized_differs) normalized else title_orig;
+        if (try runSearchVariant(client, allocator, search_title, "", q)) |outcome| {
+            try attempts.append(allocator, outcome.attempt);
+            if (outcome.body) |b| return .{
+                .body = b,
+                .idx = outcome.idx,
+                .attempts = try attempts.toOwnedSlice(allocator),
+            };
+        }
+    }
+
+    return .{
+        .body = null,
+        .idx = 0,
+        .attempts = try attempts.toOwnedSlice(allocator),
+    };
+}
+
+/// One round-trip to `search.json`. Returns null when the HTTP call
+/// failed (network/non-200) — distinguishes that from "200 with 0 docs"
+/// so the ladder can decide whether to retry. The returned `attempt`
+/// is always populated so the user sees what was tried.
+fn runSearchVariant(
+    client: http.HttpClient,
+    allocator: std.mem.Allocator,
+    title: []const u8,
+    author: []const u8,
+    q: provider_iface.Query,
+) !?SearchVariantOutcome {
+    const et = try urlEncode(allocator, title);
+    defer allocator.free(et);
+    const ea = try urlEncode(allocator, author);
+    defer allocator.free(ea);
+    const url = try std.fmt.allocPrint(
+        allocator,
+        "https://openlibrary.org/search.json?title={s}&author={s}&limit=10",
+        .{ et, ea },
+    );
+    defer allocator.free(url);
+
+    var attempt: SearchAttempt = .{
+        .title = try allocator.dupe(u8, title),
+        .author = try allocator.dupe(u8, author),
+        .num_docs = 0,
+    };
+
+    const body = httpGetOk(client, allocator, url) orelse {
+        log.debug("search variant title=\"{s}\" author=\"{s}\": HTTP failure", .{ title, author });
+        return .{ .body = null, .idx = 0, .attempt = attempt };
+    };
+
+    const stats = inspectSearchBody(allocator, body, q) catch SearchStats{};
+    attempt.num_docs = stats.num_docs;
+    attempt.chosen_title = if (stats.chosen_title) |t| try allocator.dupe(u8, t) else null;
+    attempt.chosen_key = if (stats.chosen_key) |k| try allocator.dupe(u8, k) else null;
+    attempt.score = stats.score;
+
+    log.debug(
+        "search variant title=\"{s}\" author=\"{s}\" → docs={d} chose={?s} score={d}",
+        .{ title, author, attempt.num_docs, attempt.chosen_title, attempt.score },
+    );
+
+    if (attempt.num_docs == 0) {
+        allocator.free(body);
+        return .{ .body = null, .idx = 0, .attempt = attempt };
+    }
+    return .{ .body = body, .idx = stats.chosen_idx, .attempt = attempt };
+}
+
+const SearchStats = struct {
+    num_docs: usize = 0,
+    chosen_idx: usize = 0,
+    chosen_title: ?[]const u8 = null,
+    chosen_key: ?[]const u8 = null,
+    score: i64 = 0,
+};
+
+fn inspectSearchBody(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    q: provider_iface.Query,
+) !SearchStats {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch
+        return SearchStats{};
+    defer parsed.deinit();
+    if (parsed.value != .object) return SearchStats{};
+    const docs_v = parsed.value.object.get("docs") orelse return SearchStats{};
+    if (docs_v != .array) return SearchStats{};
+    const docs = docs_v.array.items;
+    if (docs.len == 0) return SearchStats{};
+
+    var idx: usize = 0;
+    var best_score: i64 = std.math.minInt(i64);
+    for (docs, 0..) |doc, i| {
+        if (doc != .object) continue;
+        const s = scoreDoc(doc.object, q);
+        if (s > best_score) {
+            best_score = s;
+            idx = i;
+        }
+    }
+
+    var stats: SearchStats = .{
+        .num_docs = docs.len,
+        .chosen_idx = idx,
+        .score = best_score,
+    };
+
+    if (docs[idx] == .object) {
+        if (docs[idx].object.get("title")) |t| {
+            if (t == .string) stats.chosen_title = t.string;
+        }
+        if (docs[idx].object.get("key")) |k| {
+            if (k == .string) stats.chosen_key = k.string;
+        }
+    }
+
+    return stats;
+}
+
+/// Strip decoration from an Open Library search title query.
+///
+/// OL's `search.json` is fuzzy on word order but intolerant of
+/// subtitle/series markers in the title field. Stripping the subtitle
+/// (the part after the first `:`) and any trailing ` (...)` block
+/// unblocks lookups like "A Little Hatred: Book One (The Age of
+/// Madness)" → "A Little Hatred".
+///
+/// Returns an owned slice (always allocated, even when the result
+/// equals the input — keeps the call site's free-pattern uniform).
+pub fn normalizeQueryTitle(allocator: std.mem.Allocator, title: []const u8) ![]u8 {
+    var slice = std.mem.trim(u8, title, " \t");
+
+    while (true) {
+        var end = slice.len;
+        while (end > 0 and (slice[end - 1] == ' ' or slice[end - 1] == '\t')) end -= 1;
+        if (end == 0 or slice[end - 1] != ')') break;
+        var depth: i32 = 1;
+        var i = end - 1;
+        var open: ?usize = null;
+        while (i > 0) {
+            i -= 1;
+            const c = slice[i];
+            if (c == ')') depth += 1;
+            if (c == '(') {
+                depth -= 1;
+                if (depth == 0) {
+                    open = i;
+                    break;
+                }
+            }
+        }
+        if (open) |o| {
+            slice = std.mem.trim(u8, slice[0..o], " \t");
+        } else break;
+    }
+
+    if (std.mem.indexOfScalar(u8, slice, ':')) |colon| {
+        if (colon >= 3) {
+            slice = std.mem.trim(u8, slice[0..colon], " \t");
+        }
+    }
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    var prev_space = false;
+    for (slice) |ch| {
+        const is_space = ch == ' ' or ch == '\t';
+        if (is_space) {
+            if (!prev_space and out.items.len > 0) try out.append(allocator, ' ');
+            prev_space = true;
+        } else {
+            try out.append(allocator, ch);
+            prev_space = false;
+        }
+    }
+    while (out.items.len > 0 and out.items[out.items.len - 1] == ' ') {
+        _ = out.pop();
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+/// Lighter sibling of `parseEditionsPayload` for the cover paginator:
+/// returns just the cover URLs out of every entry that has one, plus
+/// the total entry count (used by the caller to decide whether the
+/// edition stream is exhausted). Unlike `parseEditionsPayload`, this
+/// keeps entries that lack ISBN/publisher/year — for cover discovery,
+/// any edition with a cover is worth surfacing.
+const BatchCoverResult = struct {
+    urls: []const []const u8,
+    entry_count: usize,
+};
+
+fn parseEditionCoverBatch(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+) !BatchCoverResult {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch
+        return .{ .urls = &.{}, .entry_count = 0 };
+    defer parsed.deinit();
+    if (parsed.value != .object)
+        return .{ .urls = &.{}, .entry_count = 0 };
+    const entries_v = parsed.value.object.get("entries") orelse
+        return .{ .urls = &.{}, .entry_count = 0 };
+    if (entries_v != .array)
+        return .{ .urls = &.{}, .entry_count = 0 };
+
+    var urls: std.ArrayList([]const u8) = .empty;
+    for (entries_v.array.items) |entry| {
+        if (entry != .object) continue;
+        const covers = entry.object.get("covers") orelse continue;
+        if (covers != .array) continue;
+        for (covers.array.items) |c| {
+            if (c != .integer or c.integer <= 0) continue;
+            const u = try std.fmt.allocPrint(
+                allocator,
+                "https://covers.openlibrary.org/b/id/{d}-M.jpg",
+                .{c.integer},
+            );
+            try urls.append(allocator, u);
+            break;
+        }
+    }
+
+    return .{
+        .urls = try urls.toOwnedSlice(allocator),
+        .entry_count = entries_v.array.items.len,
+    };
+}
+
+/// GET with exponential backoff on transient failures. Retries up to
+/// 3 times with 250ms / 750ms / 2s sleeps between attempts. Returns
+/// null on a terminal 4xx (404/410 = no record, not worth retrying),
+/// or on the final transient failure (network error / 5xx). The
+/// shutdown atomic is checked before each backoff so Ctrl+C during a
+/// batch doesn't have to wait out a 2s sleep.
+fn httpGetOk(client: http.HttpClient, allocator: std.mem.Allocator, url: []const u8) ?[]u8 {
+    const delays_ms = [_]u64{ 0, 250, 750, 2000 };
+    var i: usize = 0;
+    while (i < delays_ms.len) : (i += 1) {
+        if (delays_ms[i] > 0) {
+            if (shutdown.isRequested()) return null;
+            var remaining = delays_ms[i];
+            while (remaining > 0) {
+                if (shutdown.isRequested()) return null;
+                const chunk: u64 = if (remaining > 250) 250 else remaining;
+                const req = std.c.timespec{
+                    .sec = 0,
+                    .nsec = @intCast(chunk * std.time.ns_per_ms),
+                };
+                _ = std.c.nanosleep(&req, null);
+                remaining -= chunk;
+            }
+        }
+        var resp = client.fetchGet(allocator, url, .{}) catch {
+            continue;
+        };
+        if (resp.status >= 200 and resp.status < 300) return resp.body;
+        if (resp.status >= 400 and resp.status < 500) {
+            resp.deinit(allocator);
+            return null;
+        }
+        resp.deinit(allocator);
+    }
+    std.log.warn("openlibrary: giving up on {s} after {d} attempts", .{ url, delays_ms.len });
+    return null;
 }
 
 fn stripWorksPrefix(key: []const u8) []const u8 {
@@ -282,16 +756,157 @@ fn stripWorksPrefix(key: []const u8) []const u8 {
 }
 
 fn extractFirstWorkKey(allocator: std.mem.Allocator, body: []const u8) !?[]const u8 {
+    return extractWorkKeyAt(allocator, body, 0);
+}
+
+fn extractWorkKeyAt(allocator: std.mem.Allocator, body: []const u8, idx: usize) !?[]const u8 {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return null;
     defer parsed.deinit();
     if (parsed.value != .object) return null;
     const docs = parsed.value.object.get("docs") orelse return null;
-    if (docs != .array or docs.array.items.len == 0) return null;
-    const doc = docs.array.items[0];
+    if (docs != .array or docs.array.items.len <= idx) return null;
+    const doc = docs.array.items[idx];
     if (doc != .object) return null;
     const k = doc.object.get("key") orelse return null;
     if (k != .string) return null;
     return try allocator.dupe(u8, k.string);
+}
+
+/// Pick the best-matching doc index for a search response. Ranking
+/// criteria (positive = better):
+///   +1000  author surname appears in `author_name`
+///   + 300  language array contains "eng"
+///   + 100  has an ISBN-13 (mass-market edition is likely)
+///   + (clamp 0..40)  edition_count / 5  (republish frequency)
+///   - 500  title contains "graphic novel" / "abridged" / "screenplay" /
+///          "adapted" / "audiobook" — clearly derivative editions
+/// Returns null when `docs` is empty or unparseable so the caller
+/// falls back to index 0.
+fn chooseBestSearchDoc(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    q: provider_iface.Query,
+) !?usize {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const docs_v = parsed.value.object.get("docs") orelse return null;
+    if (docs_v != .array or docs_v.array.items.len == 0) return null;
+    const docs = docs_v.array.items;
+    if (docs.len == 1) return 0;
+
+    var best_idx: usize = 0;
+    var best_score: i64 = std.math.minInt(i64);
+    for (docs, 0..) |doc, i| {
+        if (doc != .object) continue;
+        const score = scoreDoc(doc.object, q);
+        if (score > best_score) {
+            best_score = score;
+            best_idx = i;
+        }
+    }
+    return best_idx;
+}
+
+fn scoreDoc(doc: std.json.ObjectMap, q: provider_iface.Query) i64 {
+    var s: i64 = 0;
+
+    if (q.title) |qt| {
+        if (doc.get("title")) |t| {
+            if (t == .string and qt.len > 0 and t.string.len > 0) {
+                if (containsCi(t.string, qt)) {
+                    const ratio = (qt.len * 100) / @max(qt.len, t.string.len);
+                    s += @divFloor(500 * @as(i64, @intCast(ratio)), 100);
+                }
+            }
+        }
+    }
+
+    if (q.author) |a| {
+        const surname = firstWord(a);
+        if (surname.len > 2) {
+            if (doc.get("author_name")) |an| {
+                if (an == .array) {
+                    for (an.array.items) |x| {
+                        if (x != .string) continue;
+                        if (containsCi(x.string, surname)) {
+                            s += 1000;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (doc.get("language")) |lang| {
+        if (lang == .array) {
+            for (lang.array.items) |l| {
+                if (l != .string) continue;
+                if (std.mem.eql(u8, l.string, "eng")) {
+                    s += 300;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (doc.get("edition_count")) |ec| {
+        if (ec == .integer) {
+            const capped = @min(ec.integer, 200);
+            s += @divFloor(capped, 5);
+        }
+    }
+
+    if (doc.get("isbn")) |is| {
+        if (is == .array) {
+            for (is.array.items) |x| {
+                if (x != .string) continue;
+                if (x.string.len == 13) {
+                    s += 100;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (doc.get("title")) |t| {
+        if (t == .string) {
+            const bad = [_][]const u8{
+                "graphic novel", "abridged",    "screenplay",  "adapted",
+                "audiobook",     "study guide", "cliffsnotes", "sparknotes",
+            };
+            for (bad) |needle| {
+                if (containsCi(t.string, needle)) {
+                    s -= 500;
+                    break;
+                }
+            }
+        }
+    }
+
+    return s;
+}
+
+fn firstWord(s: []const u8) []const u8 {
+    var end: usize = 0;
+    while (end < s.len) : (end += 1) {
+        const ch = s[end];
+        if (ch == ',' or ch == ' ' or ch == ';') break;
+    }
+    return s[0..end];
+}
+
+fn containsCi(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0 or needle.len > haystack.len) return false;
+    var i: usize = 0;
+    outer: while (i + needle.len <= haystack.len) : (i += 1) {
+        for (needle, 0..) |c, j| {
+            if (std.ascii.toLower(haystack[i + j]) != std.ascii.toLower(c)) continue :outer;
+        }
+        return true;
+    }
+    return false;
 }
 
 /// Minimal percent-encoder for URL query values.
@@ -314,12 +929,110 @@ fn urlEncode(allocator: std.mem.Allocator, s: []const u8) ![]u8 {
     return buf.toOwnedSlice(allocator);
 }
 
-/// Parse Open Library's search.json response and return metadata for
-/// the first matching doc. Confidence is dialled down a notch vs ISBN
-/// lookup because title-search is fuzzier.
+/// Parse Open Library's search.json response, returning metadata for
+/// the first matching doc. Kept as a thin wrapper around
+/// `parseSearchPayloadAt` for callers that don't care about ranking
+/// (e.g. ISBN-already-known paths, tests).
 pub fn parseSearchPayload(
     allocator: std.mem.Allocator,
     body: []const u8,
+    q: provider_iface.Query,
+) !?meta.BookMetadata {
+    const idx = (chooseBestSearchDoc(allocator, body, q) catch null) orelse 0;
+    return parseSearchPayloadAt(allocator, body, idx);
+}
+
+/// M1: parse every candidate from a `search.json` response, ordered
+/// best-first (winning doc at index 0). Each entry carries enough for
+/// the alternate-match picker (display) plus a full BookMetadata for
+/// when the user selects it. The `chosen_idx` of the source search is
+/// rotated to index 0 so the UI can render "current pick" + "other N".
+pub fn parseSearchCandidates(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    q: provider_iface.Query,
+    chosen_idx: usize,
+    cap: usize,
+) ![]Candidate {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return &.{};
+    defer parsed.deinit();
+    if (parsed.value != .object) return &.{};
+    const docs_v = parsed.value.object.get("docs") orelse return &.{};
+    if (docs_v != .array) return &.{};
+    const docs = docs_v.array.items;
+    if (docs.len == 0) return &.{};
+
+    const N = @min(docs.len, cap);
+    var list: std.ArrayList(Candidate) = .empty;
+    try list.ensureTotalCapacity(allocator, N);
+
+    var indices: std.ArrayList(usize) = .empty;
+    defer indices.deinit(allocator);
+    try indices.append(allocator, chosen_idx);
+    for (docs, 0..) |_, i| {
+        if (i == chosen_idx) continue;
+        try indices.append(allocator, i);
+        if (indices.items.len >= N) break;
+    }
+
+    for (indices.items) |i| {
+        if (i >= docs.len) continue;
+        const doc_v = docs[i];
+        if (doc_v != .object) continue;
+        const doc = doc_v.object;
+
+        var c: Candidate = .{};
+        c.score = scoreDoc(doc, q);
+        if (doc.get("title")) |t| if (t == .string) {
+            c.title = try allocator.dupe(u8, t.string);
+        };
+        if (doc.get("author_name")) |an| {
+            if (an == .array and an.array.items.len > 0) {
+                const first = an.array.items[0];
+                if (first == .string) c.author = try allocator.dupe(u8, first.string);
+            }
+        }
+        if (doc.get("key")) |k| if (k == .string) {
+            c.work_key = try allocator.dupe(u8, k.string);
+        };
+        if (doc.get("first_publish_year")) |y| {
+            if (y == .integer and y.integer >= 1000 and y.integer < 3000) {
+                c.year = @intCast(y.integer);
+            }
+        }
+        if (doc.get("isbn")) |is| {
+            if (is == .array and is.array.items.len > 0) {
+                for (is.array.items) |it| {
+                    if (it != .string) continue;
+                    if (it.string.len == 13) {
+                        c.isbn = try allocator.dupe(u8, it.string);
+                        break;
+                    }
+                }
+                if (c.isbn == null) {
+                    const f = is.array.items[0];
+                    if (f == .string) c.isbn = try allocator.dupe(u8, f.string);
+                }
+            }
+        }
+        if (doc.get("cover_i")) |ci| if (ci == .integer) {
+            c.cover_url = try std.fmt.allocPrint(
+                allocator,
+                "https://covers.openlibrary.org/b/id/{d}-M.jpg",
+                .{ci.integer},
+            );
+        };
+
+        c.metadata = (try parseSearchPayloadAt(allocator, body, i)) orelse meta.BookMetadata{};
+        try list.append(allocator, c);
+    }
+    return list.toOwnedSlice(allocator);
+}
+
+pub fn parseSearchPayloadAt(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    idx: usize,
 ) !?meta.BookMetadata {
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch return null;
     defer parsed.deinit();
@@ -327,8 +1040,8 @@ pub fn parseSearchPayload(
     const root = parsed.value;
     if (root != .object) return null;
     const docs_v = root.object.get("docs") orelse return null;
-    if (docs_v != .array or docs_v.array.items.len == 0) return null;
-    const doc_v = docs_v.array.items[0];
+    if (docs_v != .array or docs_v.array.items.len <= idx) return null;
+    const doc_v = docs_v.array.items[idx];
     if (doc_v != .object) return null;
     const doc = doc_v.object;
 
@@ -355,7 +1068,6 @@ pub fn parseSearchPayload(
     }
     if (doc.get("isbn")) |is| {
         if (is == .array and is.array.items.len > 0) {
-            // Prefer the first ISBN-13 (13 chars, all digits).
             for (is.array.items) |it| {
                 if (it != .string) continue;
                 if (it.string.len == 13) {
@@ -413,7 +1125,6 @@ pub fn parseIsbnPayload(
 
     if (book.get("publish_date")) |d| {
         if (d == .string and d.string.len >= 4) {
-            // Open Library returns strings like "October 2024" or "2024".
             const yr = findYear(d.string);
             if (yr) |y| md.published_year = y;
         }
@@ -455,8 +1166,6 @@ pub fn parseIsbnPayload(
 
     return md;
 }
-
-// ---- Rich enrichment ----------------------------------------------------
 
 pub const DetailsResult = struct {
     work_key: ?[]const u8 = null,
@@ -500,8 +1209,6 @@ pub fn parseDetailsPayload(
     }
 
     var md: meta.BookMetadata = .{ .source = .openlibrary, .confidence = 0.75 };
-    // (number_of_pages is captured per-edition in parseEditionsPayload;
-    // BookMetadata has no `pages` field so we don't pull it here.)
     if (details.get("languages")) |ls| {
         if (ls == .array and ls.array.items.len > 0) {
             const first = ls.array.items[0];
@@ -566,8 +1273,6 @@ pub fn parseWorkPayload(allocator: std.mem.Allocator, body: []const u8) !WorkInf
         }
     }
 
-    // OL has no canonical series field on the work; some records expose
-    // a "series" array of strings — pick the first if so.
     if (work.get("series")) |sv| {
         if (sv == .array and sv.array.items.len > 0) {
             const first = sv.array.items[0];
@@ -580,7 +1285,6 @@ pub fn parseWorkPayload(allocator: std.mem.Allocator, body: []const u8) !WorkInf
             var ids: std.ArrayList(i64) = .empty;
             for (cv.array.items) |item| {
                 if (item != .integer) continue;
-                // OL marks placeholders as -1; skip.
                 if (item.integer <= 0) continue;
                 try ids.append(allocator, item.integer);
             }
@@ -616,7 +1320,6 @@ pub fn parseEditionsPayload(
         if (e.get("key")) |k| if (k == .string) {
             ed.ol_key = try allocator.dupe(u8, k.string);
         };
-        // Prefer ISBN-13, fall back to ISBN-10.
         ed.isbn = (try firstStringFromArray(allocator, e.get("isbn_13"))) orelse
             (try firstStringFromArray(allocator, e.get("isbn_10")));
         ed.publisher = try firstStringFromArray(allocator, e.get("publishers"));
@@ -652,14 +1355,12 @@ pub fn parseEditionsPayload(
             }
         }
 
-        // Skip records that look like noise (no ISBN AND no publisher AND no year).
         if (ed.isbn == null and ed.publisher == null and ed.published_year == null) continue;
 
         try list.append(allocator, ed);
         if (list.items.len >= cap) break;
     }
 
-    // Stable sort by year desc, then publisher.
     const slice = try list.toOwnedSlice(allocator);
     std.sort.block(Edition, slice, {}, editionLessThan);
     return slice;
@@ -668,7 +1369,7 @@ pub fn parseEditionsPayload(
 fn editionLessThan(_: void, a: Edition, b: Edition) bool {
     const ay = a.published_year orelse 0;
     const by = b.published_year orelse 0;
-    if (ay != by) return ay > by; // newer first
+    if (ay != by) return ay > by;
     const ap = a.publisher orelse "";
     const bp = b.publisher orelse "";
     return std.mem.lessThan(u8, ap, bp);
@@ -701,7 +1402,10 @@ fn findYear(s: []const u8) ?u16 {
     while (i + 4 <= s.len) : (i += 1) {
         const slice = s[i .. i + 4];
         var all_digit = true;
-        for (slice) |c| if (!std.ascii.isDigit(c)) { all_digit = false; break; };
+        for (slice) |c| if (!std.ascii.isDigit(c)) {
+            all_digit = false;
+            break;
+        };
         if (all_digit) {
             const y = std.fmt.parseInt(u16, slice, 10) catch continue;
             if (y >= 1000 and y < 3000) return y;
@@ -709,8 +1413,6 @@ fn findYear(s: []const u8) ?u16 {
     }
     return null;
 }
-
-// ---- Tests --------------------------------------------------------------
 
 test "parseIsbnPayload extracts title and authors" {
     const fixture =
@@ -748,4 +1450,155 @@ test "findYear pulls 4-digit year from text" {
     try std.testing.expectEqual(@as(u16, 2007), findYear("July 21, 2007").?);
     try std.testing.expectEqual(@as(u16, 1984), findYear("1984").?);
     try std.testing.expectEqual(@as(?u16, null), findYear("forever"));
+}
+
+test "normalizeQueryTitle strips subtitle after colon" {
+    const a = std.testing.allocator;
+    const r = try normalizeQueryTitle(a, "A Little Hatred: Book One (The Age of Madness)");
+    defer a.free(r);
+    try std.testing.expectEqualStrings("A Little Hatred", r);
+}
+
+test "normalizeQueryTitle strips trailing parens" {
+    const a = std.testing.allocator;
+    const r = try normalizeQueryTitle(a, "Some Book (Series Name 1)");
+    defer a.free(r);
+    try std.testing.expectEqualStrings("Some Book", r);
+}
+
+test "normalizeQueryTitle strips chained trailing parens" {
+    const a = std.testing.allocator;
+    const r = try normalizeQueryTitle(a, "Title (Series 1) (Hardcover)");
+    defer a.free(r);
+    try std.testing.expectEqualStrings("Title", r);
+}
+
+test "normalizeQueryTitle leaves plain titles alone" {
+    const a = std.testing.allocator;
+    const r = try normalizeQueryTitle(a, "Hyperion");
+    defer a.free(r);
+    try std.testing.expectEqualStrings("Hyperion", r);
+}
+
+test "normalizeQueryTitle preserves leading-acronym colon" {
+    const a = std.testing.allocator;
+    const r = try normalizeQueryTitle(a, "F:Equation");
+    defer a.free(r);
+    try std.testing.expectEqualStrings("F:Equation", r);
+}
+
+test "normalizeQueryTitle collapses internal whitespace" {
+    const a = std.testing.allocator;
+    const r = try normalizeQueryTitle(a, "  A    Little   Hatred  ");
+    defer a.free(r);
+    try std.testing.expectEqualStrings("A Little Hatred", r);
+}
+
+const dummy_io_test: std.Io = undefined;
+
+test "lookup ISBN: 200 → parses metadata" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var mock = http.MockClient.init(std.testing.allocator);
+    defer mock.deinit();
+    try mock.add(
+        "https://openlibrary.org/api/books?bibkeys=ISBN:9780765365279&format=json&jscmd=data",
+        200,
+        \\{"ISBN:9780765365279":{"title":"The Way of Kings","publish_date":"2010","authors":[{"name":"Brandon Sanderson"}]}}
+        ,
+    );
+
+    var ol = OpenLibrary{ .http_client = mock.client() };
+    const md_opt = try ol.lookup(a, dummy_io_test, .{ .isbn = "9780765365279" });
+    try std.testing.expect(md_opt != null);
+    try std.testing.expectEqualStrings("The Way of Kings", md_opt.?.title.?);
+    try std.testing.expectEqual(@as(usize, 1), mock.calls.items.len);
+}
+
+test "lookup ISBN: 404 → null without raising" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var mock = http.MockClient.init(std.testing.allocator);
+    defer mock.deinit();
+    try mock.add(
+        "https://openlibrary.org/api/books?bibkeys=ISBN:nothing&format=json&jscmd=data",
+        404,
+        "{}",
+    );
+
+    var ol = OpenLibrary{ .http_client = mock.client() };
+    const md_opt = try ol.lookup(a, dummy_io_test, .{ .isbn = "nothing" });
+    try std.testing.expect(md_opt == null);
+}
+
+test "lookup ISBN: HTTP error → null (graceful degradation)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var mock = http.MockClient.init(std.testing.allocator);
+    defer mock.deinit();
+
+    var ol = OpenLibrary{ .http_client = mock.client() };
+    const md_opt = try ol.lookup(a, dummy_io_test, .{ .isbn = "9780000000000" });
+    try std.testing.expect(md_opt == null);
+    try std.testing.expectEqual(@as(usize, 1), mock.calls.items.len);
+}
+
+test "lookup title: hits search endpoint with URL-encoded params" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var mock = http.MockClient.init(std.testing.allocator);
+    defer mock.deinit();
+    try mock.add(
+        "https://openlibrary.org/search.json?title=Hyperion&author=Simmons&limit=10",
+        200,
+        \\{"docs":[{"title":"Hyperion","author_name":["Dan Simmons"],"first_publish_year":1989,"edition_count":50}]}
+        ,
+    );
+
+    var ol = OpenLibrary{ .http_client = mock.client() };
+    const md_opt = try ol.lookup(a, dummy_io_test, .{ .title = "Hyperion", .author = "Simmons" });
+    try std.testing.expect(md_opt != null);
+    try std.testing.expectEqualStrings("Hyperion", md_opt.?.title.?);
+    try std.testing.expectEqual(@as(u16, 1989), md_opt.?.published_year.?);
+}
+
+test "lookupRichDiag: search ladder records attempts when all 0 docs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var mock = http.MockClient.init(std.testing.allocator);
+    defer mock.deinit();
+    try mock.add(
+        "https://openlibrary.org/search.json?title=Foo%3A+Bar&author=Baz&limit=10",
+        200,
+        \\{"docs":[]}
+        ,
+    );
+    try mock.add(
+        "https://openlibrary.org/search.json?title=Foo&author=Baz&limit=10",
+        200,
+        \\{"docs":[]}
+        ,
+    );
+    try mock.add(
+        "https://openlibrary.org/search.json?title=Foo&author=&limit=10",
+        200,
+        \\{"docs":[]}
+        ,
+    );
+
+    var ol = OpenLibrary{ .http_client = mock.client() };
+    const diag = try ol.lookupRichDiag(a, dummy_io_test, .{ .title = "Foo: Bar", .author = "Baz" });
+    try std.testing.expect(diag.result == null);
+    try std.testing.expectEqual(@as(usize, 3), diag.attempts.len);
+    try std.testing.expectEqual(@as(usize, 3), mock.calls.items.len);
 }

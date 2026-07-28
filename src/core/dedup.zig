@@ -77,8 +77,6 @@ pub fn compareTitles(allocator: std.mem.Allocator, a: []const u8, b: []const u8)
     return fuzzy.jaroWinkler(na, nb);
 }
 
-// ---- Tests --------------------------------------------------------------
-
 test "normalizeTitle strips subtitle, punctuation, and leading article" {
     const alloc = std.testing.allocator;
     const out = try normalizeTitle(alloc, "The Way of Kings: Book One of the Stormlight Archive");
@@ -106,8 +104,6 @@ test "compareTitles flags near-duplicates" {
     try std.testing.expect(score > FUZZY_THRESHOLD);
 }
 
-// ---- Logical-identity grouping -----------------------------------------
-
 pub const Group = struct {
     /// Ordered with the highest-quality book first ("keep" candidate).
     books: []const catalog_mod.Book,
@@ -127,7 +123,6 @@ pub fn groupByLogicalIdentity(
     books: []const catalog_mod.Book,
 ) ![]Group {
     var groups: std.ArrayList(Group) = .empty;
-    // Track which book indices have been claimed by some group already.
     var claimed = try allocator.alloc(bool, books.len);
     @memset(claimed, false);
 
@@ -215,6 +210,5 @@ test "groupByLogicalIdentity finds cross-format duplicates" {
 
     try std.testing.expectEqual(@as(usize, 1), groups.len);
     try std.testing.expectEqual(@as(usize, 2), groups[0].books.len);
-    // EPUB ranks above MOBI → first in the group.
     try std.testing.expectEqual(meta.Format.epub, groups[0].books[0].format);
 }

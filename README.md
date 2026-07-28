@@ -4,8 +4,9 @@ Three surfaces, one library:
 
 - **CLI** — scan, enrich, dedup, rename, convert, optimize, set
   metadata/covers, standardize a directory in one command.
-- **Web UI** (`booktool serve`) — browse, search, read EPUBs in the
-  browser.
+- **Web UI** (`booktool serve`) — browse, search, triage, edit, and
+  read books in the browser. Supports EPUB, MOBI, AZW3, PDF, and the
+  comic archive formats (CBZ / CBR / CB7 / CBT).
 - **TUI** (`booktool tui`) — same library, plaintext reader, full
   keyboard control.
 
@@ -27,6 +28,9 @@ in one SQLite file.
 - sqlite3 (`brew install sqlite`)
 - chafa, optional, for `cover` command (`brew install chafa`)
 - Calibre, optional, for conversion directions libmobi can't handle
+- sevenzip, optional, for **CBR / CB7 / CBT** covers and metadata
+  (`brew install sevenzip` on macOS, `apt install p7zip-full` on Linux).
+  CBZ doesn't need it — miniz is vendored.
 
 ## Build
 
@@ -35,8 +39,10 @@ mise install            # installs Zig 0.16 + zls
 zig build               # produces ./zig-out/bin/booktool (also re-links on rebuild)
 zig build -Doptimize=ReleaseFast   # optimized build
 zig build run -- info SOMEFILE.epub
-zig build test          # runs the unit-test suite (66 tests)
-./scripts/smoke.sh      # end-to-end checks against tests/fixtures (19)
+zig build test          # runs the unit-test suite (109 tests)
+./scripts/smoke.sh      # end-to-end checks against tests/fixtures (25)
+./scripts/smoke-web.sh  # web-layer smoke against a live server (23)
+./scripts/test-e2e.sh   # Playwright browser end-to-end (15; needs `npm i playwright`)
 ```
 
 To force a clean rebuild: `rm -rf .zig-cache zig-out && zig build`.
@@ -44,7 +50,7 @@ To force a clean rebuild: `rm -rf .zig-cache zig-out && zig build`.
 ### Dev loop (watch + incremental)
 
 ```sh
-zig build --watch -fincremental --summary none
+zig build --watch -fincremental -Doptimize=ReleaseFast --summary none
 ```
 
 Rebuilds on file change, reuses the incremental cache between runs, and
@@ -127,6 +133,24 @@ booktool optimize ~/Downloads/books/*.epub # shave a percent or two
 ```sh
 booktool standardize ~/Downloads/books --apply
 ```
+
+### Hands-off maintenance
+
+Once a library is set up, schedule the recurring chores instead of
+running them manually:
+
+```sh
+booktool schedule add nightly-rescan @daily rescan-all
+booktool schedule add catch-new-meta "every 6h" enrich-missing
+booktool schedule list                     # show what's configured
+booktool schedule run 1                    # fire job 1 now
+booktool schedule daemon                   # run the scheduler without the web UI
+```
+
+The same schedule definitions are picked up by `booktool serve` (an
+in-process thread checks every minute) or by `booktool schedule
+daemon` when you don't want the HTTP server running. Definitions
+live in the catalog DB, so both modes share the same list.
 
 ## Roadmap
 

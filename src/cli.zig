@@ -21,6 +21,8 @@ const optimize_cmd = @import("commands/optimize.zig");
 const setcover_cmd = @import("commands/setcover.zig");
 const setmeta_cmd = @import("commands/setmeta.zig");
 const standardize_cmd = @import("commands/standardize.zig");
+const sources_cmd = @import("commands/sources.zig");
+const schedule_cmd = @import("commands/schedule.zig");
 
 pub const Context = struct {
     arena: std.mem.Allocator,
@@ -63,6 +65,8 @@ pub fn run(ctx: Context) !u8 {
     if (eq(cmd, "set-cover")) return setcover_cmd.run(ctx, rest);
     if (eq(cmd, "set-meta")) return setmeta_cmd.run(ctx, rest);
     if (eq(cmd, "standardize")) return standardize_cmd.run(ctx, rest);
+    if (eq(cmd, "sources")) return sources_cmd.run(ctx, rest);
+    if (eq(cmd, "schedule")) return schedule_cmd.run(ctx, rest);
 
     try ctx.stderr.print("unknown command: {s}\n", .{cmd});
     try printUsage(ctx.stderr);
@@ -96,6 +100,8 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\  set-cover FILE IMG     Replace embedded cover image
         \\  set-meta FILE [...]    Edit embedded title/author/series/year
         \\  standardize DIR        scan → enrich → dedup → rename → optimize
+        \\  sources <sub>          Manage watched folders (add/list/rescan/remove)
+        \\  schedule <sub>         Manage scheduled maintenance jobs (list/add/rm/run/daemon)
         \\  help                   Show this help
         \\  version                Print version
         \\

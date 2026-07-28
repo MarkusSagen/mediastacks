@@ -1,19 +1,17 @@
 //! `booktool set-cover FILE IMAGE` — replace the embedded cover.
 //!
-//! EPUB: re-pack the ZIP, swapping the bytes of the manifest entry
-//! marked as `cover-image` (EPUB3) or referenced by `<meta name="cover">`
-//! (EPUB2). Image content type is detected from magic bytes.
-//!
-//! MOBI/AZW3: shell out to `mobimeta -s cover-image=IMAGE FILE` (libmobi
-//! tool). Falls back gracefully if `mobimeta` is missing.
+//! EPUB writes the bytes back into the archive (via the handler
+//! vtable's `writeCover`). MOBI/AZW3 — libmobi has no cover-write
+//! API — write a library-side override at
+//! `$XDG_DATA_HOME/booktool/covers/<id>.<ext>` instead, which the
+//! booktool catalog renders everywhere.
 
 const std = @import("std");
 const cli = @import("../cli.zig");
 const format_mod = @import("../formats/format.zig");
-const zip = @import("../ffi/miniz.zig");
-const xml = @import("../ffi/libxml2.zig");
-
-const OPF_NS = "http://www.idpf.org/2007/opf";
+const catalog_mod = @import("../core/catalog.zig");
+const cover_store = @import("../core/cover_store.zig");
+const registry = @import("../formats/registry.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len < 2) {
@@ -28,147 +26,67 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         return 2;
     };
 
-    return switch (fmt) {
-        .epub => setEpubCover(ctx, book_path, image_path),
-        .mobi, .azw3 => setMobiCover(ctx, book_path, image_path),
+    const new_image = try readWhole(ctx.arena, image_path);
+    const h = registry.forFormat(fmt) orelse {
+        try ctx.stderr.print("set-cover: no handler for {s}\n", .{@tagName(fmt)});
+        return 2;
+    };
+
+    h.writeCover(ctx.arena, ctx.io, book_path, new_image) catch |err| switch (err) {
+        error.NotSupported => return setOverrideCover(ctx, book_path, new_image),
         else => {
-            try ctx.stderr.print("set-cover not supported for {s}\n", .{@tagName(fmt)});
+            try ctx.stderr.print("{s}: {s}\n", .{ book_path, @errorName(err) });
             return 2;
         },
     };
-}
 
-fn setMobiCover(ctx: cli.Context, book_path: []const u8, image_path: []const u8) !u8 {
-    _ = image_path;
-    // libmobi's mobimeta tool only knows about a fixed list of named
-    // metadata keys (title/author/publisher/description/isbn/subject/
-    // publishdate/review/contributor/copyright/asin/language/imprint).
-    // 'cover' and 'thumbnail' are not among them, and libmobi itself
-    // exposes no public cover-write API. Honest answer is "convert
-    // first" — the resulting EPUB *can* have its cover replaced.
-    try ctx.stderr.print(
-        "set-cover is not supported for {s}.\n  libmobi does not expose a cover-write API. Convert\n  '{s}' to EPUB first (booktool convert --to epub) and try again.\n",
-        .{ "MOBI/AZW3", book_path },
-    );
-    return 2;
-}
+    if (catalog_mod.defaultPath(ctx.arena, ctx.env)) |catalog_path| {
+        if (catalog_mod.Catalog.open(catalog_path)) |cat_v| {
+            var cat = cat_v;
+            defer cat.close();
+            if (cat.getBookByPath(ctx.arena, book_path) catch null) |book| {
+                cover_store.write(ctx.arena, ctx.env, book.id, new_image) catch {};
+            }
+        } else |_| {}
+    } else |_| {}
 
-fn setEpubCover(ctx: cli.Context, book_path: []const u8, image_path: []const u8) !u8 {
-    const new_image = try readWhole(ctx.arena, image_path);
-    applyToEpub(ctx.arena, book_path, new_image) catch |err| {
-        try ctx.stderr.print("{s}: {s}\n", .{ book_path, @errorName(err) });
-        return 2;
-    };
     try ctx.stdout.print("replaced cover in {s}\n", .{book_path});
     return 0;
 }
 
-/// I/O-free EPUB cover replacement for use by the web API. `image_bytes`
-/// is the raw bytes of the new cover (JPEG/PNG); the existing OPF's
-/// declared cover-image entry is overwritten with them and the archive
-/// is repacked.
-pub fn applyToEpub(arena: std.mem.Allocator, book_path: []const u8, image_bytes: []const u8) !void {
-    var reader: zip.ZipReader = .{};
-    try reader.open(book_path);
-    defer reader.close();
+/// Write a library-side cover override for the book at `book_path`.
+/// Used when the format's handler returns `error.NotSupported`
+/// (MOBI/AZW3/PDF/comics). Requires the file to have been scanned
+/// first so we have a stable book id to key off of.
+fn setOverrideCover(ctx: cli.Context, book_path: []const u8, new_image: []const u8) !u8 {
+    const catalog_path = try catalog_mod.defaultPath(ctx.arena, ctx.env);
+    var cat = catalog_mod.Catalog.open(catalog_path) catch |err| {
+        try ctx.stderr.print("cannot open catalog ({s}): {s}\n", .{ catalog_path, @errorName(err) });
+        return 2;
+    };
+    defer cat.close();
 
-    const container_bytes = try reader.readMember(arena, "META-INF/container.xml");
-    var container = try xml.Doc.parseMemory(container_bytes);
-    defer container.deinit();
-    const opf_path = (try container.firstString(
-        arena,
-        "c",
-        "urn:oasis:names:tc:opendocument:xmlns:container",
-        "//c:rootfile/@full-path",
-    )) orelse return error.NoOpf;
-    const opf_dir = std.fs.path.dirname(opf_path) orelse "";
+    const book = (try cat.getBookByPath(ctx.arena, book_path)) orelse {
+        try ctx.stderr.print(
+            "no catalog row for {s}.\n  Run `booktool scan` on its directory first so the cover override\n  can be stored against a stable book id.\n",
+            .{book_path},
+        );
+        return 2;
+    };
 
-    const opf_bytes = try reader.readMember(arena, opf_path);
-    var opf = try xml.Doc.parseMemory(opf_bytes);
-    defer opf.deinit();
-
-    var cover_href = try opf.firstString(
-        arena,
-        "p",
-        OPF_NS,
-        "//p:item[contains(@properties,'cover-image')]/@href",
+    cover_store.write(ctx.arena, ctx.env, book.id, new_image) catch |err| {
+        try ctx.stderr.print("override write failed: {s}\n", .{@errorName(err)});
+        return 2;
+    };
+    const override_dir = try cover_store.dirPath(ctx.arena, ctx.env);
+    try ctx.stdout.print(
+        "cover override written to {s}/{d}.{s}\n" ++
+            "note: this format doesn't support in-file cover editing.\n" ++
+            "      booktool will show this cover everywhere, but {s} is unchanged.\n" ++
+            "      Run `booktool convert {s} --to epub` to bake it in.\n",
+        .{ override_dir, book.id, cover_store.sniff(new_image).asString(), book_path, book_path },
     );
-    if (cover_href == null) {
-        const cover_id = try opf.firstString(arena, "p", OPF_NS, "//p:meta[@name='cover']/@content");
-        if (cover_id) |id| {
-            var xp: [256]u8 = undefined;
-            const xpath = try std.fmt.bufPrint(&xp, "//p:item[@id='{s}']/@href", .{id});
-            cover_href = try opf.firstString(arena, "p", OPF_NS, xpath);
-        }
-    }
-    const href = cover_href orelse return error.NoCoverItem;
-
-    const cover_member_path = if (opf_dir.len > 0)
-        try std.fs.path.join(arena, &.{ opf_dir, href })
-    else
-        try arena.dupe(u8, href);
-
-    const tmp_path = try std.fmt.allocPrint(arena, "{s}.cover.tmp", .{book_path});
-    var writer: zip.ZipWriter = .{};
-    try writer.create(tmp_path);
-    errdefer writer.abort();
-
-    const Walk = struct {
-        arena: std.mem.Allocator,
-        reader: *zip.ZipReader,
-        writer: *zip.ZipWriter,
-        cover_path: []const u8,
-        new_image: []const u8,
-        replaced: bool = false,
-
-        fn add(self: *@This(), _: u32, name: []const u8, _: u64) anyerror!void {
-            const level: zip.ZipWriter.Compression =
-                if (std.mem.eql(u8, name, "mimetype")) .none else .best;
-            if (std.mem.eql(u8, name, self.cover_path)) {
-                try self.writer.addBytes(name, self.new_image, level);
-                self.replaced = true;
-            } else {
-                const bytes = try self.reader.readMember(self.arena, name);
-                defer self.arena.free(bytes);
-                try self.writer.addBytes(name, bytes, level);
-            }
-        }
-    };
-    var walk_ctx = Walk{
-        .arena = arena,
-        .reader = &reader,
-        .writer = &writer,
-        .cover_path = cover_member_path,
-        .new_image = image_bytes,
-    };
-    try reader.forEachMember(&walk_ctx, Walk.add);
-    if (!walk_ctx.replaced) {
-        writer.abort();
-        unlinkPath(tmp_path);
-        return error.CoverMemberMissing;
-    }
-    try writer.finalizeAndClose();
-
-    var src_buf: [4096]u8 = undefined;
-    var dst_buf: [4096]u8 = undefined;
-    const src_z = try std.fmt.bufPrintZ(&src_buf, "{s}", .{tmp_path});
-    const dst_z = try std.fmt.bufPrintZ(&dst_buf, "{s}", .{book_path});
-    if (std.c.rename(src_z.ptr, dst_z.ptr) != 0) {
-        unlinkPath(tmp_path);
-        return error.RenameFailed;
-    }
-}
-
-fn cleanupTmp(path: []const u8) void {
-    var buf: [4096]u8 = undefined;
-    const z = std.fmt.bufPrintZ(&buf, "{s}", .{path}) catch return;
-    _ = std.c.unlink(z.ptr);
-}
-
-fn unlinkPath(path: []const u8) void {
-    var buf: [4096]u8 = undefined;
-    const z = std.fmt.bufPrintZ(&buf, "{s}", .{path}) catch return;
-    _ = std.c.unlink(z.ptr);
+    return 0;
 }
 
 fn readWhole(arena: std.mem.Allocator, path: []const u8) ![]u8 {

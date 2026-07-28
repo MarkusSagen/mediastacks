@@ -9,6 +9,10 @@
 *.azw
 *.prc
 *.pdf
+*.cbz
+*.cbr
+*.cb7
+*.cbt
 
 # Keep the structural docs.
 !.gitignore

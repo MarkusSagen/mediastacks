@@ -27,8 +27,6 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     const tmp_path_z = try std.fmt.bufPrintZ(&unlink_buf, "{s}", .{tmp_path});
     defer _ = std.c.unlink(tmp_path_z.ptr);
 
-    // Flush our buffered stdout before handing the terminal off to
-    // chafa — otherwise our text and chafa's output can interleave.
     try ctx.stdout.flush();
 
     const result = std.process.run(ctx.arena, ctx.io, .{

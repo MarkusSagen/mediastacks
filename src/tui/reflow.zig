@@ -11,7 +11,6 @@ pub fn wrap(allocator: std.mem.Allocator, text: []const u8, width: usize) ![][]c
     if (width < 8) return error.WidthTooSmall;
     var lines: std.ArrayList([]const u8) = .empty;
 
-    // Split into paragraphs on blank lines.
     var paragraphs = std.mem.splitSequence(u8, text, "\n\n");
     var first_para = true;
     while (paragraphs.next()) |para_raw| {
@@ -41,12 +40,10 @@ fn wrapParagraph(
             try current.appendSlice(allocator, word);
             continue;
         }
-        // Doesn't fit. Flush current line (if any).
         if (current.items.len > 0) {
             try out.append(allocator, try allocator.dupe(u8, current.items));
             current.clearRetainingCapacity();
         }
-        // Hard-break very long words.
         if (word.len > width) {
             var i: usize = 0;
             while (i + width <= word.len) : (i += width) {
@@ -68,11 +65,10 @@ pub fn paginate(lines: []const []const u8, height: usize) usize {
     return @max(pages, 1);
 }
 
-// ---- Tests --------------------------------------------------------------
-
 test "wrap respects width and preserves paragraph breaks" {
     const alloc = std.testing.allocator;
-    const lines = try wrap(alloc,
+    const lines = try wrap(
+        alloc,
         "The quick brown fox jumps over the lazy dog.\n\nThis is paragraph two of the test.",
         20,
     );
@@ -80,13 +76,13 @@ test "wrap respects width and preserves paragraph breaks" {
         for (lines) |l| alloc.free(l);
         alloc.free(lines);
     }
-    // Expect at least: 2-3 lines for para 1, 1 blank, 2 lines for para 2
     try std.testing.expect(lines.len >= 5);
-    // Check no line exceeds the limit.
     for (lines) |l| try std.testing.expect(l.len <= 20);
-    // Find the blank separator.
     var found_blank = false;
-    for (lines) |l| if (l.len == 0) { found_blank = true; break; };
+    for (lines) |l| if (l.len == 0) {
+        found_blank = true;
+        break;
+    };
     try std.testing.expect(found_blank);
 }
 

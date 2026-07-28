@@ -14,13 +14,7 @@ const std = @import("std");
 const cli = @import("../cli.zig");
 const catalog_mod = @import("../core/catalog.zig");
 const template_mod = @import("../core/template.zig");
-
-const RenamePlan = struct {
-    id: i64,
-    src: []const u8,
-    dst: []const u8,
-    same: bool,
-};
+const standardize = @import("../core/standardize.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     var apply = false;
@@ -54,46 +48,21 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     var cat = try catalog_mod.Catalog.open(catalog_path);
     defer cat.close();
 
-    const books = try cat.listBooks(ctx.arena);
-    if (books.len == 0) {
+    const plans = try standardize.planAll(ctx.arena, &cat, template_str);
+    if (plans.len == 0) {
         try ctx.stdout.print("(catalog is empty)\n", .{});
         return 0;
     }
-
-    var plans: std.ArrayList(RenamePlan) = .empty;
-    var unrenameable: u32 = 0;
-
-    for (books) |book| {
-        const new_rel = template_mod.render(ctx.arena, template_str, book.metadata, book.format) catch |err| switch (err) {
-            template_mod.Error.IncompleteMetadata => {
-                unrenameable += 1;
-                continue;
-            },
-            else => return err,
-        };
-        const parent = std.fs.path.dirname(book.path) orelse ".";
-        const dst_path = try std.fs.path.join(ctx.arena, &.{ parent, new_rel });
-        const same = std.mem.eql(u8, book.path, dst_path);
-        try plans.append(ctx.arena, .{
-            .id = book.id,
-            .src = book.path,
-            .dst = dst_path,
-            .same = same,
-        });
-    }
+    const counts = standardize.summarize(plans);
 
     var changed: u32 = 0;
-    var skipped_same: u32 = 0;
     var errors: u32 = 0;
 
-    for (plans.items) |plan| {
-        if (plan.same) {
-            skipped_same += 1;
-            continue;
-        }
-        try ctx.stdout.print("id={d}\n  - {s}\n  + {s}\n", .{ plan.id, plan.src, plan.dst });
+    for (plans) |plan| {
+        if (plan.dst == null or plan.same) continue;
+        try ctx.stdout.print("id={d}\n  - {s}\n  + {s}\n", .{ plan.id, plan.src, plan.dst.? });
         if (apply) {
-            executeRename(&cat, plan) catch |err| {
+            standardize.applyOne(&cat, plan) catch |err| {
                 try ctx.stderr.print("    ! {s}\n", .{@errorName(err)});
                 errors += 1;
                 continue;
@@ -105,13 +74,12 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (apply) {
         try ctx.stdout.print(
             "\nrenamed={d} unchanged={d} unrenameable={d} errors={d}\n",
-            .{ changed, skipped_same, unrenameable, errors },
+            .{ changed, counts.same, counts.unrenameable, errors },
         );
     } else {
-        const would_change = plans.items.len - skipped_same;
         try ctx.stdout.print(
             "\n{d} would be renamed, {d} already canonical, {d} unrenameable (missing metadata)\n",
-            .{ would_change, skipped_same, unrenameable },
+            .{ counts.would_change, counts.same, counts.unrenameable },
         );
         try ctx.stdout.print("(dry run — pass --apply to execute)\n", .{});
     }
@@ -119,10 +87,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 }
 
 fn presetTemplate(name: []const u8) ![]const u8 {
-    if (std.mem.eql(u8, name, "default")) return template_mod.DEFAULT_TEMPLATE;
-    if (std.mem.eql(u8, name, "flat")) return template_mod.FLAT_TEMPLATE;
-    if (std.mem.eql(u8, name, "series-dir")) return template_mod.SERIES_DIR_TEMPLATE;
-    return error.UnknownPreset;
+    return standardize.presetTemplate(name);
 }
 
 fn printPresets(w: *std.Io.Writer) !void {
@@ -154,38 +119,4 @@ fn printHelp(w: *std.Io.Writer) !void {
         \\Templates may include '/' to nest into subdirectories (series-dir does).
         \\
     );
-}
-
-fn executeRename(cat: *catalog_mod.Catalog, plan: RenamePlan) !void {
-    // Ensure the destination's parent directory exists.
-    if (std.fs.path.dirname(plan.dst)) |parent| {
-        try mkdirParents(parent);
-    }
-
-    var src_buf: [4096]u8 = undefined;
-    var dst_buf: [4096]u8 = undefined;
-    const src_z = try std.fmt.bufPrintZ(&src_buf, "{s}", .{plan.src});
-    const dst_z = try std.fmt.bufPrintZ(&dst_buf, "{s}", .{plan.dst});
-
-    if (std.c.access(dst_z.ptr, 0) == 0) return error.DestinationExists;
-    if (std.c.rename(src_z.ptr, dst_z.ptr) != 0) return error.RenameFailed;
-    try cat.updateBookPath(plan.id, plan.dst);
-}
-
-/// Create all parent directories of `path` (mkdir -p semantics).
-fn mkdirParents(path: []const u8) !void {
-    var buf: [4096]u8 = undefined;
-    if (path.len >= buf.len) return error.PathTooLong;
-    @memcpy(buf[0..path.len], path);
-    buf[path.len] = 0;
-
-    // Walk components, mkdir each level.
-    var i: usize = 1; // skip leading '/'
-    while (i <= path.len) : (i += 1) {
-        if (i == path.len or path[i] == '/') {
-            buf[i] = 0;
-            _ = std.c.mkdir(@ptrCast(&buf), 0o755);
-            if (i < path.len) buf[i] = '/';
-        }
-    }
 }

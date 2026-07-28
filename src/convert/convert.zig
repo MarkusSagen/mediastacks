@@ -22,6 +22,7 @@ pub fn pickEngine(src: meta.Format, dst: meta.Format) ?Engine {
         },
         .epub => .calibre,
         .pdf => .calibre,
+        .cbz, .cbr, .cb7, .cbt => null,
         .unknown => null,
     };
 }

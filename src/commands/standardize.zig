@@ -38,12 +38,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         const a = args[i];
-        if (std.mem.eql(u8, a, "--apply")) apply = true
-        else if (std.mem.eql(u8, a, "--no-enrich")) no_enrich = true
-        else if (std.mem.eql(u8, a, "--no-dedup")) no_dedup = true
-        else if (std.mem.eql(u8, a, "--no-rename")) no_rename = true
-        else if (std.mem.eql(u8, a, "--no-optimize")) no_optimize = true
-        else if (std.mem.eql(u8, a, "--template") and i + 1 < args.len) {
+        if (std.mem.eql(u8, a, "--apply")) apply = true else if (std.mem.eql(u8, a, "--no-enrich")) no_enrich = true else if (std.mem.eql(u8, a, "--no-dedup")) no_dedup = true else if (std.mem.eql(u8, a, "--no-rename")) no_rename = true else if (std.mem.eql(u8, a, "--no-optimize")) no_optimize = true else if (std.mem.eql(u8, a, "--template") and i + 1 < args.len) {
             i += 1;
             template = args[i];
         } else if (std.mem.eql(u8, a, "-h") or std.mem.eql(u8, a, "--help")) {
@@ -61,24 +56,20 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         return 1;
     };
 
-    // 1) scan
     try section(ctx, "scan");
     if (try scan_cmd.run(ctx, &.{target}) != 0) return 1;
 
-    // 2) enrich
     if (!no_enrich) {
         try section(ctx, "enrich");
         _ = try enrich_cmd.run(ctx, &.{});
     } else try ctx.stdout.print("\n(skipping enrich)\n", .{});
 
-    // 3) dedup
     if (!no_dedup) {
         try section(ctx, "dedup");
         const dedup_args: []const []const u8 = if (apply) &.{"--apply"} else &.{};
         _ = try dedup_cmd.run(ctx, dedup_args);
     } else try ctx.stdout.print("\n(skipping dedup)\n", .{});
 
-    // 4) rename
     if (!no_rename) {
         try section(ctx, "rename");
         var rargs: std.ArrayList([]const u8) = .empty;
@@ -90,7 +81,6 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         _ = try rename_cmd.run(ctx, rargs.items);
     } else try ctx.stdout.print("\n(skipping rename)\n", .{});
 
-    // 5) optimize — only when --apply (in-place rewrite is real work).
     if (!no_optimize and apply) {
         try section(ctx, "optimize");
         const catalog_path = try catalog_mod.defaultPath(ctx.arena, ctx.env);
