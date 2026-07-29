@@ -12,9 +12,9 @@ A kind-aware media organizer. One shared Zig core library, two binaries:
     keyboard control.
 - **`shelve`** — the general media organizer. Point it at a messy
   download folder and it groups, dedups, and relabels TV & movies into
-  a clean, templated library: `shelve organize DIR [--apply]`,
-  `shelve undo`. Offline-first; deletes go to a trash dir; every apply
-  is reversible via an undo journal.
+  a clean, templated library: `shelve organize DIR` (applies by default;
+  add `--dry-run` to preview), `shelve undo`. Offline-first; deletes go
+  to a trash dir; every run is reversible via an undo journal.
 
 Written in Zig 0.16. Small, deliberately. Book state lives in one
 SQLite file; the organizer works directly on the filesystem.

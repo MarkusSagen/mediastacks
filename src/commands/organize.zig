@@ -11,7 +11,6 @@ const apply_mod = @import("../core/apply.zig");
 const Opts = struct {
     dir: ?[]const u8 = null,
     to: ?[]const u8 = null,
-    apply: bool = false,
     dry_run: bool = false,
     plan_out: ?[]const u8 = null,
     from: ?[]const u8 = null,
@@ -34,9 +33,7 @@ fn parseArgs(args: []const []const u8) !Opts {
             i += 1;
             if (i >= args.len) return error.MissingValue;
             o.to = args[i];
-        } else if (std.mem.eql(u8, a, "--apply")) {
-            o.apply = true;
-        } else if (std.mem.eql(u8, a, "--dry-run")) {
+        } else if (std.mem.eql(u8, a, "--dry-run") or std.mem.eql(u8, a, "-n")) {
             o.dry_run = true;
         } else if (std.mem.eql(u8, a, "--plan")) {
             i += 1;
@@ -114,13 +111,12 @@ fn printPlan(w: *std.Io.Writer, p: plan_mod.Plan) !void {
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     const opts = parseArgs(args) catch |err| {
         try ctx.stderr.print("bad arguments: {s}\n", .{@errorName(err)});
-        try ctx.stderr.print("usage: shelve organize DIR [--to LIB] [--apply | --dry-run] [--plan FILE] [--from FILE] [--on-conflict skip|suffix|overwrite]\n", .{});
+        try ctx.stderr.print("usage: shelve organize DIR [--dry-run|-n] [--to LIB] [--plan FILE] [--from FILE] [--on-conflict skip|suffix|overwrite]\n", .{});
         return 1;
     };
 
-    // Dry-run is the default; --dry-run makes it explicit and overrides
-    // --apply as a safety brake.
-    const do_apply = opts.apply and !opts.dry_run;
+    // Applying is the default (rsync-style); --dry-run only previews.
+    const do_apply = !opts.dry_run;
 
     var cfg = try config.load(ctx.arena, ctx.env);
     if (opts.to) |to| cfg.library_root = to;
@@ -157,42 +153,43 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 
     try printPlan(ctx.stdout, p);
 
-    if (do_apply) {
-        const res = apply_mod.apply(ctx.arena, p, opts.on_conflict, ctx.env) catch |err| {
-            try ctx.stderr.print("apply failed: {s}\n", .{@errorName(err)});
-            return 2;
-        };
-        try ctx.stdout.print(
-            "\napplied: moved={d} trashed={d} skipped={d}\njournal: {s}\n",
-            .{ res.moved, res.trashed, res.skipped, res.journal_path },
-        );
+    if (!do_apply) {
+        try ctx.stdout.print("\n(dry-run — nothing changed; drop --dry-run to apply)\n", .{});
+        return 0;
     }
+
+    const res = apply_mod.apply(ctx.arena, p, opts.on_conflict, ctx.env) catch |err| {
+        try ctx.stderr.print("apply failed: {s}\n", .{@errorName(err)});
+        return 2;
+    };
+    try ctx.stdout.print(
+        "\napplied: moved={d} trashed={d} skipped={d}\nundo with: shelve undo   (journal: {s})\n",
+        .{ res.moved, res.trashed, res.skipped, res.journal_path },
+    );
     return 0;
 }
 
 const t = std.testing;
 
 test "parseArgs reads flags" {
-    const args = [_][]const u8{ "/downloads/show", "--to", "/lib", "--apply", "--on-conflict", "suffix" };
+    const args = [_][]const u8{ "/downloads/show", "--to", "/lib", "--on-conflict", "suffix" };
     const opts = try parseArgs(args[0..]);
     try t.expectEqualStrings("/downloads/show", opts.dir.?);
     try t.expectEqualStrings("/lib", opts.to.?);
-    try t.expect(opts.apply);
     try t.expectEqual(apply_mod.OnConflict.suffix, opts.on_conflict);
 }
 
-test "parseArgs defaults: dry-run, skip conflicts" {
+test "parseArgs default applies (dry_run off)" {
     const args = [_][]const u8{"/x"};
     const opts = try parseArgs(args[0..]);
-    try t.expect(!opts.apply);
-    try t.expect(!opts.dry_run);
+    try t.expect(!opts.dry_run); // run() applies when dry_run is false
     try t.expectEqual(apply_mod.OnConflict.skip, opts.on_conflict);
     try t.expect(opts.from == null);
 }
 
-test "parseArgs --dry-run parses" {
-    const args = [_][]const u8{ "/x", "--apply", "--dry-run" };
-    const opts = try parseArgs(args[0..]);
-    try t.expect(opts.apply);
-    try t.expect(opts.dry_run); // run() lets dry_run override apply
+test "parseArgs --dry-run and -n both set dry_run" {
+    const long = try parseArgs((&[_][]const u8{ "/x", "--dry-run" })[0..]);
+    try t.expect(long.dry_run);
+    const short = try parseArgs((&[_][]const u8{ "/x", "-n" })[0..]);
+    try t.expect(short.dry_run);
 }

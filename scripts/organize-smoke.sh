@@ -48,7 +48,7 @@ check() {
 }
 
 echo "== dry-run =="
-OUT="$("$SHELVE" organize "$SRC" --to "$LIB")"
+OUT="$("$SHELVE" organize "$SRC" --to "$LIB" --dry-run)"
 echo "$OUT"
 check "plan: move=3" 'grep -q "move=3" <<<"$OUT"'
 check "plan: trash=1" 'grep -q "trash=1" <<<"$OUT"'
@@ -56,8 +56,8 @@ check "plan: dup=1" 'grep -q "dup=1" <<<"$OUT"'
 check "dry-run did not create the library" '[[ ! -d "$LIB" ]]'
 check "dry-run did not move .DS_Store" '[[ -f "$SRC/.DS_Store" ]]'
 
-echo "== apply =="
-"$SHELVE" organize "$SRC" --to "$LIB" --apply >/dev/null
+echo "== apply (default, no flag) =="
+"$SHELVE" organize "$SRC" --to "$LIB" >/dev/null
 check "S01E05 episode landed in library" 'find "$LIB/TV" -iname "*S01E05*.mkv" | grep -q .'
 check "S01E04 episode landed in library" 'find "$LIB/TV" -iname "*S01E04*.mkv" | grep -q .'
 check "subtitle sidecar landed alongside" 'find "$LIB/TV" -iname "*S01E05*.srt" | grep -q .'

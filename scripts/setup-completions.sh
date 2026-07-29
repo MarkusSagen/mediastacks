@@ -32,7 +32,7 @@ new_block = '''            elif [[ $recipe ]]; then
                 local prev=${words[CURRENT-1]}
                 local cur=${words[CURRENT]}
                 case $recipe in
-                    organize|organize-apply)
+                    organize)
                         case $prev in
                             --on-conflict)
                                 local -a v=(${(f)"$(just list-values on-conflict 2>/dev/null)"})
@@ -44,12 +44,11 @@ new_block = '''            elif [[ $recipe ]]; then
                             *)
                                 if [[ $cur == -* ]]; then
                                     local -a flags=(
+                                        '--dry-run:preview only, change nothing'
                                         '--to:library root'
-                                        '--apply:execute the plan'
-                                        '--dry-run:preview only (overrides --apply)'
                                         '--on-conflict:collision policy'
-                                        '--plan:write the plan as JSON'
-                                        '--from:apply/inspect a plan JSON'
+                                        '--plan:also write the plan as JSON'
+                                        '--from:use a plan JSON instead of scanning'
                                     )
                                     _describe 'flag' flags && ret=0
                                 else
@@ -112,13 +111,13 @@ elif [ "$shell" = "bash" ]; then
 _stacks_just_recipe_args() {
     local recipe="$1"; local cur="${COMP_WORDS[COMP_CWORD]}"; local prev="${COMP_WORDS[COMP_CWORD-1]}"
     case "$recipe" in
-        organize|organize-apply)
+        organize)
             case "$prev" in
                 --on-conflict) COMPREPLY=($(compgen -W "$(just list-values on-conflict 2>/dev/null)" -- "$cur")) ;;
                 --to|--plan|--from) COMPREPLY=($(compgen -f -- "$cur")) ;;
                 *)
                     if [[ "$cur" == -* ]]; then
-                        COMPREPLY=($(compgen -W "--to --apply --dry-run --on-conflict --plan --from" -- "$cur"))
+                        COMPREPLY=($(compgen -W "--dry-run --to --on-conflict --plan --from" -- "$cur"))
                     else
                         COMPREPLY=($(compgen -f -- "$cur"))
                     fi ;;

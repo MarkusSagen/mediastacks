@@ -174,22 +174,17 @@ catalog-info:
 
 # ───────── media organizer (shelve) ────────────────────────────────
 
-# Preview a TV/movie reorg of DIR — prints the plan, moves nothing.
-# FLAGS (all optional): --to LIB  --apply  --dry-run
+# Reorganize DIR's TV/movies into the library. Applies by default;
+# pass --dry-run (-n) to preview. Undo any run with `just undo`.
+# FLAGS (all optional): --dry-run  --to LIB
 #   --on-conflict skip|suffix|overwrite  --plan FILE  --from FILE
-# e.g. `just organize ~/Downloads/down/Show --to ~/Media`
+# e.g. `just organize ~/Downloads/down/Show --dry-run`
+#      `just organize ~/Downloads/down/Show --to ~/Media`
 organize DIR="" *FLAGS="": build
-    @if [ -z "{{DIR}}" ]; then echo "usage: just organize DIR [--to LIB] [--apply] [--on-conflict skip|suffix|overwrite] [--plan FILE] [--from FILE]"; exit 1; fi
+    @if [ -z "{{DIR}}" ]; then echo "usage: just organize DIR [--dry-run] [--to LIB] [--on-conflict skip|suffix|overwrite] [--plan FILE] [--from FILE]"; exit 1; fi
     ./zig-out/bin/shelve organize "{{DIR}}" {{FLAGS}}
 
-# Apply a reorg: move DIR's media into the library + write an undo journal.
-# Same FLAGS as `organize` (adds --apply for you). e.g.
-#   `just organize-apply ~/Downloads/down/Show --to ~/Media --on-conflict suffix`
-organize-apply DIR="" *FLAGS="": build
-    @if [ -z "{{DIR}}" ]; then echo "usage: just organize-apply DIR [--to LIB] [--on-conflict skip|suffix|overwrite]"; exit 1; fi
-    ./zig-out/bin/shelve organize "{{DIR}}" --apply {{FLAGS}}
-
-# Reverse the most recent `shelve organize --apply` (from its undo journal).
+# Reverse the most recent `just organize` (from its undo journal).
 undo: build
     ./zig-out/bin/shelve undo
 

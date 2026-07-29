@@ -44,14 +44,13 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\  shelve <command> [args]
         \\
         \\Commands:
-        \\  organize DIR [flags]   Plan a reorganization (dry-run by default)
+        \\  organize DIR [flags]   Reorganize DIR into the library (applies by default)
+        \\    --dry-run, -n          Preview only — print the plan, change nothing
         \\    --to LIB               Override the library root
-        \\    --apply                Execute the plan (move + journal)
-        \\    --dry-run              Preview only (the default; overrides --apply)
-        \\    --plan FILE            Write the plan as JSON
-        \\    --from FILE            Apply/inspect a plan JSON instead of scanning
         \\    --on-conflict WHICH    skip (default) | suffix | overwrite
-        \\  undo                   Reverse the most recent apply
+        \\    --plan FILE            Also write the plan as JSON
+        \\    --from FILE            Use a plan JSON instead of scanning DIR
+        \\  undo                   Reverse the most recent organize
         \\  help                   Show this help
         \\  version                Print version
         \\
