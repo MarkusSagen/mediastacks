@@ -11,6 +11,7 @@ pub const kind = @import("core/kind.zig");
 pub const classify = @import("core/classify.zig");
 pub const tv = @import("kinds/tv.zig");
 pub const movie = @import("kinds/movie.zig");
+pub const mediascore = @import("core/mediascore.zig");
 pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
 pub const dedup = @import("core/dedup.zig");
@@ -54,6 +55,7 @@ test {
     _ = classify;
     _ = tv;
     _ = movie;
+    _ = mediascore;
     _ = metadata;
     _ = catalog;
     _ = dedup;
