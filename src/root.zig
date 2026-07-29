@@ -7,6 +7,7 @@ const std = @import("std");
 
 pub const cli = @import("cli.zig");
 
+pub const kind = @import("core/kind.zig");
 pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
 pub const dedup = @import("core/dedup.zig");
@@ -46,6 +47,7 @@ pub const web_api = @import("web/api.zig");
 
 test {
     std.testing.refAllDecls(@This());
+    _ = kind;
     _ = metadata;
     _ = catalog;
     _ = dedup;
