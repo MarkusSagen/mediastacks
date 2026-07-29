@@ -127,7 +127,7 @@ pub fn applyOne(cat: *catalog_mod.Catalog, plan: RenamePlan) !void {
 /// so the data is on disk before src is unlinked. Returns any I/O
 /// error from open/read/write/fsync. The destination is removed on
 /// failure to avoid leaving half-written files around.
-fn copyAcrossDevices(src_z: [:0]const u8, dst_z: [:0]const u8) !void {
+pub fn copyAcrossDevices(src_z: [:0]const u8, dst_z: [:0]const u8) !void {
     const src_fd = std.c.open(src_z.ptr, .{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
     if (src_fd < 0) return error.OpenSrcFailed;
     defer _ = std.c.close(src_fd);
@@ -170,7 +170,7 @@ pub fn presetTemplate(name: []const u8) ![]const u8 {
 /// that doesn't already exist. POSIX-only; on Windows we'd need a
 /// different separator + a wide-char API. The CLI's previous home
 /// for this code is removed; this is the canonical implementation.
-fn mkdirParents(path: []const u8) !void {
+pub fn mkdirParents(path: []const u8) !void {
     var buf: [4096]u8 = undefined;
     if (path.len >= buf.len) return error.PathTooLong;
     @memcpy(buf[0..path.len], path);

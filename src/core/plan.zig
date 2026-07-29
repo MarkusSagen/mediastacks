@@ -40,7 +40,9 @@ pub fn toJson(alloc: std.mem.Allocator, plan: Plan) ![]u8 {
 /// Parse a Plan from JSON. Uses `alloc` leakily — pass an arena the caller
 /// owns.
 pub fn fromJson(alloc: std.mem.Allocator, bytes: []const u8) !Plan {
-    return std.json.parseFromSliceLeaky(Plan, alloc, bytes, .{});
+    // `.alloc_always` so parsed strings own their memory rather than
+    // aliasing `bytes` (which the caller may free).
+    return std.json.parseFromSliceLeaky(Plan, alloc, bytes, .{ .allocate = .alloc_always });
 }
 
 const t = std.testing;

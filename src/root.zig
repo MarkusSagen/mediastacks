@@ -15,6 +15,8 @@ pub const mediascore = @import("core/mediascore.zig");
 pub const plan = @import("core/plan.zig");
 pub const config = @import("core/config.zig");
 pub const group = @import("core/group.zig");
+pub const journal = @import("core/journal.zig");
+pub const apply = @import("core/apply.zig");
 pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
 pub const dedup = @import("core/dedup.zig");
@@ -62,6 +64,8 @@ test {
     _ = plan;
     _ = config;
     _ = group;
+    _ = journal;
+    _ = apply;
     _ = metadata;
     _ = catalog;
     _ = dedup;
