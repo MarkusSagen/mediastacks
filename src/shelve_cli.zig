@@ -47,6 +47,7 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\  organize DIR [flags]   Plan a reorganization (dry-run by default)
         \\    --to LIB               Override the library root
         \\    --apply                Execute the plan (move + journal)
+        \\    --dry-run              Preview only (the default; overrides --apply)
         \\    --plan FILE            Write the plan as JSON
         \\    --from FILE            Apply/inspect a plan JSON instead of scanning
         \\    --on-conflict WHICH    skip (default) | suffix | overwrite

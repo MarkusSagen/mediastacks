@@ -12,6 +12,7 @@ const Opts = struct {
     dir: ?[]const u8 = null,
     to: ?[]const u8 = null,
     apply: bool = false,
+    dry_run: bool = false,
     plan_out: ?[]const u8 = null,
     from: ?[]const u8 = null,
     on_conflict: apply_mod.OnConflict = .skip,
@@ -35,6 +36,8 @@ fn parseArgs(args: []const []const u8) !Opts {
             o.to = args[i];
         } else if (std.mem.eql(u8, a, "--apply")) {
             o.apply = true;
+        } else if (std.mem.eql(u8, a, "--dry-run")) {
+            o.dry_run = true;
         } else if (std.mem.eql(u8, a, "--plan")) {
             i += 1;
             if (i >= args.len) return error.MissingValue;
@@ -111,9 +114,13 @@ fn printPlan(w: *std.Io.Writer, p: plan_mod.Plan) !void {
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     const opts = parseArgs(args) catch |err| {
         try ctx.stderr.print("bad arguments: {s}\n", .{@errorName(err)});
-        try ctx.stderr.print("usage: shelve organize DIR [--to LIB] [--apply] [--plan FILE] [--from FILE] [--on-conflict skip|suffix|overwrite]\n", .{});
+        try ctx.stderr.print("usage: shelve organize DIR [--to LIB] [--apply | --dry-run] [--plan FILE] [--from FILE] [--on-conflict skip|suffix|overwrite]\n", .{});
         return 1;
     };
+
+    // Dry-run is the default; --dry-run makes it explicit and overrides
+    // --apply as a safety brake.
+    const do_apply = opts.apply and !opts.dry_run;
 
     var cfg = try config.load(ctx.arena, ctx.env);
     if (opts.to) |to| cfg.library_root = to;
@@ -150,7 +157,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 
     try printPlan(ctx.stdout, p);
 
-    if (opts.apply) {
+    if (do_apply) {
         const res = apply_mod.apply(ctx.arena, p, opts.on_conflict, ctx.env) catch |err| {
             try ctx.stderr.print("apply failed: {s}\n", .{@errorName(err)});
             return 2;
@@ -178,6 +185,14 @@ test "parseArgs defaults: dry-run, skip conflicts" {
     const args = [_][]const u8{"/x"};
     const opts = try parseArgs(args[0..]);
     try t.expect(!opts.apply);
+    try t.expect(!opts.dry_run);
     try t.expectEqual(apply_mod.OnConflict.skip, opts.on_conflict);
     try t.expect(opts.from == null);
+}
+
+test "parseArgs --dry-run parses" {
+    const args = [_][]const u8{ "/x", "--apply", "--dry-run" };
+    const opts = try parseArgs(args[0..]);
+    try t.expect(opts.apply);
+    try t.expect(opts.dry_run); // run() lets dry_run override apply
 }
