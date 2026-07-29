@@ -1,4 +1,4 @@
-# booktool — task runner. Run `just` (no args) for the recipe list.
+# stacks — task runner (biblio = books, shelve = media organizer). Run `just` (no args) for the recipe list.
 #
 # Convention: the comment line directly above each recipe is what
 # `just --list` shows, so it has to be a single-line summary. Longer
@@ -19,7 +19,7 @@ default:
 
 # ───────── build / verify ───────────────────────────────────────────
 
-# Debug build → `./zig-out/bin/booktool`.
+# Debug build → `./zig-out/bin/biblio`.
 build:
     zig build
 
@@ -74,7 +74,7 @@ clean:
 
 # Start the web UI on $PORT (default 8787). Ctrl+C stops it.
 serve PORT=PORT: build
-    ./zig-out/bin/booktool serve --port {{PORT}}
+    ./zig-out/bin/biblio serve --port {{PORT}}
 
 # 1s sleep gives `serve` time to bind the socket; bump it on a slow
 # box. The open is backgrounded with `&` so it's fire-and-forget and
@@ -87,87 +87,129 @@ dev PORT=PORT: build
        elif command -v xdg-open >/dev/null 2>&1; then xdg-open "http://127.0.0.1:{{PORT}}/"; \
        else echo "(no 'open' or 'xdg-open' — visit http://127.0.0.1:{{PORT}}/ manually)"; \
        fi) &
-    ./zig-out/bin/booktool serve --port {{PORT}}
+    ./zig-out/bin/biblio serve --port {{PORT}}
 
-# Same as `serve` but with BOOKTOOL_DEBUG=1 — emits scoped debug logs.
+# Same as `serve` but with STACKS_DEBUG=1 — emits scoped debug logs.
 serve-debug PORT=PORT: build
-    BOOKTOOL_DEBUG=1 ./zig-out/bin/booktool serve --port {{PORT}}
+    STACKS_DEBUG=1 ./zig-out/bin/biblio serve --port {{PORT}}
 
 # Release-built server — what you'd ship; slower compile, snappier runtime.
 serve-release PORT=PORT: build-release
-    ./zig-out/bin/booktool serve --port {{PORT}}
+    ./zig-out/bin/biblio serve --port {{PORT}}
 
 # Terminal UI — list + reader, no browser.
 tui: build
-    ./zig-out/bin/booktool tui
+    ./zig-out/bin/biblio tui
 
-# Kill any lingering `booktool serve` process.
+# Kill any lingering `biblio serve` process.
 kill-serve:
-    -pkill -f 'booktool serve'
+    -pkill -f 'biblio serve'
 
 # ───────── catalog operations ──────────────────────────────────────
 
 # Walk DIR and ingest every recognised ebook into the catalog.
 scan DIR="": build
     @if [ -z "{{DIR}}" ]; then echo "usage: just scan DIR"; exit 1; fi
-    ./zig-out/bin/booktool scan {{DIR}}
+    ./zig-out/bin/biblio scan {{DIR}}
 
 # Show embedded metadata for one file (epub/mobi/azw3/cbz/cb*/pdf).
 info FILE="": build
     @if [ -z "{{FILE}}" ]; then echo "usage: just info FILE"; exit 1; fi
-    ./zig-out/bin/booktool info {{FILE}}
+    ./zig-out/bin/biblio info {{FILE}}
 
 # Pull metadata from Open Library for every unverified row.
 enrich *FLAGS: build
-    ./zig-out/bin/booktool enrich {{FLAGS}}
+    ./zig-out/bin/biblio enrich {{FLAGS}}
 
 # List catalog rows missing important metadata (title/author/year/isbn).
 missing: build
-    ./zig-out/bin/booktool missing
+    ./zig-out/bin/biblio missing
 
 # Find duplicates (exact-sha + fuzzy title). Add --apply to delete dupes.
 dedup *FLAGS: build
-    ./zig-out/bin/booktool dedup {{FLAGS}}
+    ./zig-out/bin/biblio dedup {{FLAGS}}
 
 # Show / execute canonical renames. Add --apply to actually move files.
 rename *FLAGS: build
-    ./zig-out/bin/booktool rename {{FLAGS}}
+    ./zig-out/bin/biblio rename {{FLAGS}}
 
 # Library-tidy pipeline: scan → enrich → dedup → rename → optimize.
 standardize DIR="" *FLAGS="": build
     @if [ -z "{{DIR}}" ]; then echo "usage: just standardize DIR [--apply]"; exit 1; fi
-    ./zig-out/bin/booktool standardize {{DIR}} {{FLAGS}}
+    ./zig-out/bin/biblio standardize {{DIR}} {{FLAGS}}
 
 # Recompress an EPUB at max deflate (10-30% smaller, same content).
 optimize FILE="": build
     @if [ -z "{{FILE}}" ]; then echo "usage: just optimize FILE"; exit 1; fi
-    ./zig-out/bin/booktool optimize {{FILE}}
+    ./zig-out/bin/biblio optimize {{FILE}}
 
 # Edit embedded metadata of one file (--title / --author / --series / ...).
 set-meta FILE="" *FLAGS="": build
     @if [ -z "{{FILE}}" ]; then echo "usage: just set-meta FILE [flags]"; exit 1; fi
-    ./zig-out/bin/booktool set-meta {{FILE}} {{FLAGS}}
+    ./zig-out/bin/biblio set-meta {{FILE}} {{FLAGS}}
 
 # Replace the embedded cover with a JPG/PNG.
 set-cover FILE="" IMG="": build
     @if [ -z "{{FILE}}" ] || [ -z "{{IMG}}" ]; then echo "usage: just set-cover FILE IMG"; exit 1; fi
-    ./zig-out/bin/booktool set-cover {{FILE}} {{IMG}}
+    ./zig-out/bin/biblio set-cover {{FILE}} {{IMG}}
 
 # Convert SRC to FMT (epub/mobi/azw3/pdf).
 convert SRC="" FMT="": build
     @if [ -z "{{SRC}}" ] || [ -z "{{FMT}}" ]; then echo "usage: just convert SRC FMT"; exit 1; fi
-    ./zig-out/bin/booktool convert {{SRC}} --to {{FMT}}
+    ./zig-out/bin/biblio convert {{SRC}} --to {{FMT}}
 
 # Manage watched library folders (list / add / remove / rescan).
 sources *SUB: build
-    ./zig-out/bin/booktool sources {{SUB}}
+    ./zig-out/bin/biblio sources {{SUB}}
 
 # Open the catalog DB in the sqlite3 REPL (read/write — careful).
 catalog-sql:
-    sqlite3 "${XDG_DATA_HOME:-$HOME/.local/share}/booktool/catalog.db"
+    sqlite3 "${XDG_DATA_HOME:-$HOME/.local/share}/stacks/catalog.db"
 
 # Print the catalog DB path + its current size on disk.
 catalog-info:
-    @path="${XDG_DATA_HOME:-$HOME/.local/share}/booktool/catalog.db"; \
+    @path="${XDG_DATA_HOME:-$HOME/.local/share}/stacks/catalog.db"; \
       echo "$path"; \
       if [ -f "$path" ]; then ls -lh "$path"; fi
+
+# ───────── media organizer (shelve) ────────────────────────────────
+
+# Preview a TV/movie reorg of DIR — prints the plan, moves nothing.
+# FLAGS (all optional): --to LIB  --apply  --dry-run
+#   --on-conflict skip|suffix|overwrite  --plan FILE  --from FILE
+# e.g. `just organize ~/Downloads/down/Show --to ~/Media`
+organize DIR="" *FLAGS="": build
+    @if [ -z "{{DIR}}" ]; then echo "usage: just organize DIR [--to LIB] [--apply] [--on-conflict skip|suffix|overwrite] [--plan FILE] [--from FILE]"; exit 1; fi
+    ./zig-out/bin/shelve organize "{{DIR}}" {{FLAGS}}
+
+# Apply a reorg: move DIR's media into the library + write an undo journal.
+# Same FLAGS as `organize` (adds --apply for you). e.g.
+#   `just organize-apply ~/Downloads/down/Show --to ~/Media --on-conflict suffix`
+organize-apply DIR="" *FLAGS="": build
+    @if [ -z "{{DIR}}" ]; then echo "usage: just organize-apply DIR [--to LIB] [--on-conflict skip|suffix|overwrite]"; exit 1; fi
+    ./zig-out/bin/shelve organize "{{DIR}}" --apply {{FLAGS}}
+
+# Reverse the most recent `shelve organize --apply` (from its undo journal).
+undo: build
+    ./zig-out/bin/shelve undo
+
+# End-to-end organize → apply → undo smoke on a synthetic messy folder.
+organize-smoke: build
+    ./scripts/organize-smoke.sh
+
+# Print where shelve keeps organizer state (config + undo journals).
+shelve-info:
+    @echo "config:  ${XDG_CONFIG_HOME:-$HOME/.config}/stacks/config.toml"; \
+      echo "undo:    ${XDG_DATA_HOME:-$HOME/.local/share}/stacks/undo/"
+
+# ───────── shell completions ────────────────────────────────────────
+
+# Install tab-completion for `just` (recipe- + flag-value aware) into your shell.
+# e.g. `just setup-completions` (zsh) or `just setup-completions bash`.
+setup-completions shell="zsh":
+    bash ./scripts/setup-completions.sh "{{shell}}" "{{justfile_directory()}}"
+
+# List valid values for a completion dimension (used by the completion scripts).
+[private]
+list-values dim="":
+    @bash ./scripts/list-values.sh "{{dim}}"
