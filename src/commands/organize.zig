@@ -79,32 +79,87 @@ fn writeFile(path: []const u8, bytes: []const u8) !void {
     if (bytes.len > 0 and std.c.fwrite(bytes.ptr, 1, bytes.len, fp) != bytes.len) return error.WriteFailed;
 }
 
-fn printPlan(w: *std.Io.Writer, p: plan_mod.Plan) !void {
-    var moves: usize = 0;
-    var trash: usize = 0;
-    var dup: usize = 0;
+fn lessStr(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
+/// Replace a leading $HOME with `~` for readable output.
+fn abbrev(alloc: std.mem.Allocator, home: []const u8, path: []const u8) []const u8 {
+    if (home.len > 0 and std.mem.startsWith(u8, path, home)) {
+        return std.fmt.allocPrint(alloc, "~{s}", .{path[home.len..]}) catch path;
+    }
+    return path;
+}
+
+fn printPlan(alloc: std.mem.Allocator, w: *std.Io.Writer, p: plan_mod.Plan, home: []const u8) !void {
+    var keep: std.ArrayList([]const u8) = .empty; // destination paths (move/copy)
+    var dups: std.ArrayList([]const u8) = .empty; // source leaf names (left in place)
+    var junk: std.ArrayList([]const u8) = .empty; // source leaf names (→ trash)
+
     for (p.groups) |g| {
-        try w.print("[{s}] {s}\n", .{ @tagName(g.kind), g.title });
         for (g.items) |it| {
             switch (it.role) {
-                .primary, .sidecar => {
-                    try w.print("   -> {s}\n", .{it.dst orelse "?"});
-                    moves += 1;
-                },
-                .duplicate => {
-                    try w.print("   [dup] {s}\n", .{it.src});
-                    dup += 1;
-                },
-                .junk => {
-                    try w.print("   [junk] {s}\n", .{it.src});
-                    trash += 1;
-                },
+                .primary, .sidecar => if (it.dst) |d| try keep.append(alloc, d),
+                .duplicate => try dups.append(alloc, std.fs.path.basename(it.src)),
+                .junk => try junk.append(alloc, std.fs.path.basename(it.src)),
             }
         }
     }
+
+    std.mem.sort([]const u8, keep.items, {}, lessStr);
+    std.mem.sort([]const u8, dups.items, {}, lessStr);
+    std.mem.sort([]const u8, junk.items, {}, lessStr);
+
+    // ── what gets organized, grouped by destination folder ──
+    var folders: usize = 0;
+    if (keep.items.len == 0) {
+        try w.print("Nothing to organize.\n", .{});
+    } else {
+        try w.print("Organize {d} file(s) into the library:\n", .{keep.items.len});
+        var cur_dir: ?[]const u8 = null;
+        for (keep.items) |dst| {
+            const dir = std.fs.path.dirname(dst) orelse ".";
+            if (cur_dir == null or !std.mem.eql(u8, cur_dir.?, dir)) {
+                try w.print("\n  {s}/\n", .{abbrev(alloc, home, dir)});
+                cur_dir = dir;
+                folders += 1;
+            }
+            try w.print("      {s}\n", .{std.fs.path.basename(dst)});
+        }
+    }
+
+    // ── what will NOT be kept ──
+    if (dups.items.len > 0 or junk.items.len > 0 or p.unclassified.len > 0) {
+        try w.print("\nNot kept:\n", .{});
+        if (dups.items.len > 0) {
+            try w.print("  duplicates — left in place, not imported ({d}):\n", .{dups.items.len});
+            for (dups.items) |d| try w.print("      {s}\n", .{d});
+        }
+        if (junk.items.len > 0) {
+            try w.print("  junk — moved to trash ({d}):\n", .{junk.items.len});
+            // Collapse runs of identical basenames into "name ×N".
+            var i: usize = 0;
+            while (i < junk.items.len) {
+                var n: usize = 1;
+                while (i + n < junk.items.len and std.mem.eql(u8, junk.items[i], junk.items[i + n])) n += 1;
+                if (n > 1) {
+                    try w.print("      {s} ×{d}\n", .{ junk.items[i], n });
+                } else {
+                    try w.print("      {s}\n", .{junk.items[i]});
+                }
+                i += n;
+            }
+        }
+        if (p.unclassified.len > 0) {
+            try w.print("  unrecognized — skipped ({d}):\n", .{p.unclassified.len});
+            for (p.unclassified) |u| try w.print("      {s}\n", .{std.fs.path.basename(u)});
+        }
+    }
+
+    // ── one-line summary ──
     try w.print(
-        "\ngroups={d} move={d} trash={d} dup={d} unclassified={d}\n",
-        .{ p.groups.len, moves, trash, dup, p.unclassified.len },
+        "\nsummary: {d} file(s) into {d} folder(s) · {d} duplicate(s) left · {d} junk trashed · {d} unrecognized\n",
+        .{ keep.items.len, folders, dups.items.len, junk.items.len, p.unclassified.len },
     );
 }
 
@@ -151,7 +206,8 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         try ctx.stdout.print("wrote plan to {s}\n", .{op});
     }
 
-    try printPlan(ctx.stdout, p);
+    const home = ctx.env.get("HOME") orelse "";
+    try printPlan(ctx.arena, ctx.stdout, p, home);
 
     if (!do_apply) {
         try ctx.stdout.print("\n(dry-run — nothing changed; drop --dry-run to apply)\n", .{});

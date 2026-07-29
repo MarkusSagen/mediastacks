@@ -50,9 +50,10 @@ check() {
 echo "== dry-run =="
 OUT="$("$SHELVE" organize "$SRC" --to "$LIB" --dry-run)"
 echo "$OUT"
-check "plan: move=3" 'grep -q "move=3" <<<"$OUT"'
-check "plan: trash=1" 'grep -q "trash=1" <<<"$OUT"'
-check "plan: dup=1" 'grep -q "dup=1" <<<"$OUT"'
+check "plan: 3 files organized" 'grep -q "3 file(s) into" <<<"$OUT"'
+check "plan: 1 junk trashed" 'grep -q "1 junk trashed" <<<"$OUT"'
+check "plan: 1 duplicate left" 'grep -q "1 duplicate(s) left" <<<"$OUT"'
+check "plan: groups under a folder header" 'grep -qE "Season 01/$" <<<"$OUT"'
 check "dry-run did not create the library" '[[ ! -d "$LIB" ]]'
 check "dry-run did not move .DS_Store" '[[ -f "$SRC/.DS_Store" ]]'
 
