@@ -1,17 +1,23 @@
-# booktool
+# stacks
 
-Three surfaces, one library:
+A kind-aware media organizer. One shared Zig core library, two binaries:
 
-- **CLI** — scan, enrich, dedup, rename, convert, optimize, set
-  metadata/covers, standardize a directory in one command.
-- **Web UI** (`booktool serve`) — browse, search, triage, edit, and
-  read books in the browser. Supports EPUB, MOBI, AZW3, PDF, and the
-  comic archive formats (CBZ / CBR / CB7 / CBT).
-- **TUI** (`booktool tui`) — same library, plaintext reader, full
-  keyboard control.
+- **`biblio`** — the book/comic tool. Three surfaces over one library:
+  - **CLI** — scan, enrich, dedup, rename, convert, optimize, set
+    metadata/covers, standardize a directory in one command.
+  - **Web UI** (`biblio serve`) — browse, search, triage, edit, and
+    read books in the browser. Supports EPUB, MOBI, AZW3, PDF, and the
+    comic archive formats (CBZ / CBR / CB7 / CBT).
+  - **TUI** (`biblio tui`) — same library, plaintext reader, full
+    keyboard control.
+- **`shelve`** — the general media organizer. Point it at a messy
+  download folder and it groups, dedups, and relabels TV & movies into
+  a clean, templated library: `shelve organize DIR [--apply]`,
+  `shelve undo`. Offline-first; deletes go to a trash dir; every apply
+  is reversible via an undo journal.
 
-Written in Zig 0.16. Single binary, deliberately small. State lives
-in one SQLite file.
+Written in Zig 0.16. Small, deliberately. Book state lives in one
+SQLite file; the organizer works directly on the filesystem.
 
 ## Documentation
 

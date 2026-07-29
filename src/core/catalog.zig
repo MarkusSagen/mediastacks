@@ -1869,10 +1869,10 @@ pub fn defaultPath(
     env: *std.process.Environ.Map,
 ) ![]const u8 {
     if (env.get("XDG_DATA_HOME")) |xdg| {
-        return std.fs.path.join(allocator, &.{ xdg, "booktool", "catalog.db" });
+        return std.fs.path.join(allocator, &.{ xdg, "stacks", "catalog.db" });
     }
     const home = env.get("HOME") orelse return error.NoHome;
-    return std.fs.path.join(allocator, &.{ home, ".local", "share", "booktool", "catalog.db" });
+    return std.fs.path.join(allocator, &.{ home, ".local", "share", "stacks", "catalog.db" });
 }
 
 test "encodeAuthors round-trips through decodeAuthors" {

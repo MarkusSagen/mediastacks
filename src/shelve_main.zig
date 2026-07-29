@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const booktool = @import("booktool");
+const stacks = @import("stacks");
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
@@ -20,7 +20,7 @@ fn debugEmitEnabled() bool {
     if (builtin.mode == .Debug) return true;
     var state = debug_env_state.load(.acquire);
     if (state == debug_state_unchecked) {
-        const present = std.c.getenv("BOOKTOOL_DEBUG") != null;
+        const present = std.c.getenv("STACKS_DEBUG") != null;
         state = if (present) debug_state_enabled else debug_state_disabled;
         debug_env_state.store(state, .release);
     }
@@ -38,7 +38,7 @@ fn customLogFn(
 }
 
 pub fn main(init: std.process.Init) !void {
-    booktool.shutdown.install() catch |err| {
+    stacks.shutdown.install() catch |err| {
         std.debug.print("signal handler install failed: {s}\n", .{@errorName(err)});
     };
 
@@ -53,7 +53,7 @@ pub fn main(init: std.process.Init) !void {
     var stderr_fw: std.Io.File.Writer = .initStreaming(.stderr(), init.io, &stderr_buf);
     const stderr = &stderr_fw.interface;
 
-    const exit_code = booktool.shelve_cli.run(.{
+    const exit_code = stacks.shelve_cli.run(.{
         .arena = arena,
         .io = init.io,
         .args = args,

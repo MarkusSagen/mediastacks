@@ -55,10 +55,10 @@ pub fn dirPath(
     env: *std.process.Environ.Map,
 ) ![]const u8 {
     const dir = if (env.get("XDG_DATA_HOME")) |xdg|
-        try std.fs.path.join(allocator, &.{ xdg, "booktool", "covers" })
+        try std.fs.path.join(allocator, &.{ xdg, "stacks", "covers" })
     else blk: {
         const home = env.get("HOME") orelse return error.NoHome;
-        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "booktool", "covers" });
+        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "stacks", "covers" });
     };
     ensureDir(dir);
     return dir;
@@ -73,10 +73,10 @@ pub fn thumbDirPath(
     env: *std.process.Environ.Map,
 ) ![]const u8 {
     const dir = if (env.get("XDG_DATA_HOME")) |xdg|
-        try std.fs.path.join(allocator, &.{ xdg, "booktool", "thumbs" })
+        try std.fs.path.join(allocator, &.{ xdg, "stacks", "thumbs" })
     else blk: {
         const home = env.get("HOME") orelse return error.NoHome;
-        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "booktool", "thumbs" });
+        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "stacks", "thumbs" });
     };
     ensureDir(dir);
     return dir;

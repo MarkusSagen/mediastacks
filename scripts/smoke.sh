@@ -35,7 +35,7 @@ SMOKE_HOME="$(mktemp -d -t booktool-smoke.XXXXXX)"
 export XDG_DATA_HOME="$SMOKE_HOME"
 trap 'if [[ $KEEP -eq 0 ]]; then rm -rf "$SMOKE_HOME"; fi' EXIT
 
-BOOKTOOL="$ROOT/zig-out/bin/booktool"
+BIBLIO="$ROOT/zig-out/bin/biblio"
 PASS=0
 FAIL=0
 
@@ -59,8 +59,8 @@ section() {
 section "build"
 mise install >/dev/null 2>&1 || true
 zig build 2>&1 | tail -1
-[[ -x "$BOOKTOOL" ]] || { echo "no booktool binary"; exit 2; }
-echo "  binary: $BOOKTOOL"
+[[ -x "$BIBLIO" ]] || { echo "no biblio binary"; exit 2; }
+echo "  binary: $BIBLIO"
 
 # ---- Tests -------------------------------------------------------------
 
@@ -70,19 +70,19 @@ zig build test --summary all 2>&1 | grep "tests passed" || true
 # ---- find --------------------------------------------------------------
 
 section "find"
-find_all_count=$("$BOOKTOOL" find tests/fixtures 2>/dev/null | wc -l | tr -d ' ')
+find_all_count=$("$BIBLIO" find tests/fixtures 2>/dev/null | wc -l | tr -d ' ')
 assert "find without filter returns >= 5 results" test "$find_all_count" -ge 5
 
-hobb_count=$("$BOOKTOOL" find tests/fixtures --glob "**/Hobb*" 2>/dev/null | wc -l | tr -d ' ')
+hobb_count=$("$BIBLIO" find tests/fixtures --glob "**/Hobb*" 2>/dev/null | wc -l | tr -d ' ')
 assert "find --glob '**/Hobb*' finds at least 5 books" test "$hobb_count" -ge 5
 
-epub_count=$("$BOOKTOOL" find tests/fixtures --format epub 2>/dev/null | wc -l | tr -d ' ')
+epub_count=$("$BIBLIO" find tests/fixtures --format epub 2>/dev/null | wc -l | tr -d ' ')
 assert "find --format epub returns at least 3 books" test "$epub_count" -ge 3
 
 assert "find on empty dir returns exit 1" bash -c "
     tmp=\$(mktemp -d)
     set +e
-    '$BOOKTOOL' find \"\$tmp\" >/dev/null 2>&1
+    '$BIBLIO' find \"\$tmp\" >/dev/null 2>&1
     code=\$?
     rmdir \"\$tmp\"
     [[ \$code -eq 1 ]]
@@ -91,8 +91,8 @@ assert "find on empty dir returns exit 1" bash -c "
 # ---- info --------------------------------------------------------------
 
 section "info"
-sample=$("$BOOKTOOL" find tests/fixtures --format epub 2>/dev/null | head -1)
-info_out=$("$BOOKTOOL" info "$sample" 2>&1)
+sample=$("$BIBLIO" find tests/fixtures --format epub 2>/dev/null | head -1)
+info_out=$("$BIBLIO" info "$sample" 2>&1)
 assert "info prints Title" grep -q "^Title:" <<<"$info_out"
 assert "info prints Format" grep -q "^Format:" <<<"$info_out"
 
@@ -100,7 +100,7 @@ assert "info prints Format" grep -q "^Format:" <<<"$info_out"
 
 section "comic (CBZ)"
 cbz_fixture="$ROOT/tests/fixtures/sample.cbz"
-cbz_info=$("$BOOKTOOL" info "$cbz_fixture" 2>&1)
+cbz_info=$("$BIBLIO" info "$cbz_fixture" 2>&1)
 assert "info on CBZ reports Format: cbz" grep -q "^Format:.*cbz" <<<"$cbz_info"
 assert "info on CBZ reads ComicInfo title"  grep -q "^Title:.*Sample Issue" <<<"$cbz_info"
 assert "info on CBZ reads ComicInfo series" grep -q "^Series:.*Test Series" <<<"$cbz_info"
@@ -109,45 +109,45 @@ assert "info on CBZ reads ComicInfo year"   grep -q "^Year:.*2024" <<<"$cbz_info
 # ---- scan --------------------------------------------------------------
 
 section "scan"
-scan_out=$("$BOOKTOOL" scan tests/fixtures 2>&1)
+scan_out=$("$BIBLIO" scan tests/fixtures 2>&1)
 assert "scan reports ingestion summary" grep -q "ingested=" <<<"$scan_out"
 assert "scan picked up the CBZ fixture" bash -c "
-    '$BOOKTOOL' find tests/fixtures --format cbz 2>/dev/null | grep -q sample.cbz
+    '$BIBLIO' find tests/fixtures --format cbz 2>/dev/null | grep -q sample.cbz
 "
 
-scan_again=$("$BOOKTOOL" scan tests/fixtures 2>&1)
+scan_again=$("$BIBLIO" scan tests/fixtures 2>&1)
 assert "scan re-run reports unchanged > 0" grep -E "unchanged=[1-9]" -q <<<"$scan_again"
 
 # ---- missing -----------------------------------------------------------
 
 section "missing"
-missing_out=$("$BOOKTOOL" missing 2>&1)
+missing_out=$("$BIBLIO" missing 2>&1)
 assert "missing produces a count summary" grep -q "incomplete metadata" <<<"$missing_out"
 
 # ---- rename (dry-run) --------------------------------------------------
 
 section "rename"
-rename_out=$("$BOOKTOOL" rename 2>&1)
+rename_out=$("$BIBLIO" rename 2>&1)
 assert "rename dry-run notes itself" grep -q "dry run" <<<"$rename_out"
 
-template_out=$("$BOOKTOOL" rename --template "{year} - {author_sort} - {title}.{ext}" 2>&1)
+template_out=$("$BIBLIO" rename --template "{year} - {author_sort} - {title}.{ext}" 2>&1)
 assert "custom template renders {year} segment" grep -qE "/[0-9]{4} - " <<<"$template_out"
 
 # ---- dedup (no apply) --------------------------------------------------
 
 section "dedup"
-dup_out=$("$BOOKTOOL" dedup 2>&1)
+dup_out=$("$BIBLIO" dedup 2>&1)
 assert "dedup runs to completion" test $? -eq 0
 
 # ---- convert -----------------------------------------------------------
 
 section "convert"
-src_mobi=$("$BOOKTOOL" find tests/fixtures --format mobi 2>/dev/null | head -1)
+src_mobi=$("$BIBLIO" find tests/fixtures --format mobi 2>/dev/null | head -1)
 if [[ -n "$src_mobi" ]]; then
     out_dir=$(mktemp -d)
     cp "$src_mobi" "$out_dir/"
     cp_file="$out_dir/$(basename "$src_mobi")"
-    converted=$("$BOOKTOOL" convert "$cp_file" --to epub 2>&1 | tail -1)
+    converted=$("$BIBLIO" convert "$cp_file" --to epub 2>&1 | tail -1)
     assert "convert MOBI→EPUB produced a file" test -f "$converted"
     file_type=$(file -b "$converted")
     assert "converted output is EPUB" grep -q "EPUB" <<<"$file_type"
@@ -157,11 +157,11 @@ fi
 # ---- optimize ----------------------------------------------------------
 
 section "optimize"
-src_epub=$("$BOOKTOOL" find tests/fixtures --format epub 2>/dev/null | head -1)
+src_epub=$("$BIBLIO" find tests/fixtures --format epub 2>/dev/null | head -1)
 if [[ -n "$src_epub" ]]; then
     cp "$src_epub" /tmp/booktool-opt.epub
     before=$(stat -f%z /tmp/booktool-opt.epub 2>/dev/null || stat -c%s /tmp/booktool-opt.epub)
-    "$BOOKTOOL" optimize /tmp/booktool-opt.epub >/dev/null
+    "$BIBLIO" optimize /tmp/booktool-opt.epub >/dev/null
     after=$(stat -f%z /tmp/booktool-opt.epub 2>/dev/null || stat -c%s /tmp/booktool-opt.epub)
     assert "optimize did not grow the file" test "$after" -le "$before"
     rm -f /tmp/booktool-opt.epub
@@ -172,7 +172,7 @@ fi
 section "set-meta"
 if [[ -n "$src_epub" ]]; then
     cp "$src_epub" /tmp/booktool-meta.epub
-    "$BOOKTOOL" set-meta /tmp/booktool-meta.epub --series "TestSeries" --series-index "7" >/dev/null
+    "$BIBLIO" set-meta /tmp/booktool-meta.epub --series "TestSeries" --series-index "7" >/dev/null
     series_check=$(unzip -p /tmp/booktool-meta.epub 2>/dev/null | grep -ao "calibre:series\".*\"TestSeries" | head -1 || true)
     assert "set-meta wrote calibre:series meta" test -n "$series_check"
     rm -f /tmp/booktool-meta.epub
@@ -182,22 +182,22 @@ fi
 
 if [[ $OFFLINE -eq 0 ]]; then
     section "enrich (network)"
-    enrich_out=$("$BOOKTOOL" enrich --limit 1 2>&1 | tail -3)
+    enrich_out=$("$BIBLIO" enrich --limit 1 2>&1 | tail -3)
     assert "enrich --limit 1 prints summary" grep -qE "queried=[0-9]" <<<"$enrich_out"
 fi
 
 # ---- standardize (dry-run) ---------------------------------------------
 
 section "standardize"
-std_out=$("$BOOKTOOL" standardize tests/fixtures --no-enrich --no-optimize 2>&1)
+std_out=$("$BIBLIO" standardize tests/fixtures --no-enrich --no-optimize 2>&1)
 assert "standardize prints dry-run summary" grep -q "dry-run complete" <<<"$std_out"
 
 # ---- help / version ---------------------------------------------------
 
 section "meta"
-assert "version returns 0" "$BOOKTOOL" version >/dev/null
+assert "version returns 0" "$BIBLIO" version >/dev/null
 assert "help mentions every command" bash -c "
-    help=\$('$BOOKTOOL' help)
+    help=\$('$BIBLIO' help)
     for cmd in info find scan cover convert enrich missing dedup rename serve tui optimize set-cover set-meta standardize; do
         grep -q \"\$cmd\" <<< \"\$help\" || { echo missing \$cmd; exit 1; }
     done

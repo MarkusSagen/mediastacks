@@ -1,7 +1,7 @@
 .{
-    .name = .booktool,
+    .name = .stacks,
     .version = "0.0.0",
-    .fingerprint = 0x9ce55ebd11d5ca65, // Changing this has security and trust implications.
+    .fingerprint = 0xb628ef36853da9a9, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .vaxis = .{

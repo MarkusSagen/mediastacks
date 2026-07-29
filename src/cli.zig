@@ -47,7 +47,7 @@ pub fn run(ctx: Context) !u8 {
         return 0;
     }
     if (eq(cmd, "version") or eq(cmd, "--version") or eq(cmd, "-V")) {
-        try ctx.stdout.print("booktool 0.0.0\n", .{});
+        try ctx.stdout.print("biblio 0.0.0\n", .{});
         return 0;
     }
     if (eq(cmd, "info")) return info_cmd.run(ctx, rest);
@@ -79,10 +79,10 @@ fn eq(a: []const u8, b: []const u8) bool {
 
 pub fn printUsage(w: *std.Io.Writer) !void {
     try w.writeAll(
-        \\booktool — manage an ebook library.
+        \\biblio — manage an ebook library.
         \\
         \\Usage:
-        \\  booktool <command> [args]
+        \\  biblio <command> [args]
         \\
         \\Commands:
         \\  info FILE              Show embedded metadata for a file
@@ -106,8 +106,8 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\  version                Print version
         \\
         \\Configuration:
-        \\  Catalog DB lives at $XDG_DATA_HOME/booktool/catalog.db
-        \\  (default: ~/.local/share/booktool/catalog.db)
+        \\  Catalog DB lives at $XDG_DATA_HOME/stacks/catalog.db
+        \\  (default: ~/.local/share/stacks/catalog.db)
         \\
     );
 }

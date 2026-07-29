@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) void {
     const vaxis_mod = vaxis_dep.module("vaxis");
 
     // ---- booktool library module ---------------------------------------
-    const booktool_mod = b.addModule("booktool", .{
+    const stacks_mod = b.addModule("stacks", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
@@ -54,14 +54,14 @@ pub fn build(b: *std.Build) void {
     });
 
     // Compile vendored miniz directly into the library module.
-    booktool_mod.addCSourceFile(.{
+    stacks_mod.addCSourceFile(.{
         .file = b.path("lib/miniz/miniz.c"),
         .flags = &.{ "-std=c99", "-Wno-unused-function" },
     });
-    booktool_mod.addIncludePath(b.path("lib/miniz"));
+    stacks_mod.addIncludePath(b.path("lib/miniz"));
 
     // Small C-side helpers for things translate-c can't express cleanly.
-    booktool_mod.addCSourceFile(.{
+    stacks_mod.addCSourceFile(.{
         .file = b.path("lib/booktool_c/sqlite_helpers.c"),
         .flags = &.{"-std=c99"},
     });
@@ -71,7 +71,7 @@ pub fn build(b: *std.Build) void {
     // performs signed left-shifts on `int bitBuf` that Clang's UBSAN
     // flags — even though the wrapping behaviour is intentional. The
     // generated JPEG is correct; UBSAN is overly conservative here.
-    booktool_mod.addCSourceFile(.{
+    stacks_mod.addCSourceFile(.{
         .file = b.path("lib/booktool_c/cover_resize.c"),
         .flags = &.{
             "-std=c11",
@@ -84,28 +84,28 @@ pub fn build(b: *std.Build) void {
     });
 
     // Link system libraries.
-    for (library_dirs) |dir| booktool_mod.addLibraryPath(.{ .cwd_relative = dir });
-    for (include_dirs) |dir| booktool_mod.addIncludePath(.{ .cwd_relative = dir });
-    booktool_mod.linkSystemLibrary("mobi", .{});
-    booktool_mod.linkSystemLibrary("xml2", .{});
-    booktool_mod.linkSystemLibrary("sqlite3", .{});
+    for (library_dirs) |dir| stacks_mod.addLibraryPath(.{ .cwd_relative = dir });
+    for (include_dirs) |dir| stacks_mod.addIncludePath(.{ .cwd_relative = dir });
+    stacks_mod.linkSystemLibrary("mobi", .{});
+    stacks_mod.linkSystemLibrary("xml2", .{});
+    stacks_mod.linkSystemLibrary("sqlite3", .{});
 
     // ---- Executable ----------------------------------------------------
     const exe = b.addExecutable(.{
-        .name = "booktool",
+        .name = "biblio",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "booktool", .module = booktool_mod },
+                .{ .name = "stacks", .module = stacks_mod },
             },
         }),
     });
     b.installArtifact(exe);
 
     // ---- `zig build run -- ARGS...` -----------------------------------
-    const run_step = b.step("run", "Run booktool");
+    const run_step = b.step("run", "Run biblio");
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);
@@ -119,7 +119,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "booktool", .module = booktool_mod },
+                .{ .name = "stacks", .module = stacks_mod },
             },
         }),
     });
@@ -132,7 +132,7 @@ pub fn build(b: *std.Build) void {
     shelve_run_step.dependOn(&shelve_run_cmd.step);
 
     // ---- `zig build test` ---------------------------------------------
-    const mod_tests = b.addTest(.{ .root_module = booktool_mod });
+    const mod_tests = b.addTest(.{ .root_module = stacks_mod });
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
     const shelve_tests = b.addTest(.{ .root_module = shelve_exe.root_module });
 

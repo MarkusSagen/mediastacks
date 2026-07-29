@@ -1,6 +1,6 @@
 //! Undo journal: every apply records its moves and trashes so `shelve
 //! undo` can reverse them. Stored as JSON under
-//! `$XDG_DATA_HOME/booktool/undo/<timestamp>.json`, with a `latest`
+//! `$XDG_DATA_HOME/stacks/undo/<timestamp>.json`, with a `latest`
 //! pointer file naming the most recent journal.
 
 const std = @import("std");
@@ -13,10 +13,10 @@ pub const Journal = struct { created: i64, entries: []Entry };
 /// Resolve the undo directory path. Owned by `alloc`.
 pub fn dir(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
     if (env.get("XDG_DATA_HOME")) |xdg| {
-        return std.fs.path.join(alloc, &.{ xdg, "booktool", "undo" });
+        return std.fs.path.join(alloc, &.{ xdg, "stacks", "undo" });
     }
     const home = env.get("HOME") orelse return error.NoHome;
-    return std.fs.path.join(alloc, &.{ home, ".local", "share", "booktool", "undo" });
+    return std.fs.path.join(alloc, &.{ home, ".local", "share", "stacks", "undo" });
 }
 
 fn writeFileZ(path: []const u8, bytes: []const u8) !void {

@@ -55,8 +55,8 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\  version                Print version
         \\
         \\Configuration:
-        \\  $XDG_CONFIG_HOME/booktool/config.toml — library_root, tv_template, movie_template
-        \\  Undo journals live under $XDG_DATA_HOME/booktool/undo/
+        \\  $XDG_CONFIG_HOME/stacks/config.toml — library_root, tv_template, movie_template
+        \\  Undo journals live under $XDG_DATA_HOME/stacks/undo/
         \\
     );
 }
