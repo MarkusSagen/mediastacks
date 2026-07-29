@@ -17,6 +17,8 @@ pub const config = @import("core/config.zig");
 pub const group = @import("core/group.zig");
 pub const journal = @import("core/journal.zig");
 pub const apply = @import("core/apply.zig");
+pub const organize_cmd = @import("commands/organize.zig");
+pub const undo_cmd = @import("commands/undo.zig");
 pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
 pub const dedup = @import("core/dedup.zig");
@@ -66,6 +68,8 @@ test {
     _ = group;
     _ = journal;
     _ = apply;
+    _ = organize_cmd;
+    _ = undo_cmd;
     _ = metadata;
     _ = catalog;
     _ = dedup;
