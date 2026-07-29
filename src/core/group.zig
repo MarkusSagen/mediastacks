@@ -149,10 +149,13 @@ pub fn buildPlan(
         }
 
         const ext_dot = std.fs.path.extension(base);
-        const stem = base[0 .. base.len - ext_dot.len];
+        // `base` aliases the walker's reused name buffer, so any slice of it
+        // that outlives this iteration must be duped into the arena.
+        const stem = try arena.dupe(u8, base[0 .. base.len - ext_dot.len]);
 
         if (isSidecarExt(ext_dot)) {
-            try sidecars.append(arena, .{ .abs = abs, .dir = d, .stem = stem, .ext = if (ext_dot.len > 0) ext_dot[1..] else ext_dot });
+            const ext = try arena.dupe(u8, if (ext_dot.len > 0) ext_dot[1..] else ext_dot);
+            try sidecars.append(arena, .{ .abs = abs, .dir = d, .stem = stem, .ext = ext });
             continue;
         }
 
@@ -366,6 +369,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
     var dups: usize = 0;
     var trashed: usize = 0;
     var sidecar_items: usize = 0;
+    var sidecar_dst_ok = false;
     for (p.groups) |g| {
         if (g.kind == .tv) tv_groups += 1;
         for (g.items) |it| {
@@ -373,7 +377,12 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
                 .primary => primaries += 1,
                 .duplicate => dups += 1,
                 .junk => {},
-                .sidecar => sidecar_items += 1,
+                .sidecar => {
+                    sidecar_items += 1;
+                    if (it.dst) |dv| {
+                        if (std.mem.endsWith(u8, dv, ".srt")) sidecar_dst_ok = true;
+                    }
+                },
             }
             if (it.op == .trash) trashed += 1;
         }
@@ -383,6 +392,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
     try t.expectEqual(@as(usize, 1), dups); // second S01E04 copy
     try t.expectEqual(@as(usize, 1), trashed); // .DS_Store
     try t.expectEqual(@as(usize, 1), sidecar_items); // the .srt
+    try t.expect(sidecar_dst_ok); // sidecar dst keeps its own extension
 
     // clean up temp tree
     unlinkAt("{s}/witch.hat.atelier.s01e04.1080p.web.h264-skyanime.mkv", .{root});

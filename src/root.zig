@@ -6,6 +6,7 @@
 const std = @import("std");
 
 pub const cli = @import("cli.zig");
+pub const shelve_cli = @import("shelve_cli.zig");
 
 pub const kind = @import("core/kind.zig");
 pub const classify = @import("core/classify.zig");

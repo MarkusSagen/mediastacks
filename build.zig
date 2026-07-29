@@ -111,13 +111,35 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     run_step.dependOn(&run_cmd.step);
 
+    // ---- Second executable: the media organizer -----------------------
+    const shelve_exe = b.addExecutable(.{
+        .name = "shelve",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/shelve_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "booktool", .module = booktool_mod },
+            },
+        }),
+    });
+    b.installArtifact(shelve_exe);
+
+    const shelve_run_step = b.step("run-shelve", "Run shelve");
+    const shelve_run_cmd = b.addRunArtifact(shelve_exe);
+    shelve_run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| shelve_run_cmd.addArgs(args);
+    shelve_run_step.dependOn(&shelve_run_cmd.step);
+
     // ---- `zig build test` ---------------------------------------------
     const mod_tests = b.addTest(.{ .root_module = booktool_mod });
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
+    const shelve_tests = b.addTest(.{ .root_module = shelve_exe.root_module });
 
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&b.addRunArtifact(mod_tests).step);
     test_step.dependOn(&b.addRunArtifact(exe_tests).step);
+    test_step.dependOn(&b.addRunArtifact(shelve_tests).step);
 }
 
 // Probe well-known prefixes for system C headers.
