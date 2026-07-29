@@ -97,6 +97,73 @@ pub fn render(
     return collapseSpaces(allocator, out.items);
 }
 
+pub const Field = struct { name: []const u8, value: []const u8 };
+
+/// Render `template` substituting `{name}` / `{name:0N}` from `fields`.
+/// Numeric zero-padding applies when the value is all digits. Missing or
+/// empty fields render empty (surrounding " - " / "/" separators collapse
+/// via the shared `collapseSpaces`). Values are sanitized like `render`.
+pub fn renderFields(allocator: std.mem.Allocator, template: []const u8, fields: []const Field) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < template.len) {
+        const ch = template[i];
+        if (ch != '{') {
+            try out.append(allocator, ch);
+            i += 1;
+            continue;
+        }
+        const close = std.mem.indexOfScalarPos(u8, template, i + 1, '}') orelse
+            return Error.UnclosedPlaceholder;
+        const inside = template[i + 1 .. close];
+        i = close + 1;
+
+        var name = inside;
+        var spec: []const u8 = "";
+        if (std.mem.indexOfScalar(u8, inside, ':')) |c| {
+            name = inside[0..c];
+            spec = inside[c + 1 ..];
+        }
+
+        const raw = lookupField(fields, name) orelse continue;
+        if (raw.len == 0) continue;
+
+        var pad_buf: [32]u8 = undefined;
+        var value: []const u8 = raw;
+        if (spec.len >= 2 and spec[0] == '0' and allDigits(raw)) {
+            const width = std.fmt.parseInt(usize, spec[1..], 10) catch 0;
+            if (width > raw.len and width <= pad_buf.len) {
+                const pad = width - raw.len;
+                @memset(pad_buf[0..pad], '0');
+                @memcpy(pad_buf[pad..width], raw);
+                value = pad_buf[0..width];
+            }
+        }
+
+        const clean = try sanitize(allocator, value);
+        defer allocator.free(clean);
+        try out.appendSlice(allocator, clean);
+    }
+    return collapseSpaces(allocator, out.items);
+}
+
+fn lookupField(fields: []const Field, name: []const u8) ?[]const u8 {
+    for (fields) |f| {
+        if (std.mem.eql(u8, f.name, name)) return f.value;
+    }
+    return null;
+}
+
+fn allDigits(s: []const u8) bool {
+    if (s.len == 0) return false;
+    for (s) |c| {
+        if (!std.ascii.isDigit(c)) return false;
+    }
+    return true;
+}
+
 /// Returns null if the placeholder resolved to a "missing" value (so
 /// the caller can collapse surrounding whitespace), otherwise an
 /// owned sanitized slice.
@@ -375,6 +442,20 @@ test "series-dir falls back gracefully when series is missing" {
     const out = try render(alloc, SERIES_DIR_TEMPLATE, md, .epub);
     defer alloc.free(out);
     try expectEqualStrings("Williams, John/Augustus.epub", out);
+}
+
+test "renderFields builds a TV path with zero-padding" {
+    const alloc = test_alloc;
+    const fields = [_]Field{
+        .{ .name = "series", .value = "Witch Hat Atelier" },
+        .{ .name = "season", .value = "1" },
+        .{ .name = "episode", .value = "12" },
+        .{ .name = "title", .value = "The Shadow of Romonon" },
+        .{ .name = "ext", .value = "mkv" },
+    };
+    const out = try renderFields(alloc, "TV/{series}/Season {season:02}/{series} - S{season:02}E{episode:02} - {title}.{ext}", &fields);
+    defer alloc.free(out);
+    try expectEqualStrings("TV/Witch Hat Atelier/Season 01/Witch Hat Atelier - S01E12 - The Shadow of Romonon.mkv", out);
 }
 
 test "unknown field renders literally" {
