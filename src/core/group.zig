@@ -50,14 +50,32 @@ fn lower(arena: std.mem.Allocator, s: []const u8) ![]u8 {
     return out;
 }
 
+/// OS cruft, sample clips, and torrent-site promo litter — anything that
+/// should be trashed rather than organized.
 fn isJunkBase(base: []const u8) bool {
-    if (std.mem.eql(u8, base, ".DS_Store")) return true;
-    if (std.mem.eql(u8, base, "Thumbs.db")) return true;
-    var buf: [256]u8 = undefined;
-    if (base.len < buf.len) {
-        const lo = std.ascii.lowerString(buf[0..base.len], base);
-        if (std.mem.indexOf(u8, lo, "sample") != null) return true;
+    // Exact OS/system files.
+    const exact = [_][]const u8{ ".DS_Store", "Thumbs.db", "desktop.ini" };
+    for (exact) |e| {
+        if (std.mem.eql(u8, base, e)) return true;
     }
+
+    var buf: [512]u8 = undefined;
+    if (base.len >= buf.len) return false;
+    const lo = std.ascii.lowerString(buf[0..base.len], base);
+
+    // Sample clips (e.g. "Sample.mkv", "movie-sample.mp4").
+    if (std.mem.indexOf(u8, lo, "sample") != null) return true;
+
+    // Torrent-site promo litter dropped alongside real media.
+    if (std.mem.startsWith(u8, lo, "torrent downloaded from")) return true;
+    if (std.mem.indexOf(u8, lo, "rarbg") != null) return true;
+    if (std.mem.indexOf(u8, lo, "yts.") != null or std.mem.indexOf(u8, lo, "yify") != null) return true;
+    // "www.<site>....txt/nfo" promo drops (but not real media by that name).
+    if (std.mem.startsWith(u8, lo, "www.") and
+        (std.mem.endsWith(u8, lo, ".txt") or std.mem.endsWith(u8, lo, ".nfo"))) return true;
+    // Internet-shortcut litter.
+    if (std.mem.endsWith(u8, lo, ".url") or std.mem.endsWith(u8, lo, ".website")) return true;
+
     return false;
 }
 
@@ -331,6 +349,22 @@ fn rmdirAt(comptime fmt: []const u8, args: anytype) void {
     var pz: [512]u8 = undefined;
     const path_z = std.fmt.bufPrintZ(&pz, fmt, args) catch return;
     _ = std.c.rmdir(path_z.ptr);
+}
+
+test "isJunkBase catches OS cruft, samples, and torrent-site promo litter" {
+    // junk
+    try t.expect(isJunkBase(".DS_Store"));
+    try t.expect(isJunkBase("Thumbs.db"));
+    try t.expect(isJunkBase("Sample.mkv"));
+    try t.expect(isJunkBase("Torrent Downloaded From UIndex.org.txt"));
+    try t.expect(isJunkBase("RARBG.txt"));
+    try t.expect(isJunkBase("RARBG_DO_NOT_MIRROR.exe"));
+    try t.expect(isJunkBase("www.YTS.MX.jpg"));
+    try t.expect(isJunkBase("visit-us.url"));
+    // NOT junk
+    try t.expect(!isJunkBase("Witch Hat Atelier - S01E01 - The Magic.mkv"));
+    try t.expect(!isJunkBase("The.Matrix.1999.1080p.mkv"));
+    try t.expect(!isJunkBase("episode.nfo"));
 }
 
 test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
