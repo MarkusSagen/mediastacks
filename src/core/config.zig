@@ -4,8 +4,14 @@
 
 const std = @import("std");
 
+// Jellyfin-style defaults (also parse cleanly in Plex/Kodi):
+//   Shows/Series/Season 01/Series S01E01 - Title.mkv
+//   Movies/Film (2009)/Film (2009).mkv
+// Note: the Season folder deliberately omits the series name (Jellyfin
+// mis-detects otherwise), and template `sanitize` strips the characters
+// Jellyfin reserves (< > : " / \ | ? *).
 pub const DEFAULT_ROOT = "~/Media";
-pub const DEFAULT_TV = "TV/{series}/Season {season:02}/{series} - S{season:02}E{episode:02} - {title}.{ext}";
+pub const DEFAULT_TV = "Shows/{series}/Season {season:02}/{series} S{season:02}E{episode:02} - {title}.{ext}";
 pub const DEFAULT_MOVIE = "Movies/{title} ({year})/{title} ({year}).{ext}";
 
 pub const Config = struct {

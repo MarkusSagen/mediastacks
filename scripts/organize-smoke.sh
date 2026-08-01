@@ -59,10 +59,10 @@ check "dry-run did not move .DS_Store" '[[ -f "$SRC/.DS_Store" ]]'
 
 echo "== apply (default, no flag) =="
 "$SHELVE" organize "$SRC" --to "$LIB" >/dev/null
-check "S01E05 episode landed in library" 'find "$LIB/TV" -iname "*S01E05*.mkv" | grep -q .'
-check "S01E04 episode landed in library" 'find "$LIB/TV" -iname "*S01E04*.mkv" | grep -q .'
-check "subtitle sidecar landed alongside" 'find "$LIB/TV" -iname "*S01E05*.srt" | grep -q .'
-check "Season 01 directory created" 'find "$LIB/TV" -type d -iname "Season 01" | grep -q .'
+check "S01E05 episode landed in library" 'find "$LIB/Shows" -iname "*S01E05*.mkv" | grep -q .'
+check "S01E04 episode landed in library" 'find "$LIB/Shows" -iname "*S01E04*.mkv" | grep -q .'
+check "subtitle sidecar landed alongside" 'find "$LIB/Shows" -iname "*S01E05*.srt" | grep -q .'
+check "Season 01 directory created" 'find "$LIB/Shows" -type d -iname "Season 01" | grep -q .'
 check ".DS_Store moved to trash (gone from source)" '[[ ! -f "$SRC/.DS_Store" ]]'
 check "trash directory populated" 'find "$LIB/.stacks-trash" -name ".DS_Store" | grep -q .'
 # The larger copy (Kitsune, 8 bytes) wins as primary and moves; the smaller
