@@ -17,8 +17,9 @@ output flexibility):
    confidence, and (d) show media info in the plan. Auto-on when available,
    with `--no-probe` to skip.
 2. **Naming presets** — `preset = jellyfin | plex | kodi` in config (default
-   **jellyfin**), resolved to `{…}` template strings; explicit templates and
-   a `--preset` flag still override.
+   **jellyfin**), settable globally or per media type (`tv_preset` /
+   `movie_preset`), resolved to `{…}` template strings; explicit
+   `tv_template` / `movie_template` still override. Config-only, no CLI flag.
 
 Everything here is **read-only**. Writing tags back into files and muxing
 subtitles is explicitly deferred (see "Out of scope").
@@ -153,17 +154,25 @@ without spawning ffprobe.
     `videoScore(quality, size)` for the no-probe path. `group` calls the
     probed variant when a `Probe` is present, else the filename variant.
 
-- **`core/config.zig`** (changed)
-  - Add `preset` key + a built-in table:
+- **`core/config.zig`** (changed) — **presets are config-only** (no CLI
+  flag). Settable globally and per media type.
+  - New keys: `preset` (global), `tv_preset`, `movie_preset`. Values are a
+    preset name from a built-in table:
     ```
-    pub const PRESETS = ... // name -> {tv, movie}
+    pub const PRESETS = ... // name -> { tv: []const u8, movie: []const u8 }
     // jellyfin (current defaults), plex, kodi
     ```
-  - Resolution order (highest wins): explicit `tv_template`/`movie_template`
-    → `preset` → built-in default (`jellyfin`). `load` resolves to concrete
-    strings so downstream is unchanged.
-  - `Config` keeps `tv_template`/`movie_template` as the resolved strings;
-    add nothing else downstream needs to know about presets.
+  - Resolution per media type (highest wins):
+    1. explicit `tv_template` / `movie_template` (raw `{…}` string)
+    2. per-type `tv_preset` / `movie_preset` (preset name)
+    3. global `preset` (preset name)
+    4. built-in default (`jellyfin`)
+
+    So `preset = plex` sets both; adding `movie_preset = kodi` keeps TV on
+    plex but movies on kodi; adding `tv_template = …` overrides TV entirely.
+  - `load` resolves all of this to concrete `tv_template`/`movie_template`
+    strings on the `Config`, so nothing downstream knows presets exist.
+  - Unknown preset name → error surfaced at load (don't silently fall back).
 
 - **`core/plan.zig`** (changed — additive)
   - `pub const MediaInfo = struct { codec: ?[]const u8 = null, width: ?u32 =
@@ -181,8 +190,8 @@ without spawning ffprobe.
   - Collect per-file warnings onto the owning `Group.warnings`.
 
 - **`src/commands/organize.zig`** (changed)
-  - Flags: `--no-probe` (default probes when available) and `--preset NAME`
-    (overrides config preset for this run).
+  - Flag: `--no-probe` (default probes when available). No `--preset` flag —
+    presets are config-only.
   - Resolve `probe_enabled = !opts.no_probe`; pass to `buildPlan`.
   - `printPlan`: when `item.media` present, append `  · <codec> <res> · <Nm>`
     to the line. Print a `Warnings:` block (from group warnings) before the
@@ -191,8 +200,17 @@ without spawning ffprobe.
 ## CLI surface
 
 ```
-shelve organize DIR [--dry-run|-n] [--no-probe] [--preset jellyfin|plex|kodi]
+shelve organize DIR [--dry-run|-n] [--no-probe]
                     [--to LIB] [--on-conflict …] [--plan FILE] [--from FILE]
+```
+
+Naming is chosen in config, not on the command line:
+
+```toml
+# ~/.config/stacks/config.toml
+preset = jellyfin        # global default for all kinds
+movie_preset = plex      # override just movies (optional)
+tv_template = Shows/{series}/Season {season:02}/{series} S{season:02}E{episode:02} - {title}.{ext}   # raw override wins
 ```
 
 Dry-run line, probed:
@@ -226,8 +244,9 @@ Warnings:
   (+warning), generic fill, quality-from-height, each warning generator.
 - **`mediascore.videoScoreProbed`** — real 1080p beats filename-720p;
   bitrate breaks an in-tier tie; size is the final tiebreaker.
-- **`config`** — `preset = plex` yields plex strings; explicit `tv_template`
-  overrides the preset; default is jellyfin.
+- **`config`** — global `preset = plex` yields plex TV+movie strings;
+  `movie_preset = kodi` overrides only movies; explicit `tv_template`
+  overrides TV entirely; default is jellyfin; unknown preset name errors.
 - **`group`** — merge wiring via the pure functions (inject a `Probe`); no
   ffprobe dependency in the unit test.
 - **smoke** (`organize-smoke.sh`) — assert `--no-probe` runs clean and the
@@ -238,5 +257,3 @@ Warnings:
 
 - Preset exact strings for plex/kodi (jellyfin is the current default) —
   finalize in the plan.
-- Whether `--preset` is worth a CLI flag vs config-only. Included as cheap;
-  drop if it complicates completion.
