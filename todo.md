@@ -36,28 +36,30 @@ not a pile of per-type commands.
 
 ---
 
-## Phase 1.5 — richer, still-shared metadata (next)
+## Phase 1.5 — richer, still-shared metadata
 
-Brainstorm → spec → plan before building (like Phase 1).
+- [x] **ffprobe-backed enrichment (auto-on when installed, `--no-probe`).**
+      Real resolution/codec/bitrate/duration from the file. Feeds
+      `mediascore.videoScoreProbed` (true quality beats filename `1080p`);
+      confidence-based fill/override of embedded tags (iTunes MP4
+      `show`/`season_number`/`episode_sort` authoritative, generic tags fill);
+      mislabel/corrupt/short-runtime warnings; media info shown in the plan
+      (`· h264 1080p · 23m`). `core/probe.zig` + `core/enrich.zig` (both pure-
+      testable), `plan.Item.media`. `ffprobe` optional, gracefully absent.
+- [x] **Naming presets** — config-only `preset` / `tv_preset` / `movie_preset`
+      (jellyfin default; plex/kodi built-in), resolved to template strings;
+      explicit `tv_template`/`movie_template` win. Unknown preset → error.
 
-- [ ] **ffprobe-backed enrichment (opt-in, offline).** Read real
-      resolution/codec/bitrate/duration/audio+sub tracks from the file.
-      - Feeds `mediascore` (true quality beats filename-guessed `1080p`).
-      - Flags corrupt / mislabeled files (won't probe, or duration wildly off).
-      - Prefer embedded library tags when present (MP4/M4V `show`/`season_number`/
-        `episode_id`; Matroska `TITLE`/`SEASON`/`EPISODE`) over filename guesses.
-      - Shared: add optional `probe` fields to the parsed item; `ffprobe` is an
-        optional dependency, gracefully skipped when absent.
-- [ ] **Naming presets** — `tv_template = jellyfin|plex|kodi|<custom>` in config,
-      resolved to a template string. Keep the raw `{…}` template as the
-      lowest-common-denominator; presets are just named strings.
+Still open (own future specs):
 - [ ] **DRM *detection* (flag, don't remove).** Per kind: MP4 FairPlay
       (`sinf`/`drms`), CENC (Widevine/PlayReady), Matroska `ContentEncryption`;
       ebooks (biblio) ADEPT `encryption.xml` / `.acsm` / Kindle DRM. Label the
-      item "DRM — skipped", organize the file as-is, never try to read its media.
+      item "DRM — skipped", organize the file as-is, never read its media.
       **Removal is out of scope** (circumvention; legal + policy line).
-- [ ] Optional `--clean-tags` lossless remux (`ffmpeg -map 0 -c copy
-      -map_metadata -1`) to strip leaking release/site tags. Opt-in only.
+- [ ] **Write-back / remux (needs its own safety spec).** Embed corrected
+      tags, strip leaking release/site tags (`ffmpeg -map 0 -c copy
+      -map_metadata -1`), mux subtitles into the container. In-place file
+      rewrite is riskier than a move — design before building.
 
 ---
 
