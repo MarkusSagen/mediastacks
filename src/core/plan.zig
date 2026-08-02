@@ -8,6 +8,15 @@ const kind = @import("kind.zig");
 pub const Role = enum { primary, sidecar, duplicate, junk };
 pub const Op = enum { move, copy, trash, skip };
 
+/// Optional technical facts from ffprobe, shown in the plan and reused by
+/// the future TUI. Additive — absent when not probed.
+pub const MediaInfo = struct {
+    codec: ?[]const u8 = null,
+    width: ?u32 = null,
+    height: ?u32 = null,
+    duration_s: ?f64 = null,
+};
+
 pub const Item = struct {
     src: []const u8,
     role: Role,
@@ -15,6 +24,7 @@ pub const Item = struct {
     /// Destination path; null for trash/skip.
     dst: ?[]const u8 = null,
     reason: []const u8 = "",
+    media: ?MediaInfo = null,
 };
 
 pub const Group = struct {
@@ -69,4 +79,25 @@ test "plan json round-trips group and item shape" {
     try t.expectEqual(Role.primary, back.groups[0].items[0].role);
     try t.expectEqualStrings("/x/a.mkv", back.groups[0].items[0].src);
     try t.expectEqualStrings("/lib/TV/Show/Season 01/Show - S01E01.mkv", back.groups[0].items[0].dst.?);
+}
+
+test "plan json round-trips media info" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    var items = [_]Item{.{
+        .src = "/x/a.mkv",
+        .role = .primary,
+        .op = .move,
+        .dst = "/lib/a.mkv",
+        .media = .{ .codec = "h264", .width = 1920, .height = 1080, .duration_s = 1400 },
+    }};
+    var groups = [_]Group{.{ .kind = .tv, .title = "Show", .items = items[0..] }};
+    const plan = Plan{ .library_root = "/lib", .source = "/x", .groups = groups[0..] };
+
+    const bytes = try toJson(a, plan);
+    const back = try fromJson(a, bytes);
+    try t.expectEqual(@as(u32, 1080), back.groups[0].items[0].media.?.height.?);
+    try t.expectEqualStrings("h264", back.groups[0].items[0].media.?.codec.?);
 }
