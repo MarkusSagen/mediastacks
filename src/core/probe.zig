@@ -5,6 +5,7 @@
 //! actual process. Everything here is read-only — we never touch the media.
 
 const std = @import("std");
+const exec = @import("../util/exec.zig");
 
 pub const Confidence = enum { none, generic, authoritative };
 
@@ -134,6 +135,25 @@ pub fn freeProbe(alloc: std.mem.Allocator, p: Probe) void {
     if (p.embedded.title) |x| alloc.free(x);
 }
 
+/// True iff `ffprobe` is on PATH.
+pub fn available(alloc: std.mem.Allocator, io: std.Io) bool {
+    return exec.isExecutableInPath(alloc, io, "ffprobe");
+}
+
+/// Spawn ffprobe on `path`. Returns null when ffprobe is missing or the
+/// spawn fails; `.readable = false` when ffprobe ran but couldn't decode.
+/// Strings owned by `alloc`.
+pub fn run(alloc: std.mem.Allocator, io: std.Io, path: []const u8) ?Probe {
+    const argv = [_][]const u8{
+        "ffprobe", "-v", "error", "-print_format", "json",
+        "-show_format", "-show_streams", path,
+    };
+    const r = exec.runCaptureStdout(alloc, io, &argv, 8 * 1024 * 1024) catch return null;
+    defer alloc.free(r.stdout);
+    if (r.exit_code != 0 or r.stdout.len == 0) return Probe{ .readable = false };
+    return parse(alloc, r.stdout) catch Probe{ .readable = false };
+}
+
 const t = std.testing;
 
 const SCENE_MKV_JSON =
@@ -179,6 +199,13 @@ test "parse classifies a lone title tag as generic" {
     defer freeProbe(a, p);
     try t.expectEqual(Confidence.generic, p.embedded.confidence);
     try t.expect(p.embedded.series == null);
+}
+
+test "available() runs without crashing" {
+    const a = t.allocator;
+    var threaded = std.Io.Threaded.init(a, .{});
+    defer threaded.deinit();
+    _ = available(a, threaded.io()); // consistent with `which ffprobe`; must not crash
 }
 
 test "parse of empty/garbage json is unreadable, not a crash" {
