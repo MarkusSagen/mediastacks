@@ -11,6 +11,7 @@ const epub_reader = @import("../formats/epub.zig");
 const mobi_reader = @import("../formats/mobi.zig");
 const hash_util = @import("../util/hash.zig");
 const path_meta = @import("../core/path_meta.zig");
+const drm = @import("../core/drm.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len < 1) {
@@ -39,7 +40,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     var walker = try dir.walk(ctx.arena);
     defer walker.deinit();
 
-    var counters: struct { seen: u32 = 0, ingested: u32 = 0, skipped: u32 = 0, errors: u32 = 0 } = .{};
+    var counters: struct { seen: u32 = 0, ingested: u32 = 0, skipped: u32 = 0, drm: u32 = 0, errors: u32 = 0 } = .{};
 
     while (try walker.next(ctx.io)) |entry| {
         if (entry.kind != .file) continue;
@@ -50,6 +51,8 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 
         counters.seen += 1;
         const full_path = try std.fs.path.join(ctx.arena, &.{ dir_path, entry.path });
+
+        if (drm.detectEbook(ctx.arena, full_path) != .none) counters.drm += 1;
 
         const result = ingestOne(ctx, &cat, full_path, fmt) catch |err| {
             try ctx.stderr.print("error: {s}: {s}\n", .{ full_path, @errorName(err) });
@@ -69,8 +72,8 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     }
 
     try ctx.stdout.print(
-        "\nseen={d} ingested={d} unchanged={d} errors={d}\n",
-        .{ counters.seen, counters.ingested, counters.skipped, counters.errors },
+        "\nseen={d} ingested={d} unchanged={d} drm={d} errors={d}\n",
+        .{ counters.seen, counters.ingested, counters.skipped, counters.drm, counters.errors },
     );
     return if (counters.errors == 0) 0 else 1;
 }

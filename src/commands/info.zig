@@ -5,6 +5,7 @@ const cli = @import("../cli.zig");
 const format_mod = @import("../formats/format.zig");
 const format_registry = @import("../formats/registry.zig");
 const meta = @import("../core/metadata.zig");
+const drm = @import("../core/drm.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len < 1) {
@@ -13,7 +14,15 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     }
     const path = args[0];
 
+    // Detect DRM up front so we can report it even when a protected book's
+    // metadata can't be read.
+    const scheme = drm.detectEbook(ctx.arena, path);
+
     const fmt = format_mod.detect(ctx.io, path) catch |err| {
+        if (scheme != .none) {
+            try ctx.stdout.print("Path:        {s}\nDRM:         {s}\n", .{ path, drm.label(scheme) });
+            return 0;
+        }
         try ctx.stderr.print("cannot read {s}: {s}\n", .{ path, @errorName(err) });
         return 2;
     };
@@ -22,9 +31,16 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         try ctx.stderr.print("info not supported for {s}\n", .{@tagName(fmt)});
         return 2;
     };
-    const md: meta.BookMetadata = try h.readMetadata(ctx.arena, ctx.io, path);
+    const md: meta.BookMetadata = h.readMetadata(ctx.arena, ctx.io, path) catch |err| {
+        if (scheme != .none) {
+            try ctx.stdout.print("Path:        {s}\nFormat:      {s}\nDRM:         {s}\n", .{ path, @tagName(fmt), drm.label(scheme) });
+            return 0;
+        }
+        return err;
+    };
 
     try printMetadata(ctx.stdout, path, fmt, md);
+    if (scheme != .none) try ctx.stdout.print("DRM:         {s}\n", .{drm.label(scheme)});
     return 0;
 }
 
