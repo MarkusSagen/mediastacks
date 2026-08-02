@@ -66,6 +66,11 @@ fn dupStr(alloc: std.mem.Allocator, v: ?std.json.Value) !?[]const u8 {
     return try alloc.dupe(u8, x.string);
 }
 
+fn strTag(tags: std.json.Value, key: []const u8) ?[]const u8 {
+    const v = objGet(tags, key) orelse return null;
+    return if (v == .string and v.string.len > 0) v.string else null;
+}
+
 /// Parse ffprobe `-print_format json` output. Strings owned by `alloc`.
 /// Empty or invalid input yields `Probe{ .readable = false }` — never an error.
 pub fn parse(alloc: std.mem.Allocator, json_bytes: []const u8) !Probe {
@@ -97,6 +102,25 @@ pub fn parse(alloc: std.mem.Allocator, json_bytes: []const u8) !Probe {
     if (objGet(root, "format")) |fmt| {
         p.duration_s = asF64(objGet(fmt, "duration"));
         p.bitrate = asU64Str(objGet(fmt, "bit_rate"));
+
+        if (objGet(fmt, "tags")) |tags| {
+            const show = strTag(tags, "show");
+            const snum = asU32(objGet(tags, "season_number"));
+            const enum_ = asU32(objGet(tags, "episode_sort")) orelse asU32(objGet(tags, "episode_id"));
+            if (show != null and snum != null and enum_ != null) {
+                // iTunes-style structured tags: authoritative TV identity.
+                p.embedded = .{
+                    .series = try alloc.dupe(u8, show.?),
+                    .season = snum,
+                    .episode = enum_,
+                    .title = try dupStr(alloc, objGet(tags, "title")),
+                    .confidence = .authoritative,
+                };
+            } else if (strTag(tags, "title") orelse strTag(tags, "TITLE")) |ti| {
+                // A lone free-form title — only good enough to fill a gap.
+                p.embedded = .{ .title = try alloc.dupe(u8, ti), .confidence = .generic };
+            }
+        }
     }
 
     // No video, no format, no dimensions → effectively unreadable.
@@ -130,6 +154,31 @@ test "parse extracts technical facts from scene mkv" {
     try t.expectEqual(@as(u32, 1080), p.height.?);
     try t.expectEqual(@as(u64, 8_200_000), p.bitrate.?);
     try t.expect(p.duration_s.? > 1419 and p.duration_s.? < 1421);
+}
+
+const ITUNES_MP4_JSON =
+    \\{"streams":[{"codec_type":"video","codec_name":"h264","width":1920,"height":1080}],
+    \\"format":{"duration":"1400.0","bit_rate":"5000000","tags":{
+    \\  "media_type":"10","show":"Severance","season_number":"2","episode_sort":"5","title":"Goodbye, Mrs. Selvig"}}}
+;
+
+test "parse classifies iTunes tags as authoritative" {
+    const a = t.allocator;
+    const p = try parse(a, ITUNES_MP4_JSON);
+    defer freeProbe(a, p);
+    try t.expectEqual(Confidence.authoritative, p.embedded.confidence);
+    try t.expectEqualStrings("Severance", p.embedded.series.?);
+    try t.expectEqual(@as(u32, 2), p.embedded.season.?);
+    try t.expectEqual(@as(u32, 5), p.embedded.episode.?);
+    try t.expectEqualStrings("Goodbye, Mrs. Selvig", p.embedded.title.?);
+}
+
+test "parse classifies a lone title tag as generic" {
+    const a = t.allocator;
+    const p = try parse(a, SCENE_MKV_JSON); // has only format.tags.title
+    defer freeProbe(a, p);
+    try t.expectEqual(Confidence.generic, p.embedded.confidence);
+    try t.expect(p.embedded.series == null);
 }
 
 test "parse of empty/garbage json is unreadable, not a crash" {
