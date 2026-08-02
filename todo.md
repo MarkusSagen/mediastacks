@@ -50,12 +50,15 @@ not a pile of per-type commands.
       (jellyfin default; plex/kodi built-in), resolved to template strings;
       explicit `tv_template`/`movie_template` win. Unknown preset → error.
 
+- [x] **DRM detection (flag, don't remove).** Shared `core/drm.zig`: MP4
+      box sniff (`pssh`→CENC, `sinf`/`drms`/`encv`/`enca`→FairPlay) + epub
+      `META-INF/encryption.xml` (ADEPT) / `.acsm`. shelve flags protected
+      videos (`DRM — <scheme>` warning, organized by filename, no probe);
+      biblio reports in `info` + `scan` (`drm=N`). Detectors are total
+      (odd input → none). **Removal stays out of scope.**
+      Deferred: Matroska `ContentEncryption` (rare), Kindle KFX/AZW DRM.
+
 Still open (own future specs):
-- [ ] **DRM *detection* (flag, don't remove).** Per kind: MP4 FairPlay
-      (`sinf`/`drms`), CENC (Widevine/PlayReady), Matroska `ContentEncryption`;
-      ebooks (biblio) ADEPT `encryption.xml` / `.acsm` / Kindle DRM. Label the
-      item "DRM — skipped", organize the file as-is, never read its media.
-      **Removal is out of scope** (circumvention; legal + policy line).
 - [ ] **Write-back / remux (needs its own safety spec).** Embed corrected
       tags, strip leaking release/site tags (`ffmpeg -map 0 -c copy
       -map_metadata -1`), mux subtitles into the container. In-place file
