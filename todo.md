@@ -59,21 +59,21 @@ not a pile of per-type commands.
       Deferred: Matroska `ContentEncryption` (rare), Kindle KFX/AZW DRM.
 
 Still open (own future specs):
-- [ ] **Write-back / remux (needs its own safety spec).** Embed corrected
-      tags, strip leaking release/site tags (`ffmpeg -map 0 -c copy
+- [ ] **Write-back / remux — DEFERRED (needs its own safety spec).** Embed
+      corrected tags, strip leaking release/site tags (`ffmpeg -map 0 -c copy
       -map_metadata -1`), mux subtitles into the container. In-place file
       rewrite is riskier than a move — design before building.
 
 ---
 
-## Phase 2 — more kinds (same shared engine)
+## Phase 2 — more kinds — DEFERRED (do later)
 
 - [ ] `kinds/game.zig` — multi-disc / multi-file installs, region/version tags,
       platform folders.
 - [ ] `kinds/document.zig` — loose PDFs/papers/manuals beyond biblio's ebooks.
 - [ ] Confirm each new kind needs *only* a parser + template (no core changes).
 
-## Phase 3 — review surfaces over the Plan JSON
+## Phase 3 — review surfaces over the Plan JSON — IN PROGRESS
 
 - [ ] TUI review screen: load a `Plan` (`--from`), edit groupings/titles, toggle
       items, apply. Editor over the same JSON — no bypassing the contract.
