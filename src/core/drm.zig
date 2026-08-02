@@ -36,6 +36,22 @@ pub fn scanForDrmMarkers(bytes: []const u8) Scheme {
     return .none;
 }
 
+/// Detect ebook DRM: `.acsm` token, or an epub carrying `META-INF/
+/// encryption.xml` (Adobe ADEPT). Total: any error → `.none`.
+pub fn detectEbook(alloc: std.mem.Allocator, path: []const u8) Scheme {
+    const e = std.fs.path.extension(path);
+    if (std.ascii.eqlIgnoreCase(e, ".acsm")) return .acsm;
+    if (std.ascii.eqlIgnoreCase(e, ".epub")) {
+        var r: zip.ZipReader = .{};
+        r.open(path) catch return .none;
+        defer r.close();
+        const bytes = r.readMember(alloc, "META-INF/encryption.xml") catch return .none;
+        alloc.free(bytes);
+        return .adept;
+    }
+    return .none;
+}
+
 const MOOV_CAP: usize = 16 * 1024 * 1024;
 
 fn isMp4Ext(path: []const u8) bool {
@@ -132,4 +148,36 @@ test "detectVideo on a clean mp4 is none" {
 
 test "detectVideo ignores non-mp4 extensions" {
     try t.expectEqual(Scheme.none, detectVideo(t.allocator, "/tmp/whatever.mkv"));
+}
+
+fn makeEpub(path_z: [:0]const u8, with_enc: bool) void {
+    var w: zip.ZipWriter = .{};
+    w.create(path_z) catch return;
+    w.addBytes("mimetype", "application/epub+zip", .none) catch {};
+    if (with_enc) w.addBytes("META-INF/encryption.xml", "<encryption/>", .none) catch {};
+    w.finalizeAndClose() catch {};
+}
+
+test "detectEbook flags an epub with encryption.xml as adept" {
+    const a = t.allocator;
+    const pid = std.c.getpid();
+    var pb: [128]u8 = undefined;
+    const pz = std.fmt.bufPrintZ(&pb, "/tmp/drm-adept-{d}.epub", .{pid}) catch unreachable;
+    defer _ = std.c.unlink(pz.ptr);
+    makeEpub(pz, true);
+    try t.expectEqual(Scheme.adept, detectEbook(a, pz));
+}
+
+test "detectEbook on a plain epub is none" {
+    const a = t.allocator;
+    const pid = std.c.getpid();
+    var pb: [128]u8 = undefined;
+    const pz = std.fmt.bufPrintZ(&pb, "/tmp/drm-plain-{d}.epub", .{pid}) catch unreachable;
+    defer _ = std.c.unlink(pz.ptr);
+    makeEpub(pz, false);
+    try t.expectEqual(Scheme.none, detectEbook(a, pz));
+}
+
+test "detectEbook treats .acsm as a token" {
+    try t.expectEqual(Scheme.acsm, detectEbook(t.allocator, "/tmp/book.acsm"));
 }
