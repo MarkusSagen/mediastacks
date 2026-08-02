@@ -75,6 +75,17 @@ check "S01E05 restored to source" '[[ -f "$SRC/witch.hat.atelier.s01e05.1080p.we
 check "subtitle restored to source" '[[ -f "$SRC/witch.hat.atelier.s01e05.en.srt" ]]'
 check ".DS_Store restored to source" '[[ -f "$SRC/.DS_Store" ]]'
 
+# ffprobe enrichment path (only when ffmpeg/ffprobe are present)
+if command -v ffprobe >/dev/null 2>&1 && command -v ffmpeg >/dev/null 2>&1; then
+    echo "== probe =="
+    PSRC="$TMP/psrc"
+    mkdir -p "$PSRC"
+    ffmpeg -v error -f lavfi -i testsrc=d=1:s=1280x720 -y "$PSRC/Test.Show.S01E01.720p.mkv"
+    OUT2="$("$SHELVE" organize "$PSRC" --to "$TMP/plib" --dry-run)"
+    check "probe shows media info (720)" 'grep -qE "· .*720" <<<"$OUT2"'
+    check "--no-probe suppresses media info" '! "$SHELVE" organize "$PSRC" --to "$TMP/plib" --dry-run --no-probe | grep -qE "· .*720"'
+fi
+
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 [[ "$FAIL" -eq 0 ]]
