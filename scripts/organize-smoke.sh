@@ -75,6 +75,10 @@ check "S01E05 restored to source" '[[ -f "$SRC/witch.hat.atelier.s01e05.1080p.we
 check "subtitle restored to source" '[[ -f "$SRC/witch.hat.atelier.s01e05.en.srt" ]]'
 check ".DS_Store restored to source" '[[ -f "$SRC/.DS_Store" ]]'
 
+# DRM detection has no smoke here: a real protected file can't be generated
+# portably. It's covered by unit tests (core/drm.zig) with synthetic MP4/zip
+# fixtures and a group-level DRM test.
+
 # ffprobe enrichment path (only when ffmpeg/ffprobe are present)
 if command -v ffprobe >/dev/null 2>&1 && command -v ffmpeg >/dev/null 2>&1; then
     echo "== probe =="
