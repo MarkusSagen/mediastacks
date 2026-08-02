@@ -14,6 +14,7 @@ pub const tv = @import("kinds/tv.zig");
 pub const movie = @import("kinds/movie.zig");
 pub const mediascore = @import("core/mediascore.zig");
 pub const probe = @import("core/probe.zig");
+pub const enrich = @import("core/enrich.zig");
 pub const plan = @import("core/plan.zig");
 pub const config = @import("core/config.zig");
 pub const group = @import("core/group.zig");
@@ -66,6 +67,7 @@ test {
     _ = movie;
     _ = mediascore;
     _ = probe;
+    _ = enrich;
     _ = plan;
     _ = config;
     _ = group;
