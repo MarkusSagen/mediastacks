@@ -17,6 +17,7 @@ const tv = @import("../kinds/tv.zig");
 const movie = @import("../kinds/movie.zig");
 const probe = @import("probe.zig");
 const enrich = @import("enrich.zig");
+const drm = @import("drm.zig");
 
 const Cand = struct {
     abs: []const u8,
@@ -171,7 +172,11 @@ pub fn buildPlan(
     var junk: std.ArrayList([]const u8) = .empty;
     var unclassified: std.ArrayList([]const u8) = .empty;
 
-    const do_probe = probe_enabled and probe.available(arena, io);
+    // `--no-probe` (probe_enabled=false) skips all file inspection. DRM
+    // detection runs whenever we inspect; ffprobe availability gates only
+    // the ffprobe call.
+    const inspect = probe_enabled;
+    const ffprobe_ok = probe_enabled and probe.available(arena, io);
 
     // ---- Phase A: walk & bucket ---------------------------------------
     const cwd = std.Io.Dir.cwd();
@@ -212,16 +217,24 @@ pub fn buildPlan(
             if (mk == .tv and c.ep == null) {
                 try unclassified.append(arena, abs);
             } else {
-                if (do_probe) {
-                    c.probe = probe.run(arena, io, abs);
-                    if (mk == .tv) {
-                        const m = try enrich.mergeTv(arena, c.ep.?, c.probe);
-                        c.ep = .{ .series = m.fields.series, .season = m.fields.season, .episode = m.fields.episode, .title = m.fields.title, .quality = m.fields.quality, .ext = c.ep.?.ext };
-                        c.warnings = m.warnings;
-                    } else {
-                        const m = try enrich.mergeMovie(arena, c.mv.?, c.probe);
-                        c.mv = .{ .title = m.fields.title, .year = m.fields.year, .quality = m.fields.quality, .ext = c.mv.?.ext };
-                        c.warnings = m.warnings;
+                if (inspect) {
+                    const scheme = drm.detectVideo(arena, abs);
+                    if (scheme != .none) {
+                        // Organized by its filename fields, flagged, not probed.
+                        const wl = try arena.alloc([]const u8, 1);
+                        wl[0] = try std.fmt.allocPrint(arena, "DRM — {s}", .{drm.label(scheme)});
+                        c.warnings = wl;
+                    } else if (ffprobe_ok) {
+                        c.probe = probe.run(arena, io, abs);
+                        if (mk == .tv) {
+                            const m = try enrich.mergeTv(arena, c.ep.?, c.probe);
+                            c.ep = .{ .series = m.fields.series, .season = m.fields.season, .episode = m.fields.episode, .title = m.fields.title, .quality = m.fields.quality, .ext = c.ep.?.ext };
+                            c.warnings = m.warnings;
+                        } else {
+                            const m = try enrich.mergeMovie(arena, c.mv.?, c.probe);
+                            c.mv = .{ .title = m.fields.title, .year = m.fields.year, .quality = m.fields.quality, .ext = c.mv.?.ext };
+                            c.warnings = m.warnings;
+                        }
                     }
                 }
                 try media.append(arena, c);
@@ -402,6 +415,59 @@ test "isJunkBase catches OS cruft, samples, and torrent-site promo litter" {
     try t.expect(!isJunkBase("Witch Hat Atelier - S01E01 - The Magic.mkv"));
     try t.expect(!isJunkBase("The.Matrix.1999.1080p.mkv"));
     try t.expect(!isJunkBase("episode.nfo"));
+}
+
+fn writeDrmMp4(path_z: [:0]const u8) void {
+    const fp = std.c.fopen(path_z.ptr, "wb") orelse return;
+    defer _ = std.c.fclose(fp);
+    var box: [16]u8 = undefined;
+    std.mem.writeInt(u32, box[0..4], 16, .big);
+    @memcpy(box[4..8], "ftyp");
+    @memcpy(box[8..12], "isom");
+    std.mem.writeInt(u32, box[12..16], 0, .big);
+    _ = std.c.fwrite(&box, 1, 16, fp);
+    const payload = "trak....pssh....";
+    var mh: [8]u8 = undefined;
+    std.mem.writeInt(u32, mh[0..4], @intCast(8 + payload.len), .big);
+    @memcpy(mh[4..8], "moov");
+    _ = std.c.fwrite(&mh, 1, 8, fp);
+    _ = std.c.fwrite(payload.ptr, 1, payload.len, fp);
+}
+
+test "buildPlan flags a DRM video and skips probing" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const pid = std.c.getpid();
+    var rb: [256]u8 = undefined;
+    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-drm-{d}", .{pid});
+    mkdirAt("{s}", .{root});
+
+    var fb: [400]u8 = undefined;
+    const fpath = try std.fmt.bufPrintZ(&fb, "{s}/The.Show.S01E01.mp4", .{root});
+    writeDrmMp4(fpath);
+
+    var threaded = std.Io.Threaded.init(t.allocator, .{});
+    defer threaded.deinit();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE };
+    const p = try buildPlan(a, threaded.io(), root, cfg, true); // probe_enabled
+
+    var warned = false;
+    var media_present = false;
+    for (p.groups) |g| {
+        for (g.warnings) |w| if (std.mem.indexOf(u8, w, "DRM") != null) {
+            warned = true;
+        };
+        for (g.items) |it| if (it.media != null) {
+            media_present = true;
+        };
+    }
+    try t.expect(warned);
+    try t.expect(!media_present); // DRM file wasn't probed
+
+    unlinkAt("{s}/The.Show.S01E01.mp4", .{root});
+    rmdirAt("{s}", .{root});
 }
 
 test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
