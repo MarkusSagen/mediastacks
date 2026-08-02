@@ -26,23 +26,41 @@ pub fn freeConfig(alloc: std.mem.Allocator, cfg: Config) void {
     alloc.free(cfg.movie_template);
 }
 
-fn dupeDefaults(alloc: std.mem.Allocator) !Config {
-    return .{
-        .library_root = try alloc.dupe(u8, DEFAULT_ROOT),
-        .tv_template = try alloc.dupe(u8, DEFAULT_TV),
-        .movie_template = try alloc.dupe(u8, DEFAULT_MOVIE),
+const Preset = struct { tv: []const u8, movie: []const u8 };
+
+/// Built-in naming presets. jellyfin is the default.
+fn presetByName(name: []const u8) ?Preset {
+    if (std.mem.eql(u8, name, "jellyfin")) return .{ .tv = DEFAULT_TV, .movie = DEFAULT_MOVIE };
+    if (std.mem.eql(u8, name, "plex")) return .{
+        .tv = "TV Shows/{series}/Season {season:02}/{series} - S{season:02}E{episode:02} - {title}.{ext}",
+        .movie = DEFAULT_MOVIE,
     };
+    if (std.mem.eql(u8, name, "kodi")) return .{
+        .tv = "TV Shows/{series}/Season {season:02}/{series} S{season:02}E{episode:02} - {title}.{ext}",
+        .movie = DEFAULT_MOVIE,
+    };
+    return null;
 }
 
-fn setKey(alloc: std.mem.Allocator, slot: *[]const u8, val: []const u8) !void {
-    alloc.free(slot.*);
-    slot.* = try alloc.dupe(u8, val);
+/// Resolve one media type's template. Highest wins: explicit template →
+/// per-type preset → global preset → jellyfin default.
+fn resolve(comptime field: []const u8, explicit: ?[]const u8, per_type: ?[]const u8, global: ?[]const u8) ![]const u8 {
+    if (explicit) |x| return x;
+    if (per_type) |name| return @field(presetByName(name) orelse return error.UnknownPreset, field);
+    if (global) |name| return @field(presetByName(name) orelse return error.UnknownPreset, field);
+    return @field(presetByName("jellyfin").?, field);
 }
 
-/// Parse `key = value` config text over the defaults. Owned by `alloc`.
+/// Parse `key = value` config text, resolving presets. Owned by `alloc`.
+/// Unknown preset name → `error.UnknownPreset`.
 pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
-    var cfg = try dupeDefaults(alloc);
-    errdefer freeConfig(alloc, cfg);
+    // Raw values borrow from `text` (valid for the duration of this call).
+    var library_root: ?[]const u8 = null;
+    var preset: ?[]const u8 = null;
+    var tv_preset: ?[]const u8 = null;
+    var movie_preset: ?[]const u8 = null;
+    var tv_template: ?[]const u8 = null;
+    var movie_template: ?[]const u8 = null;
 
     var it = std.mem.tokenizeScalar(u8, text, '\n');
     while (it.next()) |raw| {
@@ -53,15 +71,24 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
         const val = std.mem.trim(u8, line[eq + 1 ..], " \t");
         if (val.len == 0) continue;
 
-        if (std.mem.eql(u8, key, "library_root")) {
-            try setKey(alloc, &cfg.library_root, val);
-        } else if (std.mem.eql(u8, key, "tv_template")) {
-            try setKey(alloc, &cfg.tv_template, val);
-        } else if (std.mem.eql(u8, key, "movie_template")) {
-            try setKey(alloc, &cfg.movie_template, val);
-        }
+        if (std.mem.eql(u8, key, "library_root")) library_root = val
+        else if (std.mem.eql(u8, key, "preset")) preset = val
+        else if (std.mem.eql(u8, key, "tv_preset")) tv_preset = val
+        else if (std.mem.eql(u8, key, "movie_preset")) movie_preset = val
+        else if (std.mem.eql(u8, key, "tv_template")) tv_template = val
+        else if (std.mem.eql(u8, key, "movie_template")) movie_template = val;
     }
-    return cfg;
+
+    const tv = try resolve("tv", tv_template, tv_preset, preset);
+    const movie = try resolve("movie", movie_template, movie_preset, preset);
+    const root = library_root orelse DEFAULT_ROOT;
+
+    const lr = try alloc.dupe(u8, root);
+    errdefer alloc.free(lr);
+    const tt = try alloc.dupe(u8, tv);
+    errdefer alloc.free(tt);
+    const mt = try alloc.dupe(u8, movie);
+    return .{ .library_root = lr, .tv_template = tt, .movie_template = mt };
 }
 
 fn configPath(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
@@ -133,4 +160,30 @@ test "parseLines with empty text yields defaults" {
     defer freeConfig(a, cfg);
     try t.expectEqualStrings(DEFAULT_ROOT, cfg.library_root);
     try t.expectEqualStrings(DEFAULT_TV, cfg.tv_template);
+}
+
+test "global preset resolves both; per-type overrides" {
+    const a = t.allocator;
+    const cfg = try parseLines(a,
+        \\preset = plex
+        \\movie_preset = kodi
+    );
+    defer freeConfig(a, cfg);
+    try t.expect(std.mem.startsWith(u8, cfg.tv_template, "TV Shows/")); // plex tv
+    try t.expect(std.mem.indexOf(u8, cfg.tv_template, " - S") != null); // plex dash form
+    try t.expect(std.mem.startsWith(u8, cfg.movie_template, "Movies/")); // kodi movie
+}
+
+test "explicit template overrides preset" {
+    const a = t.allocator;
+    const cfg = try parseLines(a,
+        \\preset = plex
+        \\tv_template = X/{series}.{ext}
+    );
+    defer freeConfig(a, cfg);
+    try t.expectEqualStrings("X/{series}.{ext}", cfg.tv_template);
+}
+
+test "unknown preset errors" {
+    try t.expectError(error.UnknownPreset, parseLines(t.allocator, "preset = nope"));
 }
