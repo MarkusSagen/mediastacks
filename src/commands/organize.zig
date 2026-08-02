@@ -12,6 +12,7 @@ const Opts = struct {
     dir: ?[]const u8 = null,
     to: ?[]const u8 = null,
     dry_run: bool = false,
+    no_probe: bool = false,
     plan_out: ?[]const u8 = null,
     from: ?[]const u8 = null,
     on_conflict: apply_mod.OnConflict = .skip,
@@ -35,6 +36,8 @@ fn parseArgs(args: []const []const u8) !Opts {
             o.to = args[i];
         } else if (std.mem.eql(u8, a, "--dry-run") or std.mem.eql(u8, a, "-n")) {
             o.dry_run = true;
+        } else if (std.mem.eql(u8, a, "--no-probe")) {
+            o.no_probe = true;
         } else if (std.mem.eql(u8, a, "--plan")) {
             i += 1;
             if (i >= args.len) return error.MissingValue;
@@ -83,6 +86,11 @@ fn lessStr(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.lessThan(u8, a, b);
 }
 
+const Keep = struct { dst: []const u8, media: ?plan_mod.MediaInfo };
+fn lessKeep(_: void, a: Keep, b: Keep) bool {
+    return std.mem.lessThan(u8, a.dst, b.dst);
+}
+
 /// Replace a leading $HOME with `~` for readable output.
 fn abbrev(alloc: std.mem.Allocator, home: []const u8, path: []const u8) []const u8 {
     if (home.len > 0 and std.mem.startsWith(u8, path, home)) {
@@ -92,21 +100,21 @@ fn abbrev(alloc: std.mem.Allocator, home: []const u8, path: []const u8) []const 
 }
 
 fn printPlan(alloc: std.mem.Allocator, w: *std.Io.Writer, p: plan_mod.Plan, home: []const u8) !void {
-    var keep: std.ArrayList([]const u8) = .empty; // destination paths (move/copy)
+    var keep: std.ArrayList(Keep) = .empty; // destinations (move/copy) + media info
     var dups: std.ArrayList([]const u8) = .empty; // source leaf names (left in place)
     var junk: std.ArrayList([]const u8) = .empty; // source leaf names (→ trash)
 
     for (p.groups) |g| {
         for (g.items) |it| {
             switch (it.role) {
-                .primary, .sidecar => if (it.dst) |d| try keep.append(alloc, d),
+                .primary, .sidecar => if (it.dst) |d| try keep.append(alloc, .{ .dst = d, .media = it.media }),
                 .duplicate => try dups.append(alloc, std.fs.path.basename(it.src)),
                 .junk => try junk.append(alloc, std.fs.path.basename(it.src)),
             }
         }
     }
 
-    std.mem.sort([]const u8, keep.items, {}, lessStr);
+    std.mem.sort(Keep, keep.items, {}, lessKeep);
     std.mem.sort([]const u8, dups.items, {}, lessStr);
     std.mem.sort([]const u8, junk.items, {}, lessStr);
 
@@ -117,14 +125,21 @@ fn printPlan(alloc: std.mem.Allocator, w: *std.Io.Writer, p: plan_mod.Plan, home
     } else {
         try w.print("Organize {d} file(s) into the library:\n", .{keep.items.len});
         var cur_dir: ?[]const u8 = null;
-        for (keep.items) |dst| {
-            const dir = std.fs.path.dirname(dst) orelse ".";
+        for (keep.items) |k| {
+            const dir = std.fs.path.dirname(k.dst) orelse ".";
             if (cur_dir == null or !std.mem.eql(u8, cur_dir.?, dir)) {
                 try w.print("\n  {s}/\n", .{abbrev(alloc, home, dir)});
                 cur_dir = dir;
                 folders += 1;
             }
-            try w.print("      {s}\n", .{std.fs.path.basename(dst)});
+            try w.print("      {s}", .{std.fs.path.basename(k.dst)});
+            if (k.media) |m| {
+                try w.print("   ·", .{});
+                if (m.codec) |c| try w.print(" {s}", .{c});
+                if (m.height) |h| try w.print(" {d}p", .{h});
+                if (m.duration_s) |d| try w.print(" · {d}m", .{@as(u32, @intFromFloat(d / 60))});
+            }
+            try w.print("\n", .{});
         }
     }
 
@@ -156,6 +171,16 @@ fn printPlan(alloc: std.mem.Allocator, w: *std.Io.Writer, p: plan_mod.Plan, home
         }
     }
 
+    // ── advisory warnings (from ffprobe) ──
+    var wcount: usize = 0;
+    for (p.groups) |g| wcount += g.warnings.len;
+    if (wcount > 0) {
+        try w.print("\nWarnings:\n", .{});
+        for (p.groups) |g| {
+            for (g.warnings) |warn| try w.print("  [{s}] {s}\n", .{ g.title, warn });
+        }
+    }
+
     // ── one-line summary ──
     try w.print(
         "\nsummary: {d} file(s) into {d} folder(s) · {d} duplicate(s) left · {d} junk trashed · {d} unrecognized\n",
@@ -166,7 +191,7 @@ fn printPlan(alloc: std.mem.Allocator, w: *std.Io.Writer, p: plan_mod.Plan, home
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     const opts = parseArgs(args) catch |err| {
         try ctx.stderr.print("bad arguments: {s}\n", .{@errorName(err)});
-        try ctx.stderr.print("usage: shelve organize DIR [--dry-run|-n] [--to LIB] [--plan FILE] [--from FILE] [--on-conflict skip|suffix|overwrite]\n", .{});
+        try ctx.stderr.print("usage: shelve organize DIR [--dry-run|-n] [--no-probe] [--to LIB] [--plan FILE] [--from FILE] [--on-conflict skip|suffix|overwrite]\n", .{});
         return 1;
     };
 
@@ -191,7 +216,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
             try ctx.stderr.print("usage: shelve organize DIR [flags]\n", .{});
             return 1;
         };
-        break :blk group.buildPlan(ctx.arena, ctx.io, dir, cfg) catch |err| {
+        break :blk group.buildPlan(ctx.arena, ctx.io, dir, cfg, !opts.no_probe) catch |err| {
             try ctx.stderr.print("cannot scan {s}: {s}\n", .{ dir, @errorName(err) });
             return 2;
         };
@@ -248,4 +273,11 @@ test "parseArgs --dry-run and -n both set dry_run" {
     try t.expect(long.dry_run);
     const short = try parseArgs((&[_][]const u8{ "/x", "-n" })[0..]);
     try t.expect(short.dry_run);
+}
+
+test "parseArgs --no-probe" {
+    const o = try parseArgs((&[_][]const u8{ "/x", "--no-probe" })[0..]);
+    try t.expect(o.no_probe);
+    const d = try parseArgs((&[_][]const u8{"/x"})[0..]);
+    try t.expect(!d.no_probe); // probes by default
 }

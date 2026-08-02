@@ -15,6 +15,8 @@ const config = @import("config.zig");
 const plan = @import("plan.zig");
 const tv = @import("../kinds/tv.zig");
 const movie = @import("../kinds/movie.zig");
+const probe = @import("probe.zig");
+const enrich = @import("enrich.zig");
 
 const Cand = struct {
     abs: []const u8,
@@ -24,6 +26,8 @@ const Cand = struct {
     mkind: kind.MediaKind,
     ep: ?tv.Episode = null,
     mv: ?movie.Movie = null,
+    probe: ?probe.Probe = null,
+    warnings: []const []const u8 = &.{},
     group_idx: usize = 0,
     role: plan.Role = .primary,
     dst: ?[]const u8 = null,
@@ -42,7 +46,25 @@ const GB = struct {
     title: []const u8,
     year: ?u32,
     items: std.ArrayList(plan.Item),
+    warnings: std.ArrayList([]const u8),
 };
+
+/// Best-copy score for a candidate: probe-aware when a readable probe
+/// exists, else the filename-quality heuristic.
+fn candScore(c: *Cand) f32 {
+    if (c.probe) |pr| {
+        if (pr.readable) return mediascore.videoScoreProbed(pr.height, pr.bitrate, c.size);
+    }
+    const q = if (c.mkind == .tv) c.ep.?.quality else c.mv.?.quality;
+    return mediascore.videoScore(q, c.size);
+}
+
+/// MediaInfo for the plan, from a readable probe.
+fn mediaOf(c: *Cand) ?plan.MediaInfo {
+    const pr = c.probe orelse return null;
+    if (!pr.readable) return null;
+    return .{ .codec = pr.vcodec, .width = pr.width, .height = pr.height, .duration_s = pr.duration_s };
+}
 
 fn lower(arena: std.mem.Allocator, s: []const u8) ![]u8 {
     const out = try arena.alloc(u8, s.len);
@@ -142,11 +164,14 @@ pub fn buildPlan(
     io: std.Io,
     dir_path: []const u8,
     cfg: config.Config,
+    probe_enabled: bool,
 ) !plan.Plan {
     var media: std.ArrayList(*Cand) = .empty;
     var sidecars: std.ArrayList(Sidecar) = .empty;
     var junk: std.ArrayList([]const u8) = .empty;
     var unclassified: std.ArrayList([]const u8) = .empty;
+
+    const do_probe = probe_enabled and probe.available(arena, io);
 
     // ---- Phase A: walk & bucket ---------------------------------------
     const cwd = std.Io.Dir.cwd();
@@ -187,6 +212,18 @@ pub fn buildPlan(
             if (mk == .tv and c.ep == null) {
                 try unclassified.append(arena, abs);
             } else {
+                if (do_probe) {
+                    c.probe = probe.run(arena, io, abs);
+                    if (mk == .tv) {
+                        const m = try enrich.mergeTv(arena, c.ep.?, c.probe);
+                        c.ep = .{ .series = m.fields.series, .season = m.fields.season, .episode = m.fields.episode, .title = m.fields.title, .quality = m.fields.quality, .ext = c.ep.?.ext };
+                        c.warnings = m.warnings;
+                    } else {
+                        const m = try enrich.mergeMovie(arena, c.mv.?, c.probe);
+                        c.mv = .{ .title = m.fields.title, .year = m.fields.year, .quality = m.fields.quality, .ext = c.mv.?.ext };
+                        c.warnings = m.warnings;
+                    }
+                }
                 try media.append(arena, c);
             }
         } else {
@@ -213,6 +250,7 @@ pub fn buildPlan(
                 .title = if (c.mkind == .tv) c.ep.?.series else c.mv.?.title,
                 .year = if (c.mkind == .movie) c.mv.?.year else null,
                 .items = .empty,
+                .warnings = .empty,
             });
             try gb_cands.append(arena, .empty);
         }
@@ -228,10 +266,7 @@ pub fn buildPlan(
             var best = std.AutoHashMap(u32, *Cand).init(arena);
             for (cands.items) |c| {
                 const gop = try best.getOrPut(c.ep.?.episode);
-                if (!gop.found_existing or
-                    mediascore.videoScore(c.ep.?.quality, c.size) >
-                        mediascore.videoScore(gop.value_ptr.*.ep.?.quality, gop.value_ptr.*.size))
-                {
+                if (!gop.found_existing or candScore(c) > candScore(gop.value_ptr.*)) {
                     gop.value_ptr.* = c;
                 }
             }
@@ -242,11 +277,12 @@ pub fn buildPlan(
             }
             // Assign roles + emit items.
             for (cands.items) |c| {
+                for (c.warnings) |w| try gb.warnings.append(arena, w);
                 const winner = best.get(c.ep.?.episode).?;
                 c.primary_dst = winner.dst;
                 if (c == winner) {
                     c.role = .primary;
-                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = c.dst, .reason = "" });
+                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = c.dst, .reason = "", .media = mediaOf(c) });
                 } else {
                     c.role = .duplicate;
                     try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate of primary" });
@@ -256,14 +292,14 @@ pub fn buildPlan(
             // Movie: all copies represent one work; pick the single best.
             var winner = cands.items[0];
             for (cands.items[1..]) |c| {
-                if (mediascore.videoScore(c.mv.?.quality, c.size) >
-                    mediascore.videoScore(winner.mv.?.quality, winner.size)) winner = c;
+                if (candScore(c) > candScore(winner)) winner = c;
             }
             winner.dst = try movieDst(arena, cfg, winner.mv.?);
             for (cands.items) |c| {
+                for (c.warnings) |w| try gb.warnings.append(arena, w);
                 c.primary_dst = winner.dst;
                 if (c == winner) {
-                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = winner.dst, .reason = "" });
+                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = winner.dst, .reason = "", .media = mediaOf(winner) });
                 } else {
                     try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate of primary" });
                 }
@@ -299,7 +335,7 @@ pub fn buildPlan(
         for (junk.items) |j| {
             try jitems.append(arena, .{ .src = j, .role = .junk, .op = .trash, .dst = null, .reason = "junk" });
         }
-        try gbs.append(arena, .{ .kind = .unknown, .title = "junk", .year = null, .items = jitems });
+        try gbs.append(arena, .{ .kind = .unknown, .title = "junk", .year = null, .items = jitems, .warnings = .empty });
     }
 
     // ---- Phase E: finalize --------------------------------------------
@@ -310,6 +346,7 @@ pub fn buildPlan(
             .title = gb.title,
             .year = gb.year,
             .items = try gb.items.toOwnedSlice(arena),
+            .warnings = try gb.warnings.toOwnedSlice(arena),
         });
     }
 
@@ -396,7 +433,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
         .tv_template = config.DEFAULT_TV,
         .movie_template = config.DEFAULT_MOVIE,
     };
-    const p = try buildPlan(a, io, root, cfg);
+    const p = try buildPlan(a, io, root, cfg, false); // probe off: deterministic, no ffprobe dep
 
     var tv_groups: usize = 0;
     var primaries: usize = 0;
