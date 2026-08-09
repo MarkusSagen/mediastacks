@@ -14,6 +14,7 @@ const config = @import("config.zig");
 const plan = @import("plan.zig");
 const tv = @import("../kinds/tv.zig");
 const movie = @import("../kinds/movie.zig");
+const music = @import("../kinds/music.zig");
 const probe = @import("probe.zig");
 const enrich = @import("enrich.zig");
 const drm = @import("drm.zig");
@@ -27,6 +28,7 @@ const Cand = struct {
     mkind: kind.MediaKind,
     ep: ?tv.Episode = null,
     mv: ?movie.Movie = null,
+    track: ?music.Track = null,
     probe: ?probe.Probe = null,
     warnings: []const []const u8 = &.{},
     group_idx: usize = 0,
@@ -42,6 +44,35 @@ const Sidecar = struct {
     stem: []const u8,
     ext: []const u8,
 };
+
+const Cover = struct { abs: []const u8, dir: []const u8, ext: []const u8 };
+
+fn isCoverImage(base: []const u8) bool {
+    const ext = std.fs.path.extension(base);
+    const is_img = std.ascii.eqlIgnoreCase(ext, ".jpg") or std.ascii.eqlIgnoreCase(ext, ".jpeg") or std.ascii.eqlIgnoreCase(ext, ".png");
+    if (!is_img) return false;
+    const stem = base[0 .. base.len - ext.len];
+    const names = [_][]const u8{ "cover", "folder", "front", "albumart", "album" };
+    for (names) |n| if (std.ascii.eqlIgnoreCase(stem, n)) return true;
+    return false;
+}
+
+/// Album-artist for a music candidate: album_artist tag → first artist →
+/// "Unknown Artist".
+fn musicAlbumArtist(c: *Cand) []const u8 {
+    const tr = c.track.?;
+    if (tr.album_artist) |x| return x;
+    if (tr.artists.len > 0) return tr.artists[0];
+    return "Unknown Artist";
+}
+fn musicAlbum(c: *Cand) []const u8 {
+    return c.track.?.album orelse "Unknown Album";
+}
+fn audioScoreOf(c: *Cand) f32 {
+    const ext = c.track.?.ext;
+    const lossless = std.ascii.eqlIgnoreCase(ext, "flac") or std.ascii.eqlIgnoreCase(ext, "alac");
+    return mediascore.audioScore(lossless, null, c.size);
+}
 
 const GB = struct {
     kind: kind.MediaKind,
@@ -136,6 +167,7 @@ pub fn buildPlan(
 ) !plan.Plan {
     var media: std.ArrayList(*Cand) = .empty;
     var sidecars: std.ArrayList(Sidecar) = .empty;
+    var covers: std.ArrayList(Cover) = .empty;
     var junk: std.ArrayList([]const u8) = .empty;
     var unclassified: std.ArrayList([]const u8) = .empty;
 
@@ -174,8 +206,19 @@ pub fn buildPlan(
             continue;
         }
 
+        if (isCoverImage(base)) {
+            const ext = try arena.dupe(u8, if (ext_dot.len > 0) ext_dot[1..] else ext_dot);
+            try covers.append(arena, .{ .abs = abs, .dir = d, .ext = ext });
+            continue;
+        }
+
         const mk = classify_mod.classify(base, false);
-        if (mk == .tv or mk == .movie) {
+        if (mk == .music) {
+            const c = try arena.create(Cand);
+            c.* = .{ .abs = abs, .dir = d, .stem = stem, .size = statSize(io, abs), .mkind = .music };
+            c.track = if (inspect) try music.parse(arena, io, abs) else try music.fromTags(arena, .{}, base);
+            try media.append(arena, c);
+        } else if (mk == .tv or mk == .movie) {
             const c = try arena.create(Cand);
             c.* = .{ .abs = abs, .dir = d, .stem = stem, .size = statSize(io, abs), .mkind = mk };
             if (mk == .tv) c.ep = try tv.parse(arena, base);
@@ -217,18 +260,31 @@ pub fn buildPlan(
     var gb_cands: std.ArrayList(std.ArrayList(*Cand)) = .empty;
 
     for (media.items) |c| {
-        const key = if (c.mkind == .tv)
-            try std.fmt.allocPrint(arena, "tv|{s}|{d}", .{ try lower(arena, c.ep.?.series), c.ep.?.season })
-        else
-            try std.fmt.allocPrint(arena, "mv|{s}|{?d}", .{ try lower(arena, c.mv.?.title), c.mv.?.year });
+        const key = switch (c.mkind) {
+            .tv => try std.fmt.allocPrint(arena, "tv|{s}|{d}", .{ try lower(arena, c.ep.?.series), c.ep.?.season }),
+            .movie => try std.fmt.allocPrint(arena, "mv|{s}|{?d}", .{ try lower(arena, c.mv.?.title), c.mv.?.year }),
+            .music => try std.fmt.allocPrint(arena, "mu|{s}|{s}", .{ try lower(arena, musicAlbumArtist(c)), try lower(arena, musicAlbum(c)) }),
+            else => unreachable,
+        };
 
         const gop = try key_to_gb.getOrPut(key);
         if (!gop.found_existing) {
             gop.value_ptr.* = gbs.items.len;
+            const gtitle = switch (c.mkind) {
+                .tv => c.ep.?.series,
+                .movie => c.mv.?.title,
+                .music => musicAlbum(c),
+                else => "",
+            };
+            const gyear = switch (c.mkind) {
+                .movie => c.mv.?.year,
+                .music => c.track.?.year,
+                else => null,
+            };
             try gbs.append(arena, .{
                 .kind = c.mkind,
-                .title = if (c.mkind == .tv) c.ep.?.series else c.mv.?.title,
-                .year = if (c.mkind == .movie) c.mv.?.year else null,
+                .title = gtitle,
+                .year = gyear,
                 .items = .empty,
                 .warnings = .empty,
             });
@@ -273,7 +329,7 @@ pub fn buildPlan(
                     try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate of primary" });
                 }
             }
-        } else {
+        } else if (gb.kind == .movie) {
             // Movie: all copies represent one work; pick the single best.
             var winner = cands.items[0];
             for (cands.items[1..]) |c| {
@@ -290,6 +346,36 @@ pub fn buildPlan(
                     try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = winner.dst, .reason = "", .media = mediaOf(winner), .fields = f });
                 } else {
                     try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate of primary" });
+                }
+            }
+        } else {
+            // Music: one album; dedup by (track#, title), best by audioScore.
+            // Album year is taken once (gb.year) so tracks missing a date tag
+            // don't scatter into a separate "(  )" folder.
+            var best = std.StringHashMap(*Cand).init(arena);
+            for (cands.items) |c| {
+                const tk = try std.fmt.allocPrint(arena, "{?d}|{s}", .{ c.track.?.track, try lower(arena, c.track.?.title orelse "") });
+                const gop = try best.getOrPut(tk);
+                if (!gop.found_existing or audioScoreOf(c) > audioScoreOf(gop.value_ptr.*)) gop.value_ptr.* = c;
+            }
+            var it = best.valueIterator();
+            while (it.next()) |cp| {
+                const f = plan.Fields{ .album_artist = musicAlbumArtist(cp.*), .album = gb.title, .year = gb.year, .track = cp.*.track.?.track, .title = cp.*.track.?.title, .artists = cp.*.track.?.artists, .ext = cp.*.track.?.ext };
+                cp.*.fields = f;
+                cp.*.dst = try naming.dstFor(arena, cfg, .music, f);
+            }
+            if (std.mem.eql(u8, gb.title, "Unknown Album")) try gb.warnings.append(arena, "untagged — filed under Unknown Album");
+            for (cands.items) |c| {
+                const tk = try std.fmt.allocPrint(arena, "{?d}|{s}", .{ c.track.?.track, try lower(arena, c.track.?.title orelse "") });
+                const winner = best.get(tk).?;
+                c.primary_dst = winner.dst;
+                c.fields = winner.fields;
+                if (c == winner) {
+                    c.role = .primary;
+                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = winner.dst, .reason = "", .fields = winner.fields });
+                } else {
+                    c.role = .duplicate;
+                    try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate track" });
                 }
             }
         }
@@ -318,6 +404,23 @@ pub fn buildPlan(
             }
         }
         try unclassified.append(arena, sc.abs);
+    }
+
+    // ---- Phase C2: attach album covers --------------------------------
+    for (covers.items) |cov| {
+        var attached = false;
+        for (media.items) |c| {
+            if (c.mkind != .music) continue;
+            if (!std.mem.eql(u8, c.dir, cov.dir)) continue;
+            if (c.primary_dst) |pd| {
+                const album_dir = std.fs.path.dirname(pd) orelse continue;
+                const dst = try std.fmt.allocPrint(arena, "{s}/cover.{s}", .{ album_dir, cov.ext });
+                try gbs.items[c.group_idx].items.append(arena, .{ .src = cov.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = "cover" });
+                attached = true;
+            }
+            break;
+        }
+        if (!attached) try unclassified.append(arena, cov.abs);
     }
 
     // ---- Phase D: junk ------------------------------------------------
@@ -410,6 +513,46 @@ fn writeDrmMp4(path_z: [:0]const u8) void {
     @memcpy(mh[4..8], "moov");
     _ = std.c.fwrite(&mh, 1, 8, fp);
     _ = std.c.fwrite(payload.ptr, 1, payload.len, fp);
+}
+
+test "buildPlan groups music into an album and attaches cover (no-probe)" {
+    // Deterministic: probe_enabled=false → no ffprobe, filename-only tags.
+    // The tag-driven path is covered end-to-end by scripts/music-smoke.sh.
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const pid = std.c.getpid();
+    var rb: [256]u8 = undefined;
+    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-music-{d}", .{pid});
+    mkdirAt("{s}", .{root});
+    try writeFileAt("{s}/track a.mp3", .{root}, "aaa");
+    try writeFileAt("{s}/track b.flac", .{root}, "bbbb");
+    try writeFileAt("{s}/cover.jpg", .{root}, "jpeg");
+
+    var threaded = std.Io.Threaded.init(t.allocator, .{});
+    defer threaded.deinit();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const p = try buildPlan(a, threaded.io(), root, cfg, false); // no probe
+
+    var music_groups: usize = 0;
+    var primaries: usize = 0;
+    var covers: usize = 0;
+    for (p.groups) |g| {
+        if (g.kind == .music) music_groups += 1;
+        for (g.items) |it| {
+            if (it.role == .primary) primaries += 1;
+            if (it.role == .sidecar and std.mem.endsWith(u8, it.dst orelse "", "cover.jpg")) covers += 1;
+        }
+    }
+    try t.expectEqual(@as(usize, 1), music_groups); // one Unknown Album
+    try t.expectEqual(@as(usize, 2), primaries); // the two tracks
+    try t.expectEqual(@as(usize, 1), covers); // cover attached to the album
+
+    unlinkAt("{s}/track a.mp3", .{root});
+    unlinkAt("{s}/track b.flac", .{root});
+    unlinkAt("{s}/cover.jpg", .{root});
+    rmdirAt("{s}", .{root});
 }
 
 test "buildPlan flags a DRM video and skips probing" {
