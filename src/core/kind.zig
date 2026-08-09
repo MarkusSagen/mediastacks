@@ -14,6 +14,7 @@ pub const MediaKind = enum {
     comic,
     movie,
     tv,
+    music,
     game,
     document,
     unknown,

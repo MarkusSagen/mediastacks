@@ -9,6 +9,7 @@ const std = @import("std");
 const kind = @import("kind.zig");
 
 const VIDEO_EXT = [_][]const u8{ ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".ts", ".webm" };
+const AUDIO_EXT = [_][]const u8{ ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wma" };
 const EBOOK_EXT = [_][]const u8{ ".epub", ".mobi", ".azw3" };
 const COMIC_EXT = [_][]const u8{ ".cbz", ".cbr", ".cb7", ".cbt" };
 const GAME_EXT = [_][]const u8{ ".nes", ".sfc", ".smc", ".gba", ".gb", ".gbc", ".n64", ".z64", ".iso", ".chd", ".rom", ".gg", ".md" };
@@ -48,6 +49,7 @@ pub fn classify(basename: []const u8, is_dir: bool) kind.MediaKind {
     if (extIn(ext, &VIDEO_EXT)) {
         return if (hasSeasonEpisode(stem)) .tv else .movie;
     }
+    if (extIn(ext, &AUDIO_EXT)) return .music;
     if (extIn(ext, &EBOOK_EXT)) return .ebook;
     if (extIn(ext, &COMIC_EXT)) return .comic;
     if (extIn(ext, &GAME_EXT)) return .game;
@@ -63,6 +65,12 @@ test "classify detects tv from SxxExx video file" {
 test "classify detects movie from plain video file" {
     try t.expectEqual(kind.MediaKind.movie, classify("Blade Runner 2049 (2017) 1080p.mkv", false));
 }
+test "classify detects music from audio extensions" {
+    try t.expectEqual(kind.MediaKind.music, classify("03 - Layla.mp3", false));
+    try t.expectEqual(kind.MediaKind.music, classify("song.flac", false));
+    try t.expectEqual(kind.MediaKind.music, classify("x.m4a", false));
+}
+
 test "classify routes ebook, comic, and pdf" {
     try t.expectEqual(kind.MediaKind.ebook, classify("book.epub", false));
     try t.expectEqual(kind.MediaKind.comic, classify("issue.cbz", false));
