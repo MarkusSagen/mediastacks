@@ -80,21 +80,20 @@ fn respondAsset(request: *std.http.Server.Request, bytes: []const u8, ctype: []c
     } });
 }
 
+fn claimReader(request: *std.http.Server.Request, buffer: []u8) !*std.Io.Reader {
+    if (request.head.expect != null) return try request.readerExpectContinue(buffer);
+    return request.readerExpectNone(buffer);
+}
+
 fn readBody(arena: std.mem.Allocator, request: *std.http.Server.Request, max: usize) ![]u8 {
     if (request.head.content_length) |len| {
         if (len > max) return error.BodyTooLarge;
         var buf: [64 * 1024]u8 = undefined;
-        const reader = if (request.head.expect != null)
-            try request.readerExpectContinue(&buf)
-        else
-            try request.readerExpectNone(&buf);
+        const reader = try claimReader(request, &buf);
         return try reader.readAlloc(arena, @intCast(len));
     }
     var buf: [16]u8 = undefined;
-    _ = if (request.head.expect != null)
-        try request.readerExpectContinue(&buf)
-    else
-        try request.readerExpectNone(&buf);
+    _ = try claimReader(request, &buf);
     return arena.alloc(u8, 0);
 }
 
@@ -121,6 +120,7 @@ fn handle(io: std.Io, session: *Session, env: *std.process.Environ.Map, request:
         return respondJson(request, try plan.toJson(session.arena, session.plan));
     }
     if (std.mem.eql(u8, path, "/api/apply")) {
+        _ = readBody(session.arena, request, 64 * 1024) catch {}; // claim the (empty) POST body
         const res = try apply_mod.apply(session.arena, session.plan, .skip, env);
         const body = try std.fmt.allocPrint(session.arena, "{{\"moved\":{d},\"trashed\":{d},\"skipped\":{d},\"journal\":\"{s}\"}}", .{ res.moved, res.trashed, res.skipped, res.journal_path });
         return respondJson(request, body);
