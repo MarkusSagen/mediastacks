@@ -73,6 +73,20 @@ Still open (own future specs):
 - [ ] `kinds/document.zig` — loose PDFs/papers/manuals beyond biblio's ebooks.
 - [ ] Confirm each new kind needs *only* a parser + template (no core changes).
 
+## Music epic (incremental A→B→C)
+
+- [x] **A — read tags + organize album library.** `kinds/music.zig`
+      (ffprobe tags → Track, multi-artist split into a list); classify audio →
+      `.music`; album = `Group` keyed by (album-artist, album); layout
+      `Music/{album_artist}/{album} ({year})/{track:02} - {title}.{ext}`
+      (`music_template` preset); `audioScore` dedup; album cover as a
+      sidecar. Read-only, through `organize`/`review`. music-smoke.
+- [ ] **B — MusicBrainz enrichment.** Fill missing/wrong album, year,
+      canonical artist names, cover (needs the online-provider layer, Phase 4).
+- [ ] **C — tag write-back (the multi-artist fix).** Write multi-value
+      artist tags so a track lists under *each* artist; embed cover/album/year.
+      Needs the file-mutation/write-back safety design.
+
 ## Phase 3 — review surfaces over the Plan JSON
 
 - [x] **Web review (Phase 3a).** `shelve review DIR` serves a local page
