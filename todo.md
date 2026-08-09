@@ -73,12 +73,15 @@ Still open (own future specs):
 - [ ] `kinds/document.zig` — loose PDFs/papers/manuals beyond biblio's ebooks.
 - [ ] Confirm each new kind needs *only* a parser + template (no core changes).
 
-## Phase 3 — review surfaces over the Plan JSON — IN PROGRESS
+## Phase 3 — review surfaces over the Plan JSON
 
-- [ ] TUI review screen: load a `Plan` (`--from`), edit groupings/titles, toggle
-      items, apply. Editor over the same JSON — no bypassing the contract.
-- [ ] Web review page (in `biblio serve` or a shared server): same, with
-      thumbnails/posters and drag-to-regroup.
+- [x] **Web review (Phase 3a).** `shelve review DIR` serves a local page
+      (`web/review.zig`, server-authoritative session): render grouped plan,
+      keep/skip/trash, inline retitle (live path recompute), drag-to-regroup,
+      ffmpeg posters (`/api/thumb`), Apply (real move + journal). Shared
+      `core/naming.dstFor` + `Plan.Item.fields`. `just review`, review-smoke.
+- [ ] **TUI review (Phase 3b).** Same edit-op model over the Plan in a
+      libvaxis terminal UI (`tui/review.zig`) — load `--from`, edit, apply.
 
 ## Phase 4 — online enrichment (opt-in)
 
