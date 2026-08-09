@@ -172,21 +172,55 @@ pub const AlbumMeta = struct {
     year: ?u32,
 };
 
-/// Consensus album metadata over a folder's tracks. `album` = first non-empty
-/// album tag, else `folder_name` (else "Unknown Album"). `album_artist` = a
-/// present album_artist tag; else the shared primary artist if all tracks agree;
-/// else "Various Artists" when they differ; else "Unknown Artist" when no track
-/// carries an artist. `year` = first non-zero year. Strings owned by `alloc`.
-pub fn albumMeta(alloc: std.mem.Allocator, tracks: []const Track, folder_name: []const u8) !AlbumMeta {
-    var album: []const u8 = if (folder_name.len > 0) folder_name else "Unknown Album";
-    for (tracks) |tr| if (tr.album) |al| if (al.len > 0) {
-        album = al;
-        break;
-    };
+/// A tag value is unusable if empty or corrupted — ffprobe substitutes the
+/// Unicode replacement char (U+FFFD) when it can't decode a tag's bytes, and
+/// that data is unrecoverable, so we prefer a folder-derived name instead.
+fn tagUnusable(s: []const u8) bool {
+    return s.len == 0 or std.mem.indexOf(u8, s, "\u{FFFD}") != null;
+}
 
+/// Derive a readable album name from its source folder when the album tag is
+/// missing or corrupted. Strips a leading 4-digit year and a leading
+/// "<album_artist> -" prefix (e.g. "1979 - Dire Straits - Communique" +
+/// "Dire Straits" → "Communique"). Owned by `alloc`.
+fn trimSepStart(s: []const u8) []const u8 {
+    var i: usize = 0;
+    while (i < s.len and (s[i] == ' ' or s[i] == '-' or s[i] == '_' or s[i] == '.')) : (i += 1) {}
+    return s[i..];
+}
+
+pub fn cleanAlbumFolder(alloc: std.mem.Allocator, folder: []const u8, album_artist: []const u8) ![]u8 {
+    var s = std.mem.trim(u8, folder, " \t\r\n");
+    // Leading 4-digit year + separator (e.g. "1979 - ...").
+    if (s.len >= 5 and std.ascii.isDigit(s[0]) and std.ascii.isDigit(s[1]) and
+        std.ascii.isDigit(s[2]) and std.ascii.isDigit(s[3]) and !std.ascii.isDigit(s[4]))
+    {
+        const rest = trimSepStart(s[4..]);
+        if (rest.len > 0) s = rest;
+    }
+    // Leading "<album_artist> -" prefix.
+    if (album_artist.len > 0 and s.len > album_artist.len and
+        !std.mem.eql(u8, album_artist, "Various Artists") and
+        !std.mem.eql(u8, album_artist, "Unknown Artist") and
+        std.ascii.startsWithIgnoreCase(s, album_artist))
+    {
+        const rest = trimSepStart(s[album_artist.len..]);
+        if (rest.len > 0) s = rest;
+    }
+    s = std.mem.trim(u8, s, " \t\r\n");
+    return alloc.dupe(u8, if (s.len > 0) s else folder);
+}
+
+/// Consensus album metadata over a folder's tracks. `album_artist` = a usable
+/// album_artist tag; else the shared primary artist if all tracks agree; else
+/// "Various Artists" when they differ; else "Unknown Artist" when no track
+/// carries an artist. `album` = first usable album tag, else the cleaned
+/// `folder_name` (else "Unknown Album"). `year` = first non-zero year. Strings
+/// owned by `alloc`.
+pub fn albumMeta(alloc: std.mem.Allocator, tracks: []const Track, folder_name: []const u8) !AlbumMeta {
     var album_artist: []const u8 = undefined;
     var found_aa = false;
-    for (tracks) |tr| if (tr.album_artist) |aa| if (aa.len > 0) {
+    for (tracks) |tr| if (tr.album_artist) |aa| if (!tagUnusable(aa)) {
         album_artist = aa;
         found_aa = true;
         break;
@@ -212,6 +246,18 @@ pub fn albumMeta(alloc: std.mem.Allocator, tracks: []const Track, folder_name: [
         }
     }
 
+    var album: ?[]const u8 = null;
+    for (tracks) |tr| if (tr.album) |al| if (!tagUnusable(al)) {
+        album = al;
+        break;
+    };
+    const album_final = if (album) |al|
+        try alloc.dupe(u8, al)
+    else if (folder_name.len > 0)
+        try cleanAlbumFolder(alloc, folder_name, album_artist)
+    else
+        try alloc.dupe(u8, "Unknown Album");
+
     var year: ?u32 = null;
     for (tracks) |tr| if (tr.year) |y| if (y != 0) {
         year = y;
@@ -219,7 +265,7 @@ pub fn albumMeta(alloc: std.mem.Allocator, tracks: []const Track, folder_name: [
     };
 
     return .{
-        .album = try alloc.dupe(u8, album),
+        .album = album_final,
         .album_artist = try alloc.dupe(u8, album_artist),
         .year = year,
     };
@@ -343,4 +389,29 @@ test "albumMeta: no tags -> folder name album, Unknown Artist, no year" {
     try t.expectEqualStrings("My Folder", m.album);
     try t.expectEqualStrings("Unknown Artist", m.album_artist);
     try t.expectEqual(@as(?u32, null), m.year);
+}
+
+test "cleanAlbumFolder strips leading year and artist prefix" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try t.expectEqualStrings("Communique", try cleanAlbumFolder(a, "1979 - Dire Straits - Communique", "Dire Straits"));
+    try t.expectEqualStrings("Blue", try cleanAlbumFolder(a, "Eric Clapton - Blue", "Eric Clapton"));
+    try t.expectEqualStrings("Blue", try cleanAlbumFolder(a, "Blue", "Eric Clapton"));
+    // No usable artist prefix to strip; year still goes.
+    try t.expectEqualStrings("Live In Rotterdam", try cleanAlbumFolder(a, "1978 - Live In Rotterdam", "Unknown Artist"));
+}
+
+test "albumMeta: mojibake album tag falls back to cleaned folder name" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const mojibake = "Communiqu\u{FFFD}"; // ffprobe-substituted replacement char
+    const tracks = [_]Track{
+        .{ .album = mojibake, .album_artist = "Dire Straits", .artists = &.{"Dire Straits"}, .year = 1979, .ext = "mp3" },
+    };
+    const m = try albumMeta(a, &tracks, "1979 - Dire Straits - Communique");
+    try t.expectEqualStrings("Communique", m.album);
+    try t.expectEqualStrings("Dire Straits", m.album_artist);
+    try t.expectEqual(@as(u32, 1979), m.year.?);
 }
