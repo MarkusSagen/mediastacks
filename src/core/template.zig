@@ -308,6 +308,10 @@ fn collapseSpaces(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
     var i: usize = 0;
     while (i < unslashed.items.len) {
         const s = unslashed.items[i..];
+        if (s.len >= 3 and s[0] == ' ' and s[1] == '(' and s[2] == ')') {
+            i += 3;
+            continue;
+        }
         if (s.len >= 4 and s[0] == '/' and std.mem.eql(u8, s[0..4], "/ - ")) {
             try stripped.append(allocator, '/');
             i += 4;
@@ -456,6 +460,33 @@ test "renderFields builds a TV path with zero-padding" {
     const out = try renderFields(alloc, "TV/{series}/Season {season:02}/{series} - S{season:02}E{episode:02} - {title}.{ext}", &fields);
     defer alloc.free(out);
     try expectEqualStrings("TV/Witch Hat Atelier/Season 01/Witch Hat Atelier - S01E12 - The Shadow of Romonon.mkv", out);
+}
+
+test "renderFields drops empty parenthesized year" {
+    const alloc = test_alloc;
+    const fields = [_]Field{
+        .{ .name = "album_artist", .value = "Solo" },
+        .{ .name = "album", .value = "NoYear" },
+        .{ .name = "year", .value = "" },
+        .{ .name = "track", .value = "1" },
+        .{ .name = "title", .value = "Song" },
+        .{ .name = "ext", .value = "mp3" },
+    };
+    const out = try renderFields(alloc, "Music/{album_artist}/{album} ({year})/{track:02} - {title}.{ext}", &fields);
+    defer alloc.free(out);
+    try expectEqualStrings("Music/Solo/NoYear/01 - Song.mp3", out);
+}
+
+test "renderFields drops empty year before extension" {
+    const alloc = test_alloc;
+    const fields = [_]Field{
+        .{ .name = "title", .value = "The Matrix" },
+        .{ .name = "year", .value = "" },
+        .{ .name = "ext", .value = "mkv" },
+    };
+    const out = try renderFields(alloc, "Movies/{title} ({year})/{title} ({year}).{ext}", &fields);
+    defer alloc.free(out);
+    try expectEqualStrings("Movies/The Matrix/The Matrix.mkv", out);
 }
 
 test "unknown field renders literally" {
