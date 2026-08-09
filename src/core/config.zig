@@ -13,31 +13,37 @@ const std = @import("std");
 pub const DEFAULT_ROOT = "~/Media";
 pub const DEFAULT_TV = "Shows/{series}/Season {season:02}/{series} S{season:02}E{episode:02} - {title}.{ext}";
 pub const DEFAULT_MOVIE = "Movies/{title} ({year})/{title} ({year}).{ext}";
+pub const DEFAULT_MUSIC = "Music/{album_artist}/{album} ({year})/{track:02} - {title}.{ext}";
 
 pub const Config = struct {
     library_root: []const u8,
     tv_template: []const u8,
     movie_template: []const u8,
+    music_template: []const u8,
 };
 
 pub fn freeConfig(alloc: std.mem.Allocator, cfg: Config) void {
     alloc.free(cfg.library_root);
     alloc.free(cfg.tv_template);
     alloc.free(cfg.movie_template);
+    alloc.free(cfg.music_template);
 }
 
-const Preset = struct { tv: []const u8, movie: []const u8 };
+const Preset = struct { tv: []const u8, movie: []const u8, music: []const u8 };
 
-/// Built-in naming presets. jellyfin is the default.
+/// Built-in naming presets. jellyfin is the default. (All presets share the
+/// same music layout for now.)
 fn presetByName(name: []const u8) ?Preset {
-    if (std.mem.eql(u8, name, "jellyfin")) return .{ .tv = DEFAULT_TV, .movie = DEFAULT_MOVIE };
+    if (std.mem.eql(u8, name, "jellyfin")) return .{ .tv = DEFAULT_TV, .movie = DEFAULT_MOVIE, .music = DEFAULT_MUSIC };
     if (std.mem.eql(u8, name, "plex")) return .{
         .tv = "TV Shows/{series}/Season {season:02}/{series} - S{season:02}E{episode:02} - {title}.{ext}",
         .movie = DEFAULT_MOVIE,
+        .music = DEFAULT_MUSIC,
     };
     if (std.mem.eql(u8, name, "kodi")) return .{
         .tv = "TV Shows/{series}/Season {season:02}/{series} S{season:02}E{episode:02} - {title}.{ext}",
         .movie = DEFAULT_MOVIE,
+        .music = DEFAULT_MUSIC,
     };
     return null;
 }
@@ -61,6 +67,8 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
     var movie_preset: ?[]const u8 = null;
     var tv_template: ?[]const u8 = null;
     var movie_template: ?[]const u8 = null;
+    var music_preset: ?[]const u8 = null;
+    var music_template: ?[]const u8 = null;
 
     var it = std.mem.tokenizeScalar(u8, text, '\n');
     while (it.next()) |raw| {
@@ -76,11 +84,14 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
         else if (std.mem.eql(u8, key, "tv_preset")) tv_preset = val
         else if (std.mem.eql(u8, key, "movie_preset")) movie_preset = val
         else if (std.mem.eql(u8, key, "tv_template")) tv_template = val
-        else if (std.mem.eql(u8, key, "movie_template")) movie_template = val;
+        else if (std.mem.eql(u8, key, "movie_template")) movie_template = val
+        else if (std.mem.eql(u8, key, "music_preset")) music_preset = val
+        else if (std.mem.eql(u8, key, "music_template")) music_template = val;
     }
 
     const tv = try resolve("tv", tv_template, tv_preset, preset);
     const movie = try resolve("movie", movie_template, movie_preset, preset);
+    const music = try resolve("music", music_template, music_preset, preset);
     const root = library_root orelse DEFAULT_ROOT;
 
     const lr = try alloc.dupe(u8, root);
@@ -88,7 +99,9 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
     const tt = try alloc.dupe(u8, tv);
     errdefer alloc.free(tt);
     const mt = try alloc.dupe(u8, movie);
-    return .{ .library_root = lr, .tv_template = tt, .movie_template = mt };
+    errdefer alloc.free(mt);
+    const mu = try alloc.dupe(u8, music);
+    return .{ .library_root = lr, .tv_template = tt, .movie_template = mt, .music_template = mu };
 }
 
 fn configPath(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
@@ -160,6 +173,7 @@ test "parseLines with empty text yields defaults" {
     defer freeConfig(a, cfg);
     try t.expectEqualStrings(DEFAULT_ROOT, cfg.library_root);
     try t.expectEqualStrings(DEFAULT_TV, cfg.tv_template);
+    try t.expectEqualStrings(DEFAULT_MUSIC, cfg.music_template);
 }
 
 test "global preset resolves both; per-type overrides" {

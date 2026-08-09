@@ -329,7 +329,7 @@ fn mkSession(a: std.mem.Allocator) Session {
     items[0] = .{ .src = "/x/a.mkv", .role = .primary, .op = .move, .dst = "/lib/old.mkv", .fields = .{ .series = "Old", .season = 1, .episode = 1, .ext = "mkv" } };
     const groups = a.alloc(plan.Group, 1) catch unreachable;
     groups[0] = .{ .kind = .tv, .title = "Old", .items = items };
-    return .{ .arena = a, .cfg = .{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE }, .plan = .{ .library_root = "/lib", .source = "/x", .groups = groups } };
+    return .{ .arena = a, .cfg = .{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC }, .plan = .{ .library_root = "/lib", .source = "/x", .groups = groups } };
 }
 
 test "retitle recomputes dst" {

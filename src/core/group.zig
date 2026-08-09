@@ -428,7 +428,7 @@ test "buildPlan flags a DRM video and skips probing" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
     const p = try buildPlan(a, threaded.io(), root, cfg, true); // probe_enabled
 
     var warned = false;
@@ -476,6 +476,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
         .library_root = "/lib",
         .tv_template = config.DEFAULT_TV,
         .movie_template = config.DEFAULT_MOVIE,
+        .music_template = config.DEFAULT_MUSIC,
     };
     const p = try buildPlan(a, io, root, cfg, false); // probe off: deterministic, no ffprobe dep
 

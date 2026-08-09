@@ -26,6 +26,11 @@ pub const Fields = struct {
     title: ?[]const u8 = null,
     year: ?u32 = null,
     ext: ?[]const u8 = null,
+    // music
+    album_artist: ?[]const u8 = null,
+    album: ?[]const u8 = null,
+    track: ?u32 = null,
+    artists: []const []const u8 = &.{},
 };
 
 pub const Item = struct {

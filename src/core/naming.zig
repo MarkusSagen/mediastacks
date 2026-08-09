@@ -35,6 +35,17 @@ pub fn dstFor(arena: std.mem.Allocator, cfg: config.Config, k: kind.MediaKind, f
             };
             break :blk try template.renderFields(arena, cfg.movie_template, &fields);
         },
+        .music => blk: {
+            const fields = [_]template.Field{
+                .{ .name = "album_artist", .value = f.album_artist orelse "" },
+                .{ .name = "album", .value = f.album orelse "" },
+                .{ .name = "year", .value = if (f.year) |y| try u32str(arena, y) else "" },
+                .{ .name = "track", .value = if (f.track) |tr| try u32str(arena, tr) else "" },
+                .{ .name = "title", .value = f.title orelse "" },
+                .{ .name = "ext", .value = f.ext orelse "" },
+            };
+            break :blk try template.renderFields(arena, cfg.music_template, &fields);
+        },
         else => return error.UnsupportedKind,
     };
     return std.fs.path.join(arena, &.{ cfg.library_root, rel });
@@ -46,16 +57,25 @@ test "dstFor renders a jellyfin tv path" {
     var arena_state = std.heap.ArenaAllocator.init(t.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
     const out = try dstFor(a, cfg, .tv, .{ .series = "Witch Hat Atelier", .season = 1, .episode = 12, .title = "The Shadow of Romonon", .ext = "mkv" });
     try t.expectEqualStrings("/lib/Shows/Witch Hat Atelier/Season 01/Witch Hat Atelier S01E12 - The Shadow of Romonon.mkv", out);
+}
+
+test "dstFor renders a music path" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const out = try dstFor(a, cfg, .music, .{ .album_artist = "Eric Clapton", .album = "Best of Blues", .year = 1998, .track = 3, .title = "Layla", .ext = "mp3" });
+    try t.expectEqualStrings("/lib/Music/Eric Clapton/Best of Blues (1998)/03 - Layla.mp3", out);
 }
 
 test "dstFor renders a movie path" {
     var arena_state = std.heap.ArenaAllocator.init(t.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
     const out = try dstFor(a, cfg, .movie, .{ .title = "The Matrix", .year = 1999, .ext = "mkv" });
     try t.expectEqualStrings("/lib/Movies/The Matrix (1999)/The Matrix (1999).mkv", out);
 }
