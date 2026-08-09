@@ -7,7 +7,13 @@ header h1 { margin:0; font-size:15px; }
 .summary { color:var(--dim); }
 main { padding:16px 20px 80px; }
 .group { margin:0 0 20px; }
-.group h2 { font-size:13px; color:var(--accent); font-weight:600; margin:0 0 6px; }
+.group h2 { font-size:13px; font-weight:600; margin:0 0 6px; }
+.group h2 .title { color:var(--accent); outline:none; border-bottom:1px dashed transparent; }
+.group h2 .title:focus { border-bottom-color:var(--accent); }
+.group h2 .path { color:var(--dim); font-weight:400; }
+.group.drop { background:var(--rail); border-radius:6px; }
+.handle { color:var(--dim); cursor:grab; }
+.row[draggable=true] { cursor:default; }
 .row { padding:3px 10px; border-left:2px solid var(--rail); display:flex; gap:10px; align-items:center; }
 .row .name { flex:1; }
 .row .media { color:var(--dim); }

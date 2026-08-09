@@ -35,6 +35,43 @@ function roleSelect(it, gi, ii) {
   return sel;
 }
 
+function mediaTag(it) {
+  if (!it.media) return null;
+  const parts = [];
+  if (it.media.codec) parts.push(it.media.codec);
+  if (it.media.height) parts.push(it.media.height + "p");
+  if (it.media.duration_s) parts.push(Math.round(it.media.duration_s / 60) + "m");
+  if (!parts.length) return null;
+  const m = document.createElement("span");
+  m.className = "media";
+  m.textContent = "  · " + parts.join(" ");
+  return m;
+}
+
+function groupHeader(g, gi) {
+  const h = document.createElement("h2");
+  const title = document.createElement("span");
+  title.className = "title";
+  title.contentEditable = "true";
+  title.spellcheck = false;
+  title.textContent = g.title;
+  const original = g.title;
+  title.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); title.blur(); } };
+  title.onblur = () => {
+    const t = title.textContent.trim();
+    if (t && t !== original) edit({ op: "retitle", group: gi, title: t });
+  };
+  h.appendChild(title);
+  const first = (g.items || []).find((it) => it.dst);
+  if (first) {
+    const path = document.createElement("span");
+    path.className = "path";
+    path.textContent = "  →  " + dirOf(first.dst) + "/";
+    h.appendChild(path);
+  }
+  return h;
+}
+
 function render() {
   app.innerHTML = "";
   let moves = 0, trash = 0, dup = 0;
@@ -42,31 +79,35 @@ function render() {
   groups.forEach((g, gi) => {
     const sec = document.createElement("section");
     sec.className = "group";
-    const first = (g.items || []).find((it) => it.dst);
-    const h = document.createElement("h2");
-    h.textContent = g.title + (first ? "  →  " + dirOf(first.dst) + "/" : "");
-    sec.appendChild(h);
+    // drop target for drag-to-regroup
+    sec.ondragover = (e) => { e.preventDefault(); sec.classList.add("drop"); };
+    sec.ondragleave = () => sec.classList.remove("drop");
+    sec.ondrop = (e) => {
+      e.preventDefault();
+      sec.classList.remove("drop");
+      const [fg, fi] = (e.dataTransfer.getData("text/plain") || "").split(":").map(Number);
+      if (Number.isInteger(fg) && Number.isInteger(fi) && fg !== gi) {
+        edit({ op: "move-item", from: fg, item: fi, to: gi });
+      }
+    };
+
+    sec.appendChild(groupHeader(g, gi));
 
     (g.items || []).forEach((it, ii) => {
       const row = document.createElement("div");
       row.className = "row role-" + it.role;
       if (it.role === "primary" || it.role === "sidecar") {
         moves++;
+        row.draggable = true;
+        row.ondragstart = (e) => e.dataTransfer.setData("text/plain", gi + ":" + ii);
+        const handle = document.createElement("span");
+        handle.className = "handle"; handle.textContent = "⠿";
+        row.appendChild(handle);
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = baseOf(it.dst || "?");
-        if (it.media) {
-          const parts = [];
-          if (it.media.codec) parts.push(it.media.codec);
-          if (it.media.height) parts.push(it.media.height + "p");
-          if (it.media.duration_s) parts.push(Math.round(it.media.duration_s / 60) + "m");
-          if (parts.length) {
-            const m = document.createElement("span");
-            m.className = "media";
-            m.textContent = "  · " + parts.join(" ");
-            name.appendChild(m);
-          }
-        }
+        const m = mediaTag(it);
+        if (m) name.appendChild(m);
         row.appendChild(name);
         row.appendChild(roleSelect(it, gi, ii));
       } else if (it.role === "duplicate") {
