@@ -10,12 +10,185 @@ const plan = @import("../core/plan.zig");
 const naming = @import("../core/naming.zig");
 const config = @import("../core/config.zig");
 const kind = @import("../core/kind.zig");
+const static = @import("static.zig");
+const apply_mod = @import("../core/apply.zig");
+const exec = @import("../util/exec.zig");
+const shutdown = @import("../util/shutdown.zig");
 
 pub const Session = struct {
     arena: std.mem.Allocator,
     cfg: config.Config,
     plan: plan.Plan,
 };
+
+pub const Options = struct { bind: []const u8 = "127.0.0.1", port: u16 = 8788 };
+
+/// Single-threaded review server — the session is mutable and edit ops are
+/// fast, so one request at a time keeps it race-free. 127.0.0.1 only.
+pub fn serve(
+    io: std.Io,
+    session: *Session,
+    env: *std.process.Environ.Map,
+    opts: Options,
+    log: *std.Io.Writer,
+) !void {
+    var address = try std.Io.net.IpAddress.parse(opts.bind, opts.port);
+    var server = try address.listen(io, .{ .reuse_address = true, .kernel_backlog = 64 });
+    defer server.deinit(io);
+    try log.print("reviewing at http://{s}:{d}/  (Ctrl+C to stop)\n", .{ opts.bind, opts.port });
+    try log.flush();
+
+    while (true) {
+        if (shutdown.isRequested()) return;
+        var stream = server.accept(io) catch |err| {
+            if (shutdown.isRequested()) return;
+            std.log.warn("accept: {s}", .{@errorName(err)});
+            continue;
+        };
+        defer stream.socket.close(io);
+
+        var in_buf: [16 * 1024]u8 = undefined;
+        var out_buf: [64 * 1024]u8 = undefined;
+        var sr = stream.reader(io, &in_buf);
+        var sw = stream.writer(io, &out_buf);
+        var http = std.http.Server.init(&sr.interface, &sw.interface);
+        var request = http.receiveHead() catch continue;
+
+        handle(io, session, env, &request) catch |err| {
+            request.respond("internal error\n", .{ .status = .internal_server_error, .keep_alive = false }) catch {};
+            std.log.warn("review handler: {s}", .{@errorName(err)});
+        };
+    }
+}
+
+fn pathOnly(target: []const u8) []const u8 {
+    if (std.mem.indexOfScalar(u8, target, '?')) |q| return target[0..q];
+    return target;
+}
+
+fn respondJson(request: *std.http.Server.Request, body: []const u8) !void {
+    try request.respond(body, .{ .status = .ok, .extra_headers = &.{
+        .{ .name = "content-type", .value = "application/json; charset=utf-8" },
+        .{ .name = "cache-control", .value = "no-cache" },
+    } });
+}
+
+fn respondAsset(request: *std.http.Server.Request, bytes: []const u8, ctype: []const u8) !void {
+    try request.respond(bytes, .{ .status = .ok, .extra_headers = &.{
+        .{ .name = "content-type", .value = ctype },
+        .{ .name = "cache-control", .value = "no-cache" },
+    } });
+}
+
+fn readBody(arena: std.mem.Allocator, request: *std.http.Server.Request, max: usize) ![]u8 {
+    if (request.head.content_length) |len| {
+        if (len > max) return error.BodyTooLarge;
+        var buf: [64 * 1024]u8 = undefined;
+        const reader = if (request.head.expect != null)
+            try request.readerExpectContinue(&buf)
+        else
+            try request.readerExpectNone(&buf);
+        return try reader.readAlloc(arena, @intCast(len));
+    }
+    var buf: [16]u8 = undefined;
+    _ = if (request.head.expect != null)
+        try request.readerExpectContinue(&buf)
+    else
+        try request.readerExpectNone(&buf);
+    return arena.alloc(u8, 0);
+}
+
+fn handle(io: std.Io, session: *Session, env: *std.process.Environ.Map, request: *std.http.Server.Request) !void {
+    const target = request.head.target;
+    const path = pathOnly(target);
+
+    if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html")) {
+        return respondAsset(request, static.review_html, "text/html; charset=utf-8");
+    }
+    if (std.mem.eql(u8, path, "/review.js")) return respondAsset(request, static.review_js, "application/javascript");
+    if (std.mem.eql(u8, path, "/review.css")) return respondAsset(request, static.review_css, "text/css");
+
+    if (std.mem.eql(u8, path, "/api/plan")) {
+        return respondJson(request, try plan.toJson(session.arena, session.plan));
+    }
+    if (std.mem.eql(u8, path, "/api/edit")) {
+        const body = readBody(session.arena, request, 1 * 1024 * 1024) catch {
+            return request.respond("bad body\n", .{ .status = .bad_request });
+        };
+        applyEdit(session, body) catch {
+            return request.respond("bad edit\n", .{ .status = .bad_request });
+        };
+        return respondJson(request, try plan.toJson(session.arena, session.plan));
+    }
+    if (std.mem.eql(u8, path, "/api/apply")) {
+        const res = try apply_mod.apply(session.arena, session.plan, .skip, env);
+        const body = try std.fmt.allocPrint(session.arena, "{{\"moved\":{d},\"trashed\":{d},\"skipped\":{d},\"journal\":\"{s}\"}}", .{ res.moved, res.trashed, res.skipped, res.journal_path });
+        return respondJson(request, body);
+    }
+    if (std.mem.eql(u8, path, "/api/thumb")) {
+        return handleThumb(io, session, request, target);
+    }
+
+    try request.respond("not found\n", .{ .status = .not_found });
+}
+
+/// Poster frame via ffmpeg. `src` must be a path present in the plan.
+fn handleThumb(io: std.Io, session: *Session, request: *std.http.Server.Request, target: []const u8) !void {
+    const q = std.mem.indexOfScalar(u8, target, '?') orelse return request.respond("", .{ .status = .not_found });
+    const query = target[q + 1 ..];
+    const src_enc = valueOf(query, "src") orelse return request.respond("", .{ .status = .not_found });
+    const src = try urlDecode(session.arena, src_enc);
+
+    if (!planHasSrc(session, src)) return request.respond("", .{ .status = .forbidden });
+
+    const argv = [_][]const u8{ "ffmpeg", "-v", "error", "-ss", "60", "-i", src, "-frames:v", "1", "-vf", "scale=320:-1", "-f", "image2pipe", "-vcodec", "mjpeg", "-" };
+    const r = exec.runCaptureStdout(session.arena, io, &argv, 4 * 1024 * 1024) catch return request.respond("", .{ .status = .not_found });
+    if (r.exit_code != 0 or r.stdout.len == 0) return request.respond("", .{ .status = .not_found });
+    try request.respond(r.stdout, .{ .status = .ok, .extra_headers = &.{
+        .{ .name = "content-type", .value = "image/jpeg" },
+        .{ .name = "cache-control", .value = "max-age=3600" },
+    } });
+}
+
+fn planHasSrc(session: *Session, src: []const u8) bool {
+    for (session.plan.groups) |g| {
+        for (g.items) |it| if (std.mem.eql(u8, it.src, src)) return true;
+    }
+    return false;
+}
+
+fn valueOf(query: []const u8, key: []const u8) ?[]const u8 {
+    var it = std.mem.tokenizeScalar(u8, query, '&');
+    while (it.next()) |pair| {
+        const eq = std.mem.indexOfScalar(u8, pair, '=') orelse continue;
+        if (std.mem.eql(u8, pair[0..eq], key)) return pair[eq + 1 ..];
+    }
+    return null;
+}
+
+fn urlDecode(arena: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < s.len) : (i += 1) {
+        if (s[i] == '%' and i + 2 < s.len) {
+            const hi = std.fmt.charToDigit(s[i + 1], 16) catch {
+                try out.append(arena, s[i]);
+                continue;
+            };
+            const lo = std.fmt.charToDigit(s[i + 2], 16) catch {
+                try out.append(arena, s[i]);
+                continue;
+            };
+            try out.append(arena, @intCast(hi * 16 + lo));
+            i += 2;
+        } else if (s[i] == '+') {
+            try out.append(arena, ' ');
+        } else {
+            try out.append(arena, s[i]);
+        }
+    }
+    return out.toOwnedSlice(arena);
+}
 
 fn objGet(v: std.json.Value, key: []const u8) ?std.json.Value {
     if (v != .object) return null;
