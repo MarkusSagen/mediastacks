@@ -17,6 +17,17 @@ pub const MediaInfo = struct {
     duration_s: ?f64 = null,
 };
 
+/// Structured naming fields, kept so a review surface can recompute the
+/// destination after an edit (retitle / regroup). Additive.
+pub const Fields = struct {
+    series: ?[]const u8 = null,
+    season: ?u32 = null,
+    episode: ?u32 = null,
+    title: ?[]const u8 = null,
+    year: ?u32 = null,
+    ext: ?[]const u8 = null,
+};
+
 pub const Item = struct {
     src: []const u8,
     role: Role,
@@ -25,6 +36,7 @@ pub const Item = struct {
     dst: ?[]const u8 = null,
     reason: []const u8 = "",
     media: ?MediaInfo = null,
+    fields: ?Fields = null,
 };
 
 pub const Group = struct {
@@ -100,4 +112,16 @@ test "plan json round-trips media info" {
     const back = try fromJson(a, bytes);
     try t.expectEqual(@as(u32, 1080), back.groups[0].items[0].media.?.height.?);
     try t.expectEqualStrings("h264", back.groups[0].items[0].media.?.codec.?);
+}
+
+test "plan json round-trips item fields" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    var items = [_]Item{.{ .src = "/x/a.mkv", .role = .primary, .op = .move, .dst = "/lib/a.mkv", .fields = .{ .series = "Show", .season = 1, .episode = 2, .ext = "mkv" } }};
+    var groups = [_]Group{.{ .kind = .tv, .title = "Show", .items = items[0..] }};
+    const plan = Plan{ .library_root = "/lib", .source = "/x", .groups = groups[0..] };
+    const back = try fromJson(a, try toJson(a, plan));
+    try t.expectEqual(@as(u32, 2), back.groups[0].items[0].fields.?.episode.?);
+    try t.expectEqualStrings("Show", back.groups[0].items[0].fields.?.series.?);
 }
