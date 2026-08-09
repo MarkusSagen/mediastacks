@@ -184,6 +184,12 @@ organize DIR="" *FLAGS="": build
     @if [ -z "{{DIR}}" ]; then echo "usage: just organize DIR [--dry-run] [--to LIB] [--on-conflict skip|suffix|overwrite] [--plan FILE] [--from FILE]"; exit 1; fi
     ./zig-out/bin/shelve organize "{{DIR}}" {{FLAGS}}
 
+# Review & edit a reorg in the browser, then apply on click (undo with `just undo`).
+# e.g. `just review ~/Downloads/down/Show --to ~/Media`
+review DIR="" *FLAGS="": build
+    @if [ -z "{{DIR}}" ]; then echo "usage: just review DIR [--to LIB] [--port N] [--no-probe]"; exit 1; fi
+    ./zig-out/bin/shelve review "{{DIR}}" {{FLAGS}}
+
 # Reverse the most recent `just organize` (from its undo journal).
 undo: build
     ./zig-out/bin/shelve undo
@@ -191,6 +197,10 @@ undo: build
 # End-to-end organize → apply → undo smoke on a synthetic messy folder.
 organize-smoke: build
     ./scripts/organize-smoke.sh
+
+# API-contract smoke for `shelve review` (plan → edit → apply → undo).
+review-smoke: build
+    ./scripts/review-smoke.sh
 
 # Print where shelve keeps organizer state (config + undo journals).
 shelve-info:
