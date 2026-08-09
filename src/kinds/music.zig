@@ -166,6 +166,65 @@ pub fn parse(alloc: std.mem.Allocator, io: std.Io, path: []const u8) !Track {
     return fromTags(alloc, tags, base); // tags slices live in the arena; fromTags dupes into alloc
 }
 
+pub const AlbumMeta = struct {
+    album: []const u8,
+    album_artist: []const u8,
+    year: ?u32,
+};
+
+/// Consensus album metadata over a folder's tracks. `album` = first non-empty
+/// album tag, else `folder_name` (else "Unknown Album"). `album_artist` = a
+/// present album_artist tag; else the shared primary artist if all tracks agree;
+/// else "Various Artists" when they differ; else "Unknown Artist" when no track
+/// carries an artist. `year` = first non-zero year. Strings owned by `alloc`.
+pub fn albumMeta(alloc: std.mem.Allocator, tracks: []const Track, folder_name: []const u8) !AlbumMeta {
+    var album: []const u8 = if (folder_name.len > 0) folder_name else "Unknown Album";
+    for (tracks) |tr| if (tr.album) |al| if (al.len > 0) {
+        album = al;
+        break;
+    };
+
+    var album_artist: []const u8 = undefined;
+    var found_aa = false;
+    for (tracks) |tr| if (tr.album_artist) |aa| if (aa.len > 0) {
+        album_artist = aa;
+        found_aa = true;
+        break;
+    };
+    if (!found_aa) {
+        var common: ?[]const u8 = null;
+        var all_same = true;
+        var any = false;
+        for (tracks) |tr| {
+            if (tr.artists.len == 0) continue;
+            any = true;
+            const a0 = tr.artists[0];
+            if (common) |c| {
+                if (!std.ascii.eqlIgnoreCase(c, a0)) all_same = false;
+            } else common = a0;
+        }
+        if (!any) {
+            album_artist = "Unknown Artist";
+        } else if (all_same) {
+            album_artist = common.?;
+        } else {
+            album_artist = "Various Artists";
+        }
+    }
+
+    var year: ?u32 = null;
+    for (tracks) |tr| if (tr.year) |y| if (y != 0) {
+        year = y;
+        break;
+    };
+
+    return .{
+        .album = try alloc.dupe(u8, album),
+        .album_artist = try alloc.dupe(u8, album_artist),
+        .year = year,
+    };
+}
+
 const t = std.testing;
 
 test "splitArtists splits common delimiters, trims, dedups" {
@@ -235,4 +294,53 @@ test "fromTags reads disc, drops zero year, transcodes latin-1 tags" {
     try t.expectEqual(@as(u32, 2), tr.disc.?);
     try t.expectEqual(@as(?u32, null), tr.year); // date "0" is not a real year
     try t.expectEqualStrings("Communiqué", tr.album.?);
+}
+
+test "albumMeta: album_artist tag wins" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tracks = [_]Track{
+        .{ .album = "Blue", .album_artist = "Eric Clapton", .artists = &.{"Eric Clapton"}, .year = 1998, .ext = "mp3" },
+        .{ .album = "Blue", .album_artist = "Eric Clapton", .artists = &.{"Session Band"}, .year = 1998, .ext = "mp3" },
+    };
+    const m = try albumMeta(a, &tracks, "Some Folder");
+    try t.expectEqualStrings("Blue", m.album);
+    try t.expectEqualStrings("Eric Clapton", m.album_artist);
+    try t.expectEqual(@as(u32, 1998), m.year.?);
+}
+
+test "albumMeta: all-same artist, no album_artist" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tracks = [_]Track{
+        .{ .album = "X", .artists = &.{"Solo"}, .ext = "mp3" },
+        .{ .album = "X", .artists = &.{"Solo"}, .ext = "mp3" },
+    };
+    const m = try albumMeta(a, &tracks, "Folder");
+    try t.expectEqualStrings("Solo", m.album_artist);
+}
+
+test "albumMeta: differing artists, no album_artist -> Various Artists" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tracks = [_]Track{
+        .{ .album = "Comp", .artists = &.{"Alice"}, .ext = "mp3" },
+        .{ .album = "Comp", .artists = &.{"Bob"}, .ext = "mp3" },
+    };
+    const m = try albumMeta(a, &tracks, "Folder");
+    try t.expectEqualStrings("Various Artists", m.album_artist);
+}
+
+test "albumMeta: no tags -> folder name album, Unknown Artist, no year" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tracks = [_]Track{ .{ .ext = "mp3" }, .{ .ext = "mp3" } };
+    const m = try albumMeta(a, &tracks, "My Folder");
+    try t.expectEqualStrings("My Folder", m.album);
+    try t.expectEqualStrings("Unknown Artist", m.album_artist);
+    try t.expectEqual(@as(?u32, null), m.year);
 }
