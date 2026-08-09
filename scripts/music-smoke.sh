@@ -25,6 +25,21 @@ ffmpeg -v error -f lavfi -i sine=d=1 "${meta[@]}" -metadata title=Layla   -metad
 ffmpeg -v error -f lavfi -i sine=d=1 "${meta[@]}" -metadata title=Cocaine -metadata track=2 -y "$SRC/02.mp3"
 ffmpeg -v error -f lavfi -i color=c=blue:s=64x64 -frames:v 1 -y "$SRC/cover.jpg"
 
+# --- multi-disc set: CD 1 / CD 2 subfolders roll up to one album ---
+MD="$TMP/dl/nights"; mkdir -p "$MD/CD 1" "$MD/CD 2"
+dmeta=(-metadata album="Night of the Kings" -metadata album_artist="Various Artists" -metadata date=1992)
+ffmpeg -v error -f lavfi -i sine=d=1 "${dmeta[@]}" -metadata title=Opening -metadata track=1 -metadata disc=1 -y "$MD/CD 1/01.mp3"
+ffmpeg -v error -f lavfi -i sine=d=1 "${dmeta[@]}" -metadata title=Finale  -metadata track=1 -metadata disc=2 -y "$MD/CD 2/01.mp3"
+
+# --- compilation with differing artists and NO album_artist -> Various Artists ---
+VA="$TMP/dl/comp"; mkdir -p "$VA"
+ffmpeg -v error -f lavfi -i sine=d=1 -metadata album=Comp -metadata artist=Alice -metadata title=First  -metadata track=1 -y "$VA/01.mp3"
+ffmpeg -v error -f lavfi -i sine=d=1 -metadata album=Comp -metadata artist=Bob   -metadata title=Second -metadata track=2 -y "$VA/02.mp3"
+
+# --- album with no date tag -> no (year) suffix ---
+NY="$TMP/dl/noyear"; mkdir -p "$NY"
+ffmpeg -v error -f lavfi -i sine=d=1 -metadata album=NoYear -metadata artist=Solo -metadata title=Alone -metadata track=1 -y "$NY/01.mp3"
+
 PASS=0; FAIL=0
 check() { if eval "$2"; then echo "  ok: $1"; PASS=$((PASS+1)); else echo "  FAIL: $1"; FAIL=$((FAIL+1)); fi; }
 
@@ -43,6 +58,19 @@ echo "== undo =="
 "$SHELVE" undo >/dev/null
 check "library reverted" '[[ ! -d "$LIB/Music" ]] || [[ -z "$(find "$LIB/Music" -type f 2>/dev/null)" ]]'
 check "sources restored" '[[ -f "$SRC/01.mp3" && -f "$SRC/cover.jpg" ]]'
+
+# --- A.1 correctness, verified via dry-run (naming/grouping, no apply needed) ---
+echo "== A.1 dry-run =="
+MDOUT="$("$SHELVE" organize "$MD" --to "$LIB" --dry-run)"
+check "multi-disc rolls into one album with CD1" 'grep -q "Night of the Kings (1992)/CD1/" <<<"$MDOUT"'
+check "multi-disc CD2 subfolder"                 'grep -q "Night of the Kings (1992)/CD2/" <<<"$MDOUT"'
+
+VAOUT="$("$SHELVE" organize "$VA" --to "$LIB" --dry-run)"
+check "compilation filed under Various Artists"  'grep -q "Music/Various Artists/Comp/" <<<"$VAOUT"'
+
+NYOUT="$("$SHELVE" organize "$NY" --to "$LIB" --dry-run)"
+check "no-year album has no () suffix"           'grep -q "Music/Solo/NoYear/" <<<"$NYOUT"'
+check "no-year album shows no empty parens"      '! grep -q "NoYear ()" <<<"$NYOUT"'
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"
