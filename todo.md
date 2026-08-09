@@ -81,6 +81,20 @@ Still open (own future specs):
       `Music/{album_artist}/{album} ({year})/{track:02} - {title}.{ext}`
       (`music_template` preset); `audioScore` dedup; album cover as a
       sidecar. Read-only, through `organize`/`review`. music-smoke.
+- [ ] **A.1 — real-world hardening** (found dry-running actual libraries):
+  - [ ] **Multi-disc sets**: `(2 CD)` / `CD 1`,`CD 2` subfolders flatten into
+        one album with colliding track numbers (two `08 -`, two `09 -`).
+        Infer disc from the subfolder (or a `disc` tag) → `Album/CD1/…` or
+        `{disc}-{track}` naming.
+  - [ ] **Empty/zero year** → drop the ` (year)` suffix instead of `()`/`(0)`.
+  - [ ] **Various-Artists inference**: an album whose tracks have differing
+        artists and no `album_artist` scatters (e.g. `Metroland` split across
+        3 artist folders). Detect → "Various Artists".
+  - [ ] **Latin-1 / non-UTF-8 tags** (e.g. `Communiqué`) render as mojibake;
+        detect + transcode tag bytes to UTF-8.
+  - [ ] **Audiobooks misclassified as music** (`.mp3` chapters) — resolved
+        once the audiobook kind lands (heuristics: long duration, chapter
+        naming, `.m4b`).
 - [ ] **B — MusicBrainz enrichment.** Fill missing/wrong album, year,
       canonical artist names, cover (needs the online-provider layer, Phase 4).
 - [ ] **C — tag write-back (the multi-artist fix).** Write multi-value
