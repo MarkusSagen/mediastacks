@@ -36,6 +36,8 @@ const Cand = struct {
     dst: ?[]const u8 = null,
     primary_dst: ?[]const u8 = null,
     fields: ?plan.Fields = null,
+    album_dir: ?[]const u8 = null,
+    disc: ?u32 = null,
 };
 
 const Sidecar = struct {
@@ -57,14 +59,6 @@ fn isCoverImage(base: []const u8) bool {
     return false;
 }
 
-/// Album-artist for a music candidate: album_artist tag → first artist →
-/// "Unknown Artist".
-fn musicAlbumArtist(c: *Cand) []const u8 {
-    const tr = c.track.?;
-    if (tr.album_artist) |x| return x;
-    if (tr.artists.len > 0) return tr.artists[0];
-    return "Unknown Artist";
-}
 fn musicAlbum(c: *Cand) []const u8 {
     return c.track.?.album orelse "Unknown Album";
 }
@@ -158,6 +152,15 @@ fn commonPrefixLen(a: []const u8, b: []const u8) usize {
     return i;
 }
 
+/// Album root for a music destination: the file's parent, or its grandparent
+/// when the parent is a "CD N"/"Disc N" folder (so covers land at album root).
+fn albumRootOf(p: []const u8) []const u8 {
+    const dir = std.fs.path.dirname(p) orelse p;
+    const b = std.fs.path.basename(dir);
+    if (music.discFromDirName(b) != null) return std.fs.path.dirname(dir) orelse dir;
+    return dir;
+}
+
 pub fn buildPlan(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -217,6 +220,11 @@ pub fn buildPlan(
             const c = try arena.create(Cand);
             c.* = .{ .abs = abs, .dir = d, .stem = stem, .size = statSize(io, abs), .mkind = .music };
             c.track = if (inspect) try music.parse(arena, io, abs) else try music.fromTags(arena, .{}, base);
+            const parent_base = std.fs.path.basename(d);
+            const sub_disc = music.discFromDirName(parent_base);
+            c.disc = c.track.?.disc orelse sub_disc;
+            // A "CD N"/"Disc N" subfolder rolls up to its parent album dir.
+            c.album_dir = if (sub_disc != null) (std.fs.path.dirname(d) orelse d) else d;
             try media.append(arena, c);
         } else if (mk == .tv or mk == .movie) {
             const c = try arena.create(Cand);
@@ -263,7 +271,7 @@ pub fn buildPlan(
         const key = switch (c.mkind) {
             .tv => try std.fmt.allocPrint(arena, "tv|{s}|{d}", .{ try lower(arena, c.ep.?.series), c.ep.?.season }),
             .movie => try std.fmt.allocPrint(arena, "mv|{s}|{?d}", .{ try lower(arena, c.mv.?.title), c.mv.?.year }),
-            .music => try std.fmt.allocPrint(arena, "mu|{s}|{s}", .{ try lower(arena, musicAlbumArtist(c)), try lower(arena, musicAlbum(c)) }),
+            .music => try std.fmt.allocPrint(arena, "mu|{s}", .{c.album_dir.?}),
             else => unreachable,
         };
 
@@ -349,24 +357,46 @@ pub fn buildPlan(
                 }
             }
         } else {
-            // Music: one album; dedup by (track#, title), best by audioScore.
-            // Album year is taken once (gb.year) so tracks missing a date tag
-            // don't scatter into a separate "(  )" folder.
+            // Music: one album per source folder. Consensus album/artist/year
+            // (Various-Artists fallback); dedup by (disc, track#, title).
+            var tracks = try arena.alloc(music.Track, cands.items.len);
+            for (cands.items, 0..) |c, i| tracks[i] = c.track.?;
+            const folder_name = std.fs.path.basename(cands.items[0].album_dir.?);
+            const meta = try music.albumMeta(arena, tracks, folder_name);
+
+            var distinct = std.AutoHashMap(u32, void).init(arena);
+            for (cands.items) |c| if (c.disc) |dn| try distinct.put(dn, {});
+            const multi = distinct.count() > 1;
+
+            gb.title = meta.album;
+            gb.year = meta.year;
+
             var best = std.StringHashMap(*Cand).init(arena);
             for (cands.items) |c| {
-                const tk = try std.fmt.allocPrint(arena, "{?d}|{s}", .{ c.track.?.track, try lower(arena, c.track.?.title orelse "") });
+                const dkey: u32 = if (multi) (c.disc orelse 1) else 0;
+                const tk = try std.fmt.allocPrint(arena, "{d}|{?d}|{s}", .{ dkey, c.track.?.track, try lower(arena, c.track.?.title orelse "") });
                 const gop = try best.getOrPut(tk);
                 if (!gop.found_existing or audioScoreOf(c) > audioScoreOf(gop.value_ptr.*)) gop.value_ptr.* = c;
             }
             var it = best.valueIterator();
             while (it.next()) |cp| {
-                const f = plan.Fields{ .album_artist = musicAlbumArtist(cp.*), .album = gb.title, .year = gb.year, .track = cp.*.track.?.track, .title = cp.*.track.?.title, .artists = cp.*.track.?.artists, .ext = cp.*.track.?.ext };
+                const f = plan.Fields{
+                    .album_artist = meta.album_artist,
+                    .album = meta.album,
+                    .year = meta.year,
+                    .track = cp.*.track.?.track,
+                    .title = cp.*.track.?.title,
+                    .artists = cp.*.track.?.artists,
+                    .ext = cp.*.track.?.ext,
+                    .disc = if (multi) (cp.*.disc orelse 1) else null,
+                };
                 cp.*.fields = f;
                 cp.*.dst = try naming.dstFor(arena, cfg, .music, f);
             }
-            if (std.mem.eql(u8, gb.title, "Unknown Album")) try gb.warnings.append(arena, "untagged — filed under Unknown Album");
+            if (std.mem.eql(u8, meta.album, "Unknown Album")) try gb.warnings.append(arena, "untagged — filed under Unknown Album");
             for (cands.items) |c| {
-                const tk = try std.fmt.allocPrint(arena, "{?d}|{s}", .{ c.track.?.track, try lower(arena, c.track.?.title orelse "") });
+                const dkey: u32 = if (multi) (c.disc orelse 1) else 0;
+                const tk = try std.fmt.allocPrint(arena, "{d}|{?d}|{s}", .{ dkey, c.track.?.track, try lower(arena, c.track.?.title orelse "") });
                 const winner = best.get(tk).?;
                 c.primary_dst = winner.dst;
                 c.fields = winner.fields;
@@ -411,10 +441,12 @@ pub fn buildPlan(
         var attached = false;
         for (media.items) |c| {
             if (c.mkind != .music) continue;
-            if (!std.mem.eql(u8, c.dir, cov.dir)) continue;
+            const same_dir = std.mem.eql(u8, c.dir, cov.dir) or
+                (c.album_dir != null and std.mem.eql(u8, c.album_dir.?, cov.dir));
+            if (!same_dir) continue;
             if (c.primary_dst) |pd| {
-                const album_dir = std.fs.path.dirname(pd) orelse continue;
-                const dst = try std.fmt.allocPrint(arena, "{s}/cover.{s}", .{ album_dir, cov.ext });
+                const album_root = albumRootOf(pd);
+                const dst = try std.fmt.allocPrint(arena, "{s}/cover.{s}", .{ album_root, cov.ext });
                 try gbs.items[c.group_idx].items.append(arena, .{ .src = cov.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = "cover" });
                 attached = true;
             }
@@ -552,6 +584,52 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
     unlinkAt("{s}/track a.mp3", .{root});
     unlinkAt("{s}/track b.flac", .{root});
     unlinkAt("{s}/cover.jpg", .{root});
+    rmdirAt("{s}", .{root});
+}
+
+test "buildPlan rolls CD subfolders into one multi-disc album (no-probe)" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const pid = std.c.getpid();
+    var rb: [256]u8 = undefined;
+    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-disc-{d}", .{pid});
+    mkdirAt("{s}", .{root});
+    mkdirAt("{s}/CD 1", .{root});
+    mkdirAt("{s}/CD 2", .{root});
+    try writeFileAt("{s}/CD 1/01 song one.mp3", .{root}, "aaa");
+    try writeFileAt("{s}/CD 2/01 song two.mp3", .{root}, "bbbb");
+
+    var threaded = std.Io.Threaded.init(t.allocator, .{});
+    defer threaded.deinit();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const p = try buildPlan(a, threaded.io(), root, cfg, false); // no probe: disc comes from folder names
+
+    var music_groups: usize = 0;
+    var primaries: usize = 0;
+    var cd1 = false;
+    var cd2 = false;
+    for (p.groups) |g| {
+        if (g.kind != .music) continue;
+        music_groups += 1;
+        for (g.items) |it| {
+            if (it.role != .primary) continue;
+            primaries += 1;
+            const dst = it.dst orelse "";
+            if (std.mem.indexOf(u8, dst, "/CD1/") != null) cd1 = true;
+            if (std.mem.indexOf(u8, dst, "/CD2/") != null) cd2 = true;
+        }
+    }
+    try t.expectEqual(@as(usize, 1), music_groups); // both discs → one album
+    try t.expectEqual(@as(usize, 2), primaries);
+    try t.expect(cd1);
+    try t.expect(cd2);
+
+    unlinkAt("{s}/CD 1/01 song one.mp3", .{root});
+    unlinkAt("{s}/CD 2/01 song two.mp3", .{root});
+    rmdirAt("{s}/CD 1", .{root});
+    rmdirAt("{s}/CD 2", .{root});
     rmdirAt("{s}", .{root});
 }
 
