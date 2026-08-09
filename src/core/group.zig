@@ -10,7 +10,6 @@ const std = @import("std");
 const kind = @import("kind.zig");
 const classify_mod = @import("classify.zig");
 const mediascore = @import("mediascore.zig");
-const template = @import("template.zig");
 const config = @import("config.zig");
 const plan = @import("plan.zig");
 const tv = @import("../kinds/tv.zig");
@@ -18,6 +17,7 @@ const movie = @import("../kinds/movie.zig");
 const probe = @import("probe.zig");
 const enrich = @import("enrich.zig");
 const drm = @import("drm.zig");
+const naming = @import("naming.zig");
 
 const Cand = struct {
     abs: []const u8,
@@ -33,6 +33,7 @@ const Cand = struct {
     role: plan.Role = .primary,
     dst: ?[]const u8 = null,
     primary_dst: ?[]const u8 = null,
+    fields: ?plan.Fields = null,
 };
 
 const Sidecar = struct {
@@ -118,46 +119,12 @@ fn statSize(io: std.Io, path: []const u8) u64 {
     return st.size;
 }
 
-fn u32str(arena: std.mem.Allocator, n: u32) ![]u8 {
-    return std.fmt.allocPrint(arena, "{d}", .{n});
-}
-
-/// Replace `path`'s extension with `new_ext` (no leading dot). Owned by arena.
+/// Length of the shared leading run of `a` and `b` (for sidecar matching).
 fn commonPrefixLen(a: []const u8, b: []const u8) usize {
     const n = @min(a.len, b.len);
     var i: usize = 0;
     while (i < n and a[i] == b[i]) : (i += 1) {}
     return i;
-}
-
-/// Replace `path`'s extension with `new_ext` (no leading dot). Owned by arena.
-fn replaceExt(arena: std.mem.Allocator, path: []const u8, new_ext: []const u8) ![]u8 {
-    const e = std.fs.path.extension(path);
-    const stem = path[0 .. path.len - e.len];
-    return std.fmt.allocPrint(arena, "{s}.{s}", .{ stem, new_ext });
-}
-
-fn tvDst(arena: std.mem.Allocator, cfg: config.Config, series: []const u8, ep: tv.Episode) ![]u8 {
-    const fields = [_]template.Field{
-        .{ .name = "series", .value = series },
-        .{ .name = "season", .value = try u32str(arena, ep.season) },
-        .{ .name = "episode", .value = try u32str(arena, ep.episode) },
-        .{ .name = "title", .value = ep.title orelse "" },
-        .{ .name = "ext", .value = ep.ext },
-    };
-    const rel = try template.renderFields(arena, cfg.tv_template, &fields);
-    return std.fs.path.join(arena, &.{ cfg.library_root, rel });
-}
-
-fn movieDst(arena: std.mem.Allocator, cfg: config.Config, mv: movie.Movie) ![]u8 {
-    const year_str = if (mv.year) |y| try u32str(arena, y) else "";
-    const fields = [_]template.Field{
-        .{ .name = "title", .value = mv.title },
-        .{ .name = "year", .value = year_str },
-        .{ .name = "ext", .value = mv.ext },
-    };
-    const rel = try template.renderFields(arena, cfg.movie_template, &fields);
-    return std.fs.path.join(arena, &.{ cfg.library_root, rel });
 }
 
 pub fn buildPlan(
@@ -283,19 +250,24 @@ pub fn buildPlan(
                     gop.value_ptr.* = c;
                 }
             }
-            // Compute each primary's dst.
+            // Compute each primary's fields + dst.
             var it = best.valueIterator();
             while (it.next()) |cp| {
-                cp.*.dst = try tvDst(arena, cfg, gb.title, cp.*.ep.?);
+                const f = plan.Fields{ .series = gb.title, .season = cp.*.ep.?.season, .episode = cp.*.ep.?.episode, .title = cp.*.ep.?.title, .ext = cp.*.ep.?.ext };
+                cp.*.fields = f;
+                cp.*.dst = try naming.dstFor(arena, cfg, .tv, f);
             }
-            // Assign roles + emit items.
+            // Assign roles + emit items. Every candidate carries its
+            // episode's primary fields so a sidecar matching a duplicate
+            // still resolves to the primary's destination.
             for (cands.items) |c| {
                 for (c.warnings) |w| try gb.warnings.append(arena, w);
                 const winner = best.get(c.ep.?.episode).?;
                 c.primary_dst = winner.dst;
+                c.fields = winner.fields;
                 if (c == winner) {
                     c.role = .primary;
-                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = c.dst, .reason = "", .media = mediaOf(c) });
+                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = winner.dst, .reason = "", .media = mediaOf(c), .fields = winner.fields });
                 } else {
                     c.role = .duplicate;
                     try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate of primary" });
@@ -307,12 +279,15 @@ pub fn buildPlan(
             for (cands.items[1..]) |c| {
                 if (candScore(c) > candScore(winner)) winner = c;
             }
-            winner.dst = try movieDst(arena, cfg, winner.mv.?);
+            const f = plan.Fields{ .title = winner.mv.?.title, .year = winner.mv.?.year, .ext = winner.mv.?.ext };
+            winner.fields = f;
+            winner.dst = try naming.dstFor(arena, cfg, .movie, f);
             for (cands.items) |c| {
                 for (c.warnings) |w| try gb.warnings.append(arena, w);
                 c.primary_dst = winner.dst;
+                c.fields = f;
                 if (c == winner) {
-                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = winner.dst, .reason = "", .media = mediaOf(winner) });
+                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = winner.dst, .reason = "", .media = mediaOf(winner), .fields = f });
                 } else {
                     try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate of primary" });
                 }
@@ -333,9 +308,12 @@ pub fn buildPlan(
             }
         }
         if (best_media) |c| {
-            if (c.primary_dst) |pdst| {
-                const dst = try replaceExt(arena, pdst, sc.ext);
-                try gbs.items[c.group_idx].items.append(arena, .{ .src = sc.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = "sidecar" });
+            if (c.fields) |pf| {
+                var f = pf;
+                f.ext = sc.ext; // sidecar sits beside the primary, own extension
+                const gk = gbs.items[c.group_idx].kind;
+                const dst = try naming.dstFor(arena, cfg, gk, f);
+                try gbs.items[c.group_idx].items.append(arena, .{ .src = sc.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = "sidecar", .fields = f });
                 continue;
             }
         }

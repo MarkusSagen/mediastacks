@@ -19,6 +19,7 @@ pub const drm = @import("core/drm.zig");
 pub const plan = @import("core/plan.zig");
 pub const config = @import("core/config.zig");
 pub const group = @import("core/group.zig");
+pub const naming = @import("core/naming.zig");
 pub const journal = @import("core/journal.zig");
 pub const apply = @import("core/apply.zig");
 pub const organize_cmd = @import("commands/organize.zig");
@@ -73,6 +74,7 @@ test {
     _ = plan;
     _ = config;
     _ = group;
+    _ = naming;
     _ = journal;
     _ = apply;
     _ = organize_cmd;
