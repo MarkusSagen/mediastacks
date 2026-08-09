@@ -174,7 +174,7 @@ catalog-info:
 
 # ───────── media organizer (shelve) ────────────────────────────────
 
-# Reorganize DIR's TV/movies into the library. Applies by default;
+# Reorganize DIR's TV / movies / music into the library. Applies by default;
 # pass --dry-run (-n) to preview. Undo any run with `just undo`.
 # FLAGS (all optional): --dry-run  --to LIB
 #   --on-conflict skip|suffix|overwrite  --plan FILE  --from FILE
@@ -201,6 +201,10 @@ organize-smoke: build
 # API-contract smoke for `shelve review` (plan → edit → apply → undo).
 review-smoke: build
     ./scripts/review-smoke.sh
+
+# End-to-end music smoke: tagged album → album-artist library → undo.
+music-smoke: build
+    ./scripts/music-smoke.sh
 
 # Print where shelve keeps organizer state (config + undo journals).
 shelve-info:
