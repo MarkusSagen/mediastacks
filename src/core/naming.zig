@@ -44,7 +44,13 @@ pub fn dstFor(arena: std.mem.Allocator, cfg: config.Config, k: kind.MediaKind, f
                 .{ .name = "title", .value = f.title orelse "" },
                 .{ .name = "ext", .value = f.ext orelse "" },
             };
-            break :blk try template.renderFields(arena, cfg.music_template, &fields);
+            const base_rel = try template.renderFields(arena, cfg.music_template, &fields);
+            if (f.disc) |d| {
+                if (std.mem.lastIndexOfScalar(u8, base_rel, '/')) |slash| {
+                    break :blk try std.fmt.allocPrint(arena, "{s}/CD{d}/{s}", .{ base_rel[0..slash], d, base_rel[slash + 1 ..] });
+                }
+            }
+            break :blk base_rel;
         },
         else => return error.UnsupportedKind,
     };
@@ -69,6 +75,15 @@ test "dstFor renders a music path" {
     const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
     const out = try dstFor(a, cfg, .music, .{ .album_artist = "Eric Clapton", .album = "Best of Blues", .year = 1998, .track = 3, .title = "Layla", .ext = "mp3" });
     try t.expectEqualStrings("/lib/Music/Eric Clapton/Best of Blues (1998)/03 - Layla.mp3", out);
+}
+
+test "dstFor renders a multi-disc music path" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const out = try dstFor(a, cfg, .music, .{ .album_artist = "Various Artists", .album = "Night of the Kings", .year = 1992, .disc = 2, .track = 3, .title = "Layla", .ext = "flac" });
+    try t.expectEqualStrings("/lib/Music/Various Artists/Night of the Kings (1992)/CD2/03 - Layla.flac", out);
 }
 
 test "dstFor renders a movie path" {

@@ -30,6 +30,7 @@ pub const Fields = struct {
     album_artist: ?[]const u8 = null,
     album: ?[]const u8 = null,
     track: ?u32 = null,
+    disc: ?u32 = null,
     artists: []const []const u8 = &.{},
 };
 
