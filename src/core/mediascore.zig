@@ -43,7 +43,23 @@ pub fn videoScoreProbed(height: ?u32, bitrate: ?u64, size: u64) f32 {
     return s;
 }
 
+/// Best-copy score for audio tracks: lossless dominates, then bitrate,
+/// then size.
+pub fn audioScore(lossless: bool, bitrate: ?u64, size: u64) f32 {
+    var s: f32 = if (lossless) 100 else 0;
+    if (bitrate) |b| s += @log2(@as(f32, @floatFromInt(@max(b, 1))));
+    s += @log2(@as(f32, @floatFromInt(@max(size, 1))));
+    return s;
+}
+
 const t = std.testing;
+
+test "flac beats mp3 at equal size" {
+    try t.expect(audioScore(true, 900_000, 5_000_000) > audioScore(false, 320_000, 5_000_000));
+}
+test "higher audio bitrate wins within a tier" {
+    try t.expect(audioScore(false, 320_000, 4_000_000) > audioScore(false, 128_000, 4_000_000));
+}
 
 test "probed 1080p beats 720p" {
     try t.expect(videoScoreProbed(1080, 5_000_000, 1_000_000) > videoScoreProbed(720, 5_000_000, 1_000_000));
