@@ -141,7 +141,9 @@ fn handleThumb(io: std.Io, session: *Session, request: *std.http.Server.Request,
 
     if (!planHasSrc(session, src)) return request.respond("", .{ .status = .forbidden });
 
-    const argv = [_][]const u8{ "ffmpeg", "-v", "error", "-ss", "60", "-i", src, "-frames:v", "1", "-vf", "scale=320:-1", "-f", "image2pipe", "-vcodec", "mjpeg", "-" };
+    // -ss 10: past typical intros/black; safe for anything >10s (real
+    // episodes/movies). Shorter clips just yield no poster (404 → hidden).
+    const argv = [_][]const u8{ "ffmpeg", "-v", "error", "-ss", "10", "-i", src, "-frames:v", "1", "-vf", "scale=320:-1", "-f", "image2pipe", "-vcodec", "mjpeg", "-" };
     const r = exec.runCaptureStdout(session.arena, io, &argv, 4 * 1024 * 1024) catch return request.respond("", .{ .status = .not_found });
     if (r.exit_code != 0 or r.stdout.len == 0) return request.respond("", .{ .status = .not_found });
     try request.respond(r.stdout, .{ .status = .ok, .extra_headers = &.{

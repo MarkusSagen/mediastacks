@@ -103,6 +103,14 @@ function render() {
         const handle = document.createElement("span");
         handle.className = "handle"; handle.textContent = "⠿";
         row.appendChild(handle);
+        if (it.role === "primary") {
+          const poster = document.createElement("img");
+          poster.className = "poster";
+          poster.loading = "lazy";
+          poster.src = "/api/thumb?src=" + encodeURIComponent(it.src);
+          poster.onerror = () => poster.remove();
+          row.appendChild(poster);
+        }
         const name = document.createElement("span");
         name.className = "name";
         name.textContent = baseOf(it.dst || "?");

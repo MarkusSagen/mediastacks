@@ -13,6 +13,7 @@ main { padding:16px 20px 80px; }
 .group h2 .path { color:var(--dim); font-weight:400; }
 .group.drop { background:var(--rail); border-radius:6px; }
 .handle { color:var(--dim); cursor:grab; }
+.poster { width:96px; height:54px; object-fit:cover; border-radius:3px; background:var(--rail); }
 .row[draggable=true] { cursor:default; }
 .row { padding:3px 10px; border-left:2px solid var(--rail); display:flex; gap:10px; align-items:center; }
 .row .name { flex:1; }
