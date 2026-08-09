@@ -89,8 +89,12 @@ Still open (own future specs):
   - [x] **Various-Artists inference** — consensus album-artist; differing
         artists with no `album_artist` → "Various Artists" (no artists at all →
         "Unknown Artist").
-  - [x] **Latin-1 / non-UTF-8 tags** — `music.toUtf8` transcodes tag bytes to
-        UTF-8 (`Communiqué`, not mojibake).
+  - [x] **Latin-1 / non-UTF-8 tags** — `music.toUtf8` transcodes raw Latin-1
+        tag bytes to UTF-8; when ffprobe has already substituted U+FFFD (data
+        lost), the **album** name falls back to the cleaned source folder
+        (`music.cleanAlbumFolder`, strips leading year + `<artist> -`). Remaining
+        gap: mojibake **track titles** (U+FFFD in the title tag) — would need
+        release-style filename parsing to recover; deferred.
   - [ ] **Audiobooks misclassified as music** (`.mp3` chapters) — still
         deferred to the audiobook kind (long duration, chapter naming, `.m4b`).
 - [ ] **B — MusicBrainz enrichment.** Fill missing/wrong album, year,
