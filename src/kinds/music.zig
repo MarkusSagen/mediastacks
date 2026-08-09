@@ -13,6 +13,7 @@ pub const Tags = struct {
     album_artist: ?[]const u8 = null,
     album: ?[]const u8 = null,
     track: ?[]const u8 = null,
+    disc: ?[]const u8 = null,
     date: ?[]const u8 = null,
 };
 
@@ -22,6 +23,7 @@ pub const Track = struct {
     album_artist: ?[]const u8 = null,
     album: ?[]const u8 = null,
     track: ?u32 = null,
+    disc: ?u32 = null,
     year: ?u32 = null,
     ext: []const u8,
 };
@@ -66,6 +68,41 @@ fn firstInt(s: []const u8) ?u32 {
     return v;
 }
 
+/// Transcode a tag value to UTF-8. Valid UTF-8 is duped unchanged; otherwise
+/// the bytes are treated as Latin-1 (each byte → a codepoint) and re-encoded,
+/// so a mis-encoded tag never yields invalid UTF-8. Owned by `alloc`.
+pub fn toUtf8(alloc: std.mem.Allocator, s: []const u8) ![]u8 {
+    if (std.unicode.utf8ValidateSlice(s)) return alloc.dupe(u8, s);
+    var out: std.ArrayList(u8) = .empty;
+    for (s) |b| {
+        if (b < 0x80) {
+            try out.append(alloc, b);
+        } else {
+            try out.append(alloc, 0xC0 | (b >> 6));
+            try out.append(alloc, 0x80 | (b & 0x3F));
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// Disc number from a source subfolder name: "CD 1"/"CD1"/"Disc 2"/"Disk 3"
+/// (case-insensitive) → n; anything else → null.
+pub fn discFromDirName(name: []const u8) ?u32 {
+    var buf: [64]u8 = undefined;
+    if (name.len == 0 or name.len >= buf.len) return null;
+    const lo = std.ascii.lowerString(buf[0..name.len], name);
+    const prefixes = [_][]const u8{ "disc", "disk", "cd" };
+    for (prefixes) |p| {
+        if (std.mem.startsWith(u8, lo, p)) {
+            const rest = std.mem.trim(u8, lo[p.len..], " _-");
+            if (rest.len == 0) return null;
+            for (rest) |c| if (!std.ascii.isDigit(c)) return null;
+            return std.fmt.parseInt(u32, rest, 10) catch null;
+        }
+    }
+    return null;
+}
+
 /// Build a Track from a tag set + basename (filename stem is the title
 /// fallback). All strings owned by `alloc`.
 pub fn fromTags(alloc: std.mem.Allocator, tags: Tags, basename: []const u8) !Track {
@@ -73,12 +110,16 @@ pub fn fromTags(alloc: std.mem.Allocator, tags: Tags, basename: []const u8) !Tra
     const ext = try alloc.dupe(u8, if (ext_dot.len > 0) ext_dot[1..] else ext_dot);
     const stem = basename[0 .. basename.len - ext_dot.len];
     return .{
-        .title = try alloc.dupe(u8, tags.title orelse stem),
-        .artists = if (tags.artist) |ar| try splitArtists(alloc, ar) else &.{},
-        .album_artist = if (tags.album_artist) |x| try alloc.dupe(u8, x) else null,
-        .album = if (tags.album) |x| try alloc.dupe(u8, x) else null,
+        .title = try toUtf8(alloc, tags.title orelse stem),
+        .artists = if (tags.artist) |ar| try splitArtists(alloc, try toUtf8(alloc, ar)) else &.{},
+        .album_artist = if (tags.album_artist) |x| try toUtf8(alloc, x) else null,
+        .album = if (tags.album) |x| try toUtf8(alloc, x) else null,
         .track = if (tags.track) |x| firstInt(x) else null,
-        .year = if (tags.date) |x| firstInt(x) else null,
+        .disc = if (tags.disc) |x| firstInt(x) else null,
+        .year = blk: {
+            const v = if (tags.date) |x| firstInt(x) else null;
+            break :blk if (v) |n| (if (n == 0) null else n) else null;
+        },
         .ext = ext,
     };
 }
@@ -119,6 +160,7 @@ pub fn parse(alloc: std.mem.Allocator, io: std.Io, path: []const u8) !Track {
         .album_artist = tagStr(tagsv, "album_artist"),
         .album = tagStr(tagsv, "album"),
         .track = tagStr(tagsv, "track"),
+        .disc = tagStr(tagsv, "disc") orelse tagStr(tagsv, "discnumber"),
         .date = tagStr(tagsv, "date"),
     };
     return fromTags(alloc, tags, base); // tags slices live in the arena; fromTags dupes into alloc
@@ -160,4 +202,37 @@ test "fromTags falls back to filename stem for title" {
     const tr = try fromTags(a, .{}, "some song.flac");
     try t.expectEqualStrings("some song", tr.title.?);
     try t.expectEqual(@as(usize, 0), tr.artists.len);
+}
+
+test "toUtf8 passes through valid UTF-8 and transcodes Latin-1" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Already-valid UTF-8 is returned unchanged.
+    try t.expectEqualStrings("Café", try toUtf8(a, "Café"));
+    // Latin-1 0xE9 ('é') → UTF-8 C3 A9.
+    const latin1 = [_]u8{ 'C', 'o', 'm', 'm', 'u', 'n', 'i', 'q', 'u', 0xE9 };
+    try t.expectEqualStrings("Communiqué", try toUtf8(a, &latin1));
+}
+
+test "discFromDirName parses disc subfolder names" {
+    try t.expectEqual(@as(?u32, 1), discFromDirName("CD 1"));
+    try t.expectEqual(@as(?u32, 1), discFromDirName("CD1"));
+    try t.expectEqual(@as(?u32, 1), discFromDirName("cd 01"));
+    try t.expectEqual(@as(?u32, 2), discFromDirName("Disc 2"));
+    try t.expectEqual(@as(?u32, 3), discFromDirName("Disk 3"));
+    try t.expectEqual(@as(?u32, null), discFromDirName("Season 1"));
+    try t.expectEqual(@as(?u32, null), discFromDirName("Discography"));
+    try t.expectEqual(@as(?u32, null), discFromDirName("Blue"));
+}
+
+test "fromTags reads disc, drops zero year, transcodes latin-1 tags" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const latin1_album = [_]u8{ 'C', 'o', 'm', 'm', 'u', 'n', 'i', 'q', 'u', 0xE9 };
+    const tr = try fromTags(a, .{ .title = "T", .album = &latin1_album, .track = "5", .disc = "2/2", .date = "0" }, "05 t.mp3");
+    try t.expectEqual(@as(u32, 2), tr.disc.?);
+    try t.expectEqual(@as(?u32, null), tr.year); // date "0" is not a real year
+    try t.expectEqualStrings("Communiqué", tr.album.?);
 }
