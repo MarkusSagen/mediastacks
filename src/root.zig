@@ -60,6 +60,7 @@ pub const http = @import("util/http.zig");
 pub const shutdown = @import("util/shutdown.zig");
 
 pub const web_api = @import("web/api.zig");
+pub const review = @import("web/review.zig");
 
 test {
     std.testing.refAllDecls(@This());
@@ -102,5 +103,6 @@ test {
     _ = hash;
     _ = convert;
     _ = web_api;
+    _ = review;
     _ = @import("tui/reflow.zig");
 }
