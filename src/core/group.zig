@@ -60,6 +60,10 @@ const Cover = struct { abs: []const u8, dir: []const u8, ext: []const u8, kind: 
 
 const ExtraFile = struct { abs: []const u8, dir: []const u8, stem: []const u8, ext: []const u8, kind: extras_mod.Extra };
 
+/// A "sample" smaller than this is treated as release-promo junk; larger is a
+/// legitimate sample extra.
+const SAMPLE_MAX_BYTES: u64 = 50 * 1024 * 1024;
+
 fn musicAlbum(c: *Cand) []const u8 {
     return c.track.?.album orelse "Unknown Album";
 }
@@ -122,8 +126,8 @@ fn isJunkBase(base: []const u8) bool {
     if (base.len >= buf.len) return false;
     const lo = std.ascii.lowerString(buf[0..base.len], base);
 
-    // Sample clips (e.g. "Sample.mkv", "movie-sample.mp4").
-    if (std.mem.indexOf(u8, lo, "sample") != null) return true;
+    // NOTE: bare "sample" is handled size-aware at the extras step (Jellyfin
+    // treats samples/ + -sample as extras; only tiny promo clips are junk).
 
     // Torrent-site promo litter dropped alongside real media.
     if (std.mem.startsWith(u8, lo, "torrent downloaded from")) return true;
@@ -247,6 +251,12 @@ pub fn buildPlan(
         const extra_kind: ?extras_mod.Extra = extras_mod.extraFromDir(std.fs.path.basename(d)) orelse
             (if (extras_mod.extraFromSuffix(stem)) |m| m.kind else null);
         if (extra_kind) |ek| {
+            // A tiny "sample" is release promo litter → trash; a real sample
+            // clip (or any other extra) is kept.
+            if (ek == .samples and statSize(io, abs) < SAMPLE_MAX_BYTES) {
+                try junk.append(arena, abs);
+                continue;
+            }
             const ext = try arena.dupe(u8, if (ext_dot.len > 0) ext_dot[1..] else ext_dot);
             try extra_files.append(arena, .{ .abs = abs, .dir = d, .stem = stem, .ext = ext, .kind = ek });
             continue;
@@ -637,7 +647,9 @@ test "isJunkBase catches OS cruft, samples, and torrent-site promo litter" {
     // junk
     try t.expect(isJunkBase(".DS_Store"));
     try t.expect(isJunkBase("Thumbs.db"));
-    try t.expect(isJunkBase("Sample.mkv"));
+    // "Sample.mkv" is no longer name-trashed — it's size-gated at the extras
+    // step (tiny → junk, large → sample extra).
+    try t.expect(!isJunkBase("Sample.mkv"));
     try t.expect(isJunkBase("Torrent Downloaded From UIndex.org.txt"));
     try t.expect(isJunkBase("RARBG.txt"));
     try t.expect(isJunkBase("RARBG_DO_NOT_MIRROR.exe"));
