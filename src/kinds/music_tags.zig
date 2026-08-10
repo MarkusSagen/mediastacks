@@ -261,7 +261,132 @@ pub fn readVorbisValues(alloc: std.mem.Allocator, flac: []const u8, key: []const
     return null;
 }
 
+// ---- MP3 (ID3v2.4) rebuild + dispatch ---------------------------------
+
+/// Build a new MP3: fresh ID3v2.4 tag (from `tags`) + original audio (after
+/// any existing leading ID3 tag).
+pub fn buildMp3(alloc: std.mem.Allocator, original: []const u8, tags: TagSet) Error![]u8 {
+    var audio_start: usize = 0;
+    if (original.len >= 10 and std.mem.eql(u8, original[0..3], "ID3")) {
+        const size = desynchsafe(original[6..10]);
+        audio_start = @min(original.len, 10 + size);
+    }
+    const new_tag = buildId3v24(alloc, tags) catch return Error.OutOfMemory;
+    defer alloc.free(new_tag);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(alloc);
+    out.appendSlice(alloc, new_tag) catch return Error.OutOfMemory;
+    out.appendSlice(alloc, original[audio_start..]) catch return Error.OutOfMemory;
+    return out.toOwnedSlice(alloc);
+}
+
+/// Write `tags` into `path` by extension (.flac / .mp3). Reads the whole file,
+/// rebuilds it, writes to `path.tmp`, then atomically renames over the
+/// original. Never mutates in place. Unsupported ext → Error.UnsupportedFormat.
+pub fn writeTags(alloc: std.mem.Allocator, path: []const u8, tags: TagSet) Error!void {
+    const ext = std.fs.path.extension(path);
+    const is_flac = std.ascii.eqlIgnoreCase(ext, ".flac");
+    const is_mp3 = std.ascii.eqlIgnoreCase(ext, ".mp3");
+    if (!is_flac and !is_mp3) return Error.UnsupportedFormat;
+
+    const original = readWhole(alloc, path) orelse return Error.IoError;
+    defer alloc.free(original);
+    const rebuilt = if (is_flac) try buildFlac(alloc, original, tags) else try buildMp3(alloc, original, tags);
+    defer alloc.free(rebuilt);
+
+    const tmp = std.fmt.allocPrint(alloc, "{s}.tmp", .{path}) catch return Error.OutOfMemory;
+    defer alloc.free(tmp);
+    if (!writeWholeChecked(tmp, rebuilt)) return Error.IoError;
+
+    var tz: [4096]u8 = undefined;
+    var pz: [4096]u8 = undefined;
+    if (tmp.len >= tz.len or path.len >= pz.len) return Error.IoError;
+    const tzp = std.fmt.bufPrintZ(&tz, "{s}", .{tmp}) catch return Error.IoError;
+    const pzp = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return Error.IoError;
+    if (std.c.rename(tzp.ptr, pzp.ptr) != 0) {
+        _ = std.c.unlink(tzp.ptr);
+        return Error.IoError;
+    }
+}
+
+/// Read a whole file via libc. Owned by `alloc`; null on open failure.
+fn readWhole(alloc: std.mem.Allocator, path: []const u8) ?[]u8 {
+    var pz: [4096]u8 = undefined;
+    if (path.len >= pz.len) return null;
+    const pzp = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return null;
+    const fp = std.c.fopen(pzp.ptr, "rb") orelse return null;
+    defer _ = std.c.fclose(fp);
+    var buf: std.ArrayList(u8) = .empty;
+    var chunk: [4096]u8 = undefined;
+    while (true) {
+        const n = std.c.fread(&chunk, 1, chunk.len, fp);
+        if (n == 0) break;
+        buf.appendSlice(alloc, chunk[0..n]) catch return null;
+    }
+    return buf.toOwnedSlice(alloc) catch null;
+}
+
+fn writeWholeChecked(path: []const u8, bytes: []const u8) bool {
+    var pz: [4096]u8 = undefined;
+    if (path.len >= pz.len) return false;
+    const pzp = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return false;
+    const fp = std.c.fopen(pzp.ptr, "wb") orelse return false;
+    defer _ = std.c.fclose(fp);
+    if (bytes.len == 0) return true;
+    return std.c.fwrite(bytes.ptr, 1, bytes.len, fp) == bytes.len;
+}
+
 const t = std.testing;
+
+fn writeWhole(path: []const u8, bytes: []const u8) void {
+    _ = writeWholeChecked(path, bytes);
+}
+
+test "buildMp3 prepends a new ID3 tag and keeps audio" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const orig = "\xff\xfbFAKEMP3AUDIO";
+    const out = try buildMp3(a, orig, .{ .artists = &.{ "A", "B" }, .title = "T" });
+    try t.expectEqualStrings("ID3", out[0..3]);
+    const artists = (try readTextValues(a, out, "TPE1".*)).?;
+    try t.expectEqual(@as(usize, 2), artists.len);
+    try t.expect(std.mem.endsWith(u8, out, "FAKEMP3AUDIO"));
+}
+
+test "buildMp3 replaces an existing ID3 tag" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const old = try buildId3v24(a, .{ .title = "Old" });
+    const orig = try std.mem.concat(a, u8, &.{ old, "\xff\xfbAUDIO" });
+    const out = try buildMp3(a, orig, .{ .title = "New" });
+    try t.expectEqualStrings("New", (try readTextValues(a, out, "TIT2".*)).?[0]);
+    try t.expect(std.mem.endsWith(u8, out, "AUDIO"));
+}
+
+test "writeTags round-trips a temp file and rejects unsupported ext" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const pid = std.c.getpid();
+    var pb: [256]u8 = undefined;
+    const path = try std.fmt.bufPrint(&pb, "/tmp/stacks-tags-{d}.flac", .{pid});
+    const orig = try synthFlacForTest(a);
+    writeWhole(path, orig);
+    try writeTags(a, path, .{ .artists = &.{ "A", "B" }, .album = "Z" });
+    const back = readWhole(a, path).?;
+    const artists = (try readVorbisValues(a, back, "ARTIST")).?;
+    try t.expectEqual(@as(usize, 2), artists.len);
+    var pz: [256]u8 = undefined;
+    _ = std.c.unlink((std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch unreachable).ptr);
+
+    var xb: [256]u8 = undefined;
+    const xpath = try std.fmt.bufPrint(&xb, "/tmp/stacks-tags-{d}.m4a", .{pid});
+    writeWhole(xpath, "junk");
+    try t.expectError(Error.UnsupportedFormat, writeTags(a, xpath, .{}));
+    _ = std.c.unlink((std.fmt.bufPrintZ(&pz, "{s}", .{xpath}) catch unreachable).ptr);
+}
 
 /// Test/util: minimal synthetic FLAC — marker + STREAMINFO + VORBIS_COMMENT +
 /// fake audio. Exposed so apply.zig tests can seed a file.
