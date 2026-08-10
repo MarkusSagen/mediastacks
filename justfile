@@ -212,6 +212,10 @@ music-smoke: build
 mb-smoke: build
     MB_SMOKE=1 ./scripts/mb-smoke.sh
 
+# Live TMDB smoke (needs TMDB_KEY in the environment; TMDB_SMOKE-gated).
+tmdb-smoke: build
+    TMDB_SMOKE=1 ./scripts/tmdb-smoke.sh
+
 # Tag write-back smoke: --write-tags writes multi-artist FLAC/MP3; undo restores.
 tag-smoke: build
     ./scripts/tag-smoke.sh

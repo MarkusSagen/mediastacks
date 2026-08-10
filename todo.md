@@ -146,10 +146,17 @@ transcripts — kin to music/podcasts), NOT lumped with ebooks. Config gains
 
 ## Phase 4 — online enrichment (opt-in)
 
-- [ ] Providers behind the existing `providers/` interface: TMDB/TVDB (video),
-      IGDB (games). Canonical titles/years/episode names.
-- [ ] Jellyfin/Plex ID suffixes once online: `Film (2009) [imdbid-tt…]`,
-      `Series (2010) [tvdbid-…]` (needs a series year, which needs lookup).
+- [x] **TMDB (movies + TV)** (done 2026-08-10). `providers/tmdb.zig`
+      (search+detail+episode, external_ids → tmdb/imdb/tvdb ids +
+      original_language; memoizing `Enricher`). Pure `enrich.mergeMovieOnline`/
+      `mergeTvOnline`. `group.Online{music,video}` bundle. Jellyfin **ID suffixes
+      in folder + filename** via a `{id}` token + template ` []` collapse;
+      `{series_year}` added (fills the long-missing series-folder year). Config
+      `tmdb_key` (enables when set + not `--offline`) + `id_suffix` (default on).
+      Unit-tested via `http.MockClient`; live `just tmdb-smoke` (TMDB_KEY).
+      Captures `original_language` for the language/subtitle policy epic.
+- [ ] TVDB / IGDB / OMDb providers — deferred (TMDB covers movies+TV; IGDB waits
+      for the games kind).
 
 ---
 
