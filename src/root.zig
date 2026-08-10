@@ -13,6 +13,7 @@ pub const classify = @import("core/classify.zig");
 pub const tv = @import("kinds/tv.zig");
 pub const movie = @import("kinds/movie.zig");
 pub const music = @import("kinds/music.zig");
+pub const music_tags = @import("kinds/music_tags.zig");
 pub const mediascore = @import("core/mediascore.zig");
 pub const probe = @import("core/probe.zig");
 pub const enrich = @import("core/enrich.zig");
