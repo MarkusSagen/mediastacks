@@ -68,10 +68,24 @@ Still open (own future specs):
 
 ## Phase 2 — more kinds — DEFERRED (do later)
 
+DECISION (2026-08-10): **each media kind = its own top-level library folder,
+independently configurable — NOT nested under one shared `Books/` tree.** Matches
+how Jellyfin libraries are set up (one library per content type → its own folder)
+and reflects that these are genuinely different media (sizes/formats/metadata).
+Target roots: `Movies/ Shows/ Music/ Books/`(ebooks)` Audiobooks/ Comics/ Games/
+Documents/`. **Audiobooks go through the audio pipeline** (embedded tags, chapters,
+transcripts — kin to music/podcasts), NOT lumped with ebooks. Config gains
+**per-kind library roots** (today it has per-kind templates only).
+
+- [ ] Per-kind library roots in config (each kind → own root + template).
 - [ ] `kinds/game.zig` — multi-disc / multi-file installs, region/version tags,
-      platform folders.
-- [ ] `kinds/document.zig` — loose PDFs/papers/manuals beyond biblio's ebooks.
-- [ ] Confirm each new kind needs *only* a parser + template (no core changes).
+      platform folders → `Games/`.
+- [ ] `kinds/document.zig` — loose PDFs/papers/manuals → `Documents/`; ebooks →
+      `Books/`, comics → `Comics/` (cbz/cbr, `ComicInfo.xml`), each own root.
+- [ ] `kinds/audiobook.zig` — audio pipeline (chapters, `.m4b`, transcripts) →
+      `Audiobooks/`; resolves the A.1 "audiobook misclassified as music" gap.
+- [ ] Books/comics `.opf` / `ComicInfo.xml` sidecars (Jellyfin Bookshelf).
+- [ ] Confirm each new kind needs *only* a parser + template + root (no core changes).
 
 ## Music epic (incremental A→B→C)
 
