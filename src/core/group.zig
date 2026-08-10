@@ -19,6 +19,7 @@ const probe = @import("probe.zig");
 const enrich = @import("enrich.zig");
 const drm = @import("drm.zig");
 const naming = @import("naming.zig");
+const musicbrainz = @import("../providers/musicbrainz.zig");
 
 const Cand = struct {
     abs: []const u8,
@@ -61,6 +62,15 @@ fn isCoverImage(base: []const u8) bool {
 
 fn musicAlbum(c: *Cand) []const u8 {
     return c.track.?.album orelse "Unknown Album";
+}
+
+/// True if any track carries a usable (non-empty, non-mojibake) album tag —
+/// i.e. the album name is tag-authoritative rather than folder-derived.
+fn hadUsableAlbumTag(cands: []const *Cand) bool {
+    for (cands) |c| if (c.track.?.album) |al| {
+        if (al.len > 0 and std.mem.indexOf(u8, al, "\u{FFFD}") == null) return true;
+    };
+    return false;
 }
 fn audioScoreOf(c: *Cand) f32 {
     const ext = c.track.?.ext;
@@ -167,6 +177,7 @@ pub fn buildPlan(
     dir_path: []const u8,
     cfg: config.Config,
     probe_enabled: bool,
+    mb: ?*musicbrainz.Enricher,
 ) !plan.Plan {
     var media: std.ArrayList(*Cand) = .empty;
     var sidecars: std.ArrayList(Sidecar) = .empty;
@@ -393,6 +404,30 @@ pub fn buildPlan(
                 cp.*.fields = f;
                 cp.*.dst = try naming.dstFor(arena, cfg, .music, f);
             }
+
+            // MusicBrainz enrichment (opt-in). Corrects the winners' fields in
+            // place and recomputes dst; the offline plan is untouched when the
+            // enricher is null or returns no confident match.
+            if (mb) |enr| {
+                const album_from_folder = !hadUsableAlbumTag(cands.items);
+                const rel = enr.lookupAlbum(arena, meta.album, meta.album_artist, best.count(), meta.year) catch null;
+                if (rel) |release| {
+                    var wit = best.valueIterator();
+                    while (wit.next()) |cp| {
+                        const pos = cp.*.track.?.track orelse 0;
+                        const merged = try enrich.mergeMusic(arena, cp.*.fields.?, pos, release, album_from_folder);
+                        cp.*.fields = merged.fields;
+                        cp.*.dst = try naming.dstFor(arena, cfg, .music, merged.fields);
+                        for (merged.warnings) |w| try gb.warnings.append(arena, w);
+                    }
+                    if (release.title.len > 0) gb.title = release.title;
+                    if (release.year != null) gb.year = release.year;
+                    try gb.warnings.append(arena, try std.fmt.allocPrint(arena, "MusicBrainz: matched \"{s}\"", .{release.title}));
+                } else {
+                    try gb.warnings.append(arena, "MusicBrainz: no confident match");
+                }
+            }
+
             if (std.mem.eql(u8, meta.album, "Unknown Album")) try gb.warnings.append(arena, "untagged — filed under Unknown Album");
             for (cands.items) |c| {
                 const dkey: u32 = if (multi) (c.disc orelse 1) else 0;
@@ -565,7 +600,7 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
     const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
-    const p = try buildPlan(a, threaded.io(), root, cfg, false); // no probe
+    const p = try buildPlan(a, threaded.io(), root, cfg, false, null); // no probe
 
     var music_groups: usize = 0;
     var primaries: usize = 0;
@@ -604,7 +639,7 @@ test "buildPlan rolls CD subfolders into one multi-disc album (no-probe)" {
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
     const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
-    const p = try buildPlan(a, threaded.io(), root, cfg, false); // no probe: disc comes from folder names
+    const p = try buildPlan(a, threaded.io(), root, cfg, false, null); // no probe: disc comes from folder names
 
     var music_groups: usize = 0;
     var primaries: usize = 0;
@@ -650,7 +685,7 @@ test "buildPlan flags a DRM video and skips probing" {
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
     const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
-    const p = try buildPlan(a, threaded.io(), root, cfg, true); // probe_enabled
+    const p = try buildPlan(a, threaded.io(), root, cfg, true, null); // probe_enabled
 
     var warned = false;
     var media_present = false;
@@ -699,7 +734,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
         .movie_template = config.DEFAULT_MOVIE,
         .music_template = config.DEFAULT_MUSIC,
     };
-    const p = try buildPlan(a, io, root, cfg, false); // probe off: deterministic, no ffprobe dep
+    const p = try buildPlan(a, io, root, cfg, false, null); // probe off: deterministic, no ffprobe dep
 
     var tv_groups: usize = 0;
     var primaries: usize = 0;

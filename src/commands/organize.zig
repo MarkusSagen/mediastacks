@@ -7,16 +7,31 @@ const config = @import("../core/config.zig");
 const group = @import("../core/group.zig");
 const plan_mod = @import("../core/plan.zig");
 const apply_mod = @import("../core/apply.zig");
+const http = @import("../util/http.zig");
+const httpcache = @import("../util/httpcache.zig");
+const musicbrainz = @import("../providers/musicbrainz.zig");
+const standardize = @import("../core/standardize.zig");
 
 const Opts = struct {
     dir: ?[]const u8 = null,
     to: ?[]const u8 = null,
     dry_run: bool = false,
     no_probe: bool = false,
+    offline: bool = false,
     plan_out: ?[]const u8 = null,
     from: ?[]const u8 = null,
     on_conflict: apply_mod.OnConflict = .skip,
 };
+
+/// `$XDG_CACHE_HOME/stacks/mb` (or `$HOME/.cache/stacks/mb`), created.
+fn mbCacheDir(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
+    const base = if (env.get("XDG_CACHE_HOME")) |x|
+        try std.fs.path.join(alloc, &.{ x, "stacks", "mb" })
+    else
+        try std.fs.path.join(alloc, &.{ env.get("HOME") orelse "/tmp", ".cache", "stacks", "mb" });
+    standardize.mkdirParents(base) catch {};
+    return base;
+}
 
 fn parseConflict(s: []const u8) ?apply_mod.OnConflict {
     if (std.mem.eql(u8, s, "skip")) return .skip;
@@ -38,6 +53,8 @@ fn parseArgs(args: []const []const u8) !Opts {
             o.dry_run = true;
         } else if (std.mem.eql(u8, a, "--no-probe")) {
             o.no_probe = true;
+        } else if (std.mem.eql(u8, a, "--offline")) {
+            o.offline = true;
         } else if (std.mem.eql(u8, a, "--plan")) {
             i += 1;
             if (i >= args.len) return error.MissingValue;
@@ -216,7 +233,14 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
             try ctx.stderr.print("usage: shelve organize DIR [flags]\n", .{});
             return 1;
         };
-        break :blk group.buildPlan(ctx.arena, ctx.io, dir, cfg, !opts.no_probe) catch |err| {
+        // MusicBrainz enrichment when configured and not --offline.
+        var real = http.RealHttpClient{ .io = ctx.io };
+        var caching = httpcache.CachingHttpClient{ .inner = real.client(), .dir = try mbCacheDir(ctx.arena, ctx.env) };
+        var mb = musicbrainz.MusicBrainz{ .http_client = caching.client(), .contact = cfg.musicbrainz_contact };
+        var enricher = musicbrainz.Enricher.init(ctx.arena, &mb);
+        const mb_ptr: ?*musicbrainz.Enricher =
+            if (cfg.musicbrainz_enabled and !opts.offline) &enricher else null;
+        break :blk group.buildPlan(ctx.arena, ctx.io, dir, cfg, !opts.no_probe, mb_ptr) catch |err| {
             try ctx.stderr.print("cannot scan {s}: {s}\n", .{ dir, @errorName(err) });
             return 2;
         };

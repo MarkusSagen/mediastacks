@@ -176,18 +176,19 @@ catalog-info:
 
 # Reorganize DIR's TV / movies / music into the library. Applies by default;
 # pass --dry-run (-n) to preview. Undo any run with `just undo`.
-# FLAGS (all optional): --dry-run  --to LIB
+# FLAGS (all optional): --dry-run  --to LIB  --offline
 #   --on-conflict skip|suffix|overwrite  --plan FILE  --from FILE
 # e.g. `just organize ~/Downloads/down/Show --dry-run`
 #      `just organize ~/Downloads/down/Show --to ~/Media`
+# --offline skips MusicBrainz even when enabled in config (musicbrainz = on).
 organize DIR="" *FLAGS="": build
-    @if [ -z "{{DIR}}" ]; then echo "usage: just organize DIR [--dry-run] [--to LIB] [--on-conflict skip|suffix|overwrite] [--plan FILE] [--from FILE]"; exit 1; fi
+    @if [ -z "{{DIR}}" ]; then echo "usage: just organize DIR [--dry-run] [--to LIB] [--offline] [--on-conflict skip|suffix|overwrite] [--plan FILE] [--from FILE]"; exit 1; fi
     ./zig-out/bin/shelve organize "{{DIR}}" {{FLAGS}}
 
 # Review & edit a reorg in the browser, then apply on click (undo with `just undo`).
 # e.g. `just review ~/Downloads/down/Show --to ~/Media`
 review DIR="" *FLAGS="": build
-    @if [ -z "{{DIR}}" ]; then echo "usage: just review DIR [--to LIB] [--port N] [--no-probe]"; exit 1; fi
+    @if [ -z "{{DIR}}" ]; then echo "usage: just review DIR [--to LIB] [--port N] [--no-probe] [--offline]"; exit 1; fi
     ./zig-out/bin/shelve review "{{DIR}}" {{FLAGS}}
 
 # Reverse the most recent `just organize` (from its undo journal).
