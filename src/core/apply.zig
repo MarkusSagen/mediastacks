@@ -7,8 +7,14 @@ const plan = @import("plan.zig");
 const journal = @import("journal.zig");
 const standardize = @import("standardize.zig");
 const clock = @import("../util/clock.zig");
+const music_tags = @import("../kinds/music_tags.zig");
 
 pub const OnConflict = enum { skip, suffix, overwrite };
+
+/// Opt-in tag write-back on apply. When `write`, music primaries get their tags
+/// rewritten from `Plan.Fields` after the move — backed up to `backup_dir` and
+/// journaled so `shelve undo` restores the original bytes.
+pub const TagOpts = struct { write: bool = false, backup_dir: ?[]const u8 = null };
 
 pub const Result = struct {
     moved: u32,
@@ -82,7 +88,7 @@ fn trashPath(alloc: std.mem.Allocator, root: []const u8, from: []const u8, creat
 /// Perform the filesystem work and return the in-memory journal. All
 /// journal strings are owned by `alloc`. Split out from `apply` so tests
 /// don't touch the real XDG data dir.
-pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict) !Outcome {
+pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, tag_opts: TagOpts) !Outcome {
     const created = clock.nowSeconds();
     var entries: std.ArrayList(journal.Entry) = .empty;
     errdefer entries.deinit(alloc);
@@ -106,6 +112,10 @@ pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConf
                     try moveFile(item.src, final);
                     try entries.append(alloc, .{ .action = .move, .from = try alloc.dupe(u8, item.src), .to = final });
                     moved += 1;
+
+                    if (tag_opts.write and g.kind == .music and item.role == .primary) {
+                        try maybeWriteTags(alloc, &entries, tag_opts.backup_dir, final, item, created);
+                    }
                 },
                 .trash => {
                     const tp = try trashPath(alloc, p.library_root, item.src, created);
@@ -127,20 +137,88 @@ pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConf
 }
 
 /// Apply `p` and persist the journal under the env's XDG data dir.
-pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, env: *std.process.Environ.Map) !Result {
-    const out = try applyInMemory(alloc, p, on_conflict);
+pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, env: *std.process.Environ.Map, tag_opts: TagOpts) !Result {
+    var opts = tag_opts;
+    if (opts.write and opts.backup_dir == null) {
+        // Backups live beside the undo journals.
+        const d = try journal.dir(alloc, env); // $XDG_DATA_HOME/stacks/undo
+        defer alloc.free(d);
+        const parent = std.fs.path.dirname(d) orelse d; // $XDG_DATA_HOME/stacks
+        opts.backup_dir = try std.fs.path.join(alloc, &.{ parent, "backup" });
+    }
+    const out = try applyInMemory(alloc, p, on_conflict, opts);
     const jpath = try journal.write(alloc, env, out.journal);
     return .{ .moved = out.moved, .trashed = out.trashed, .skipped = out.skipped, .journal_path = jpath };
 }
 
-/// Reverse a journal, last entry first.
+fn tagSetFromFields(f: plan.Fields) music_tags.TagSet {
+    return .{
+        .title = f.title,
+        .artists = f.artists,
+        .album_artist = f.album_artist,
+        .album = f.album,
+        .track = f.track,
+        .disc = f.disc,
+        .year = f.year,
+        .release_mbid = f.release_mbid,
+        .recording_mbid = f.recording_mbid,
+    };
+}
+
+/// Back up `target` then write tags into it, journaling a `.tagwrite` entry
+/// (from=target, to=backup). Skips silently (no mutation) on any
+/// unsupported/failed step — never writes without a restorable backup.
+fn maybeWriteTags(
+    alloc: std.mem.Allocator,
+    entries: *std.ArrayList(journal.Entry),
+    backup_dir: ?[]const u8,
+    target: []const u8,
+    item: plan.Item,
+    created: i64,
+) !void {
+    const fields = item.fields orelse return;
+    const ext = std.fs.path.extension(target);
+    if (!std.ascii.eqlIgnoreCase(ext, ".flac") and !std.ascii.eqlIgnoreCase(ext, ".mp3")) return;
+
+    const bdir = backup_dir orelse return;
+    const base = std.fs.path.basename(target);
+    const backup = try std.fmt.allocPrint(alloc, "{s}/{d}/{s}", .{ bdir, created, base });
+    if (std.fs.path.dirname(backup)) |bp| standardize.mkdirParents(bp) catch return;
+
+    var fz: [4096]u8 = undefined;
+    var bz: [4096]u8 = undefined;
+    if (target.len >= fz.len or backup.len >= bz.len) return;
+    const fzp = std.fmt.bufPrintZ(&fz, "{s}", .{target}) catch return;
+    const bzp = std.fmt.bufPrintZ(&bz, "{s}", .{backup}) catch return;
+    standardize.copyAcrossDevices(fzp, bzp) catch return; // no backup → no write
+
+    music_tags.writeTags(alloc, target, tagSetFromFields(fields)) catch return;
+    try entries.append(alloc, .{ .action = .tagwrite, .from = try alloc.dupe(u8, target), .to = backup });
+}
+
+/// Reverse a journal, last entry first. `.tagwrite` restores the pre-tag bytes
+/// (copy backup over target); `.move`/`.trash` move the file back.
 pub fn undo(alloc: std.mem.Allocator, j: journal.Journal) !void {
     _ = alloc;
     var i = j.entries.len;
     while (i > 0) {
         i -= 1;
         const e = j.entries[i];
-        moveFile(e.to, e.from) catch {};
+        switch (e.action) {
+            .tagwrite => {
+                var fz: [4096]u8 = undefined;
+                var bz: [4096]u8 = undefined;
+                if (e.from.len < fz.len and e.to.len < bz.len) {
+                    const fzp = std.fmt.bufPrintZ(&fz, "{s}", .{e.from}) catch continue;
+                    const bzp = std.fmt.bufPrintZ(&bz, "{s}", .{e.to}) catch continue;
+                    // copyAcrossDevices is O_EXCL — remove the tagged target first
+                    // so the backup can be restored over it.
+                    _ = std.c.unlink(fzp.ptr);
+                    standardize.copyAcrossDevices(bzp, fzp) catch {};
+                }
+            },
+            .move, .trash => moveFile(e.to, e.from) catch {},
+        }
     }
 }
 
@@ -150,6 +228,69 @@ fn writeFile(path_z: [:0]const u8, contents: []const u8) void {
     const fp = std.c.fopen(path_z.ptr, "wb") orelse return;
     defer _ = std.c.fclose(fp);
     _ = std.c.fwrite(contents.ptr, 1, contents.len, fp);
+}
+
+fn readBytes(alloc: std.mem.Allocator, path: []const u8) ?[]u8 {
+    var pz: [4096]u8 = undefined;
+    const pzp = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return null;
+    const fp = std.c.fopen(pzp.ptr, "rb") orelse return null;
+    defer _ = std.c.fclose(fp);
+    var buf: std.ArrayList(u8) = .empty;
+    var chunk: [4096]u8 = undefined;
+    while (true) {
+        const n = std.c.fread(&chunk, 1, chunk.len, fp);
+        if (n == 0) break;
+        buf.appendSlice(alloc, chunk[0..n]) catch return null;
+    }
+    return buf.toOwnedSlice(alloc) catch null;
+}
+
+test "apply writes tags with backup and undo restores original bytes" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const pid = std.c.getpid();
+    const mt = @import("../kinds/music_tags.zig");
+
+    var srcb: [256]u8 = undefined;
+    const src = try std.fmt.bufPrint(&srcb, "/tmp/stacks-tw-{d}-src.flac", .{pid});
+    var outdirb: [256]u8 = undefined;
+    const outdir = try std.fmt.bufPrint(&outdirb, "/tmp/stacks-tw-{d}-out", .{pid});
+    var dstb: [320]u8 = undefined;
+    const dst = try std.fmt.bufPrint(&dstb, "{s}/Album/01 - T.flac", .{outdir});
+    var bkb: [256]u8 = undefined;
+    const backup_dir = try std.fmt.bufPrint(&bkb, "/tmp/stacks-tw-{d}-bak", .{pid});
+
+    const orig = try mt.buildFlac(a, try mt.synthFlacForTest(a), .{ .artists = &.{"Solo"}, .album = "Old" });
+    defer a.free(orig);
+    var sz: [256]u8 = undefined;
+    writeFile(try std.fmt.bufPrintZ(&sz, "{s}", .{src}), orig);
+
+    var items = [_]plan.Item{.{
+        .src = src, .role = .primary, .op = .move, .dst = dst, .reason = "",
+        .fields = .{ .album_artist = "A", .album = "Album", .title = "T", .track = 1, .artists = &.{ "A", "B" }, .ext = "flac" },
+    }};
+    var groups = [_]plan.Group{.{ .kind = .music, .title = "Album", .items = items[0..] }};
+    const p = plan.Plan{ .library_root = "/tmp", .source = "/tmp", .groups = groups[0..] };
+
+    const out = try applyInMemory(a, p, .skip, .{ .write = true, .backup_dir = backup_dir });
+    defer journal.freeOwned(a, out.journal);
+    try t.expect(exists(dst));
+    const back = readBytes(a, dst).?;
+    defer a.free(back);
+    const artists = (try mt.readVorbisValues(a, back, "ARTIST")).?;
+    try t.expectEqual(@as(usize, 2), artists.len); // wrote two artists
+
+    try undo(a, out.journal);
+    try t.expect(exists(src));
+    const restored = readBytes(a, src).?;
+    defer a.free(restored);
+    try t.expectEqualSlices(u8, orig, restored); // byte-identical original
+
+    // cleanup (best-effort)
+    var z: [512]u8 = undefined;
+    _ = std.c.unlink((std.fmt.bufPrintZ(&z, "{s}", .{src}) catch unreachable).ptr);
+    _ = std.c.unlink((std.fmt.bufPrintZ(&z, "{s}", .{dst}) catch unreachable).ptr);
 }
 
 test "apply moves a primary and undo restores it" {
@@ -170,7 +311,7 @@ test "apply moves a primary and undo restores it" {
     var groups = [_]plan.Group{.{ .kind = .tv, .title = "Show", .items = items[0..] }};
     const p = plan.Plan{ .library_root = "/tmp", .source = "/tmp", .groups = groups[0..] };
 
-    const out = try applyInMemory(a, p, .skip);
+    const out = try applyInMemory(a, p, .skip, .{});
     defer journal.freeOwned(a, out.journal);
     try t.expectEqual(@as(u32, 1), out.moved);
     try t.expect(exists(dst));

@@ -121,7 +121,7 @@ fn handle(io: std.Io, session: *Session, env: *std.process.Environ.Map, request:
     }
     if (std.mem.eql(u8, path, "/api/apply")) {
         _ = readBody(session.arena, request, 64 * 1024) catch {}; // claim the (empty) POST body
-        const res = try apply_mod.apply(session.arena, session.plan, .skip, env);
+        const res = try apply_mod.apply(session.arena, session.plan, .skip, env, .{ .write = session.cfg.write_tags });
         const body = try std.fmt.allocPrint(session.arena, "{{\"moved\":{d},\"trashed\":{d},\"skipped\":{d},\"journal\":\"{s}\"}}", .{ res.moved, res.trashed, res.skipped, res.journal_path });
         return respondJson(request, body);
     }

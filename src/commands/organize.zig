@@ -18,6 +18,7 @@ const Opts = struct {
     dry_run: bool = false,
     no_probe: bool = false,
     offline: bool = false,
+    write_tags_flag: ?bool = null,
     plan_out: ?[]const u8 = null,
     from: ?[]const u8 = null,
     on_conflict: apply_mod.OnConflict = .skip,
@@ -55,6 +56,10 @@ fn parseArgs(args: []const []const u8) !Opts {
             o.no_probe = true;
         } else if (std.mem.eql(u8, a, "--offline")) {
             o.offline = true;
+        } else if (std.mem.eql(u8, a, "--write-tags")) {
+            o.write_tags_flag = true;
+        } else if (std.mem.eql(u8, a, "--no-write-tags")) {
+            o.write_tags_flag = false;
         } else if (std.mem.eql(u8, a, "--plan")) {
             i += 1;
             if (i >= args.len) return error.MissingValue;
@@ -263,7 +268,8 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         return 0;
     }
 
-    const res = apply_mod.apply(ctx.arena, p, opts.on_conflict, ctx.env) catch |err| {
+    const write_tags = opts.write_tags_flag orelse cfg.write_tags;
+    const res = apply_mod.apply(ctx.arena, p, opts.on_conflict, ctx.env, .{ .write = write_tags }) catch |err| {
         try ctx.stderr.print("apply failed: {s}\n", .{@errorName(err)});
         return 2;
     };
