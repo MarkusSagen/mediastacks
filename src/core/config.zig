@@ -23,6 +23,8 @@ pub const Config = struct {
     musicbrainz_enabled: bool = false,
     musicbrainz_contact: ?[]const u8 = null,
     write_tags: bool = false,
+    tmdb_key: ?[]const u8 = null,
+    id_suffix: bool = true,
 };
 
 pub fn freeConfig(alloc: std.mem.Allocator, cfg: Config) void {
@@ -31,6 +33,7 @@ pub fn freeConfig(alloc: std.mem.Allocator, cfg: Config) void {
     alloc.free(cfg.movie_template);
     alloc.free(cfg.music_template);
     if (cfg.musicbrainz_contact) |c| alloc.free(c);
+    if (cfg.tmdb_key) |k| alloc.free(k);
 }
 
 const Preset = struct { tv: []const u8, movie: []const u8, music: []const u8 };
@@ -76,6 +79,8 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
     var musicbrainz: ?[]const u8 = null;
     var musicbrainz_contact: ?[]const u8 = null;
     var write_tags: ?[]const u8 = null;
+    var tmdb_key: ?[]const u8 = null;
+    var id_suffix: ?[]const u8 = null;
 
     var it = std.mem.tokenizeScalar(u8, text, '\n');
     while (it.next()) |raw| {
@@ -96,7 +101,9 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
         else if (std.mem.eql(u8, key, "music_template")) music_template = val
         else if (std.mem.eql(u8, key, "musicbrainz")) musicbrainz = val
         else if (std.mem.eql(u8, key, "musicbrainz_contact")) musicbrainz_contact = val
-        else if (std.mem.eql(u8, key, "write_tags")) write_tags = val;
+        else if (std.mem.eql(u8, key, "write_tags")) write_tags = val
+        else if (std.mem.eql(u8, key, "tmdb_key")) tmdb_key = val
+        else if (std.mem.eql(u8, key, "id_suffix")) id_suffix = val;
     }
 
     const boolOn = struct {
@@ -128,6 +135,8 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
         .musicbrainz_enabled = boolOn(musicbrainz),
         .musicbrainz_contact = mb_contact,
         .write_tags = boolOn(write_tags),
+        .tmdb_key = if (tmdb_key) |v| try alloc.dupe(u8, v) else null,
+        .id_suffix = if (id_suffix) |v| boolOn(v) else true,
     };
 }
 
@@ -254,4 +263,23 @@ test "parseLines reads write_tags toggle" {
     const cfg = try parseLines(a, "write_tags = on");
     defer freeConfig(a, cfg);
     try t.expect(cfg.write_tags);
+}
+
+test "parseLines reads tmdb_key and id_suffix" {
+    const a = t.allocator;
+    const cfg = try parseLines(a,
+        \\tmdb_key = abc123
+        \\id_suffix = off
+    );
+    defer freeConfig(a, cfg);
+    try t.expectEqualStrings("abc123", cfg.tmdb_key.?);
+    try t.expect(!cfg.id_suffix);
+}
+
+test "parseLines id_suffix defaults on, tmdb_key null" {
+    const a = t.allocator;
+    const cfg = try parseLines(a, "");
+    defer freeConfig(a, cfg);
+    try t.expect(cfg.id_suffix);
+    try t.expectEqual(@as(?[]const u8, null), cfg.tmdb_key);
 }

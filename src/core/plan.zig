@@ -34,6 +34,12 @@ pub const Fields = struct {
     artists: []const []const u8 = &.{},
     release_mbid: ?[]const u8 = null,
     recording_mbid: ?[]const u8 = null,
+    // video online (TMDB)
+    series_year: ?u32 = null,
+    tmdb_id: ?[]const u8 = null,
+    imdb_id: ?[]const u8 = null,
+    tvdb_id: ?[]const u8 = null,
+    original_language: ?[]const u8 = null,
 };
 
 pub const Item = struct {
