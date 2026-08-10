@@ -58,6 +58,8 @@ const Sidecar = struct {
 
 const Cover = struct { abs: []const u8, dir: []const u8, ext: []const u8, kind: extras_mod.Image };
 
+const ExtraFile = struct { abs: []const u8, dir: []const u8, stem: []const u8, ext: []const u8, kind: extras_mod.Extra };
+
 fn musicAlbum(c: *Cand) []const u8 {
     return c.track.?.album orelse "Unknown Album";
 }
@@ -194,6 +196,7 @@ pub fn buildPlan(
     var media: std.ArrayList(*Cand) = .empty;
     var sidecars: std.ArrayList(Sidecar) = .empty;
     var covers: std.ArrayList(Cover) = .empty;
+    var extra_files: std.ArrayList(ExtraFile) = .empty;
     var junk: std.ArrayList([]const u8) = .empty;
     var unclassified: std.ArrayList([]const u8) = .empty;
 
@@ -235,6 +238,17 @@ pub fn buildPlan(
         if (extras_mod.imageFromName(base)) |img_kind| {
             const ext = try arena.dupe(u8, if (ext_dot.len > 0) ext_dot[1..] else ext_dot);
             try covers.append(arena, .{ .abs = abs, .dir = d, .ext = ext, .kind = img_kind });
+            continue;
+        }
+
+        // Jellyfin extras — a recognized subfolder (behind the scenes/trailers/…)
+        // or filename suffix (-trailer/-behindthescenes/…). Kept as extras, not
+        // primaries. (Size-aware promo-sample trashing is applied below.)
+        const extra_kind: ?extras_mod.Extra = extras_mod.extraFromDir(std.fs.path.basename(d)) orelse
+            (if (extras_mod.extraFromSuffix(stem)) |m| m.kind else null);
+        if (extra_kind) |ek| {
+            const ext = try arena.dupe(u8, if (ext_dot.len > 0) ext_dot[1..] else ext_dot);
+            try extra_files.append(arena, .{ .abs = abs, .dir = d, .stem = stem, .ext = ext, .kind = ek });
             continue;
         }
 
@@ -542,6 +556,24 @@ pub fn buildPlan(
         if (!attached) try unclassified.append(arena, cov.abs);
     }
 
+    // ---- Phase C3: attach extras --------------------------------------
+    for (extra_files.items) |ef| {
+        var attached = false;
+        const ef_parent = std.fs.path.dirname(ef.dir);
+        for (media.items) |c| {
+            const same = std.mem.eql(u8, c.dir, ef.dir);
+            const parent = ef_parent != null and std.mem.eql(u8, c.dir, ef_parent.?);
+            if (!same and !parent) continue;
+            const folder = mediaFolderOf(c) orelse break;
+            const dst = try std.fmt.allocPrint(arena, "{s}/{s}/{s}.{s}", .{ folder, extras_mod.subdir(ef.kind), ef.stem, ef.ext });
+            const reason = try std.fmt.allocPrint(arena, "extra:{s}", .{@tagName(ef.kind)});
+            try gbs.items[c.group_idx].items.append(arena, .{ .src = ef.abs, .role = .extra, .op = .move, .dst = dst, .reason = reason });
+            attached = true;
+            break;
+        }
+        if (!attached) try unclassified.append(arena, ef.abs);
+    }
+
     // ---- Phase D: junk ------------------------------------------------
     if (junk.items.len > 0) {
         var jitems: std.ArrayList(plan.Item) = .empty;
@@ -671,6 +703,46 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
     unlinkAt("{s}/track a.mp3", .{root});
     unlinkAt("{s}/track b.flac", .{root});
     unlinkAt("{s}/cover.jpg", .{root});
+    rmdirAt("{s}", .{root});
+}
+
+test "buildPlan routes extras to Jellyfin subfolders (no-probe)" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const pid = std.c.getpid();
+    var rb: [256]u8 = undefined;
+    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-extra-{d}", .{pid});
+    mkdirAt("{s}", .{root});
+    mkdirAt("{s}/trailers", .{root});
+    try writeFileAt("{s}/The.Matrix.1999.1080p.mkv", .{root}, "aaaa");
+    try writeFileAt("{s}/trailers/teaser.mkv", .{root}, "bb");
+    try writeFileAt("{s}/The.Matrix.1999.1080p-behindthescenes.mkv", .{root}, "cc");
+
+    var threaded = std.Io.Threaded.init(t.allocator, .{});
+    defer threaded.deinit();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const p = try buildPlan(a, threaded.io(), root, cfg, false, .{});
+
+    var trailer = false;
+    var bts = false;
+    var extras_n: usize = 0;
+    for (p.groups) |g| for (g.items) |it| {
+        if (it.role != .extra) continue;
+        extras_n += 1;
+        const dv = it.dst orelse continue;
+        if (std.mem.indexOf(u8, dv, "/trailers/") != null) trailer = true;
+        if (std.mem.indexOf(u8, dv, "/behind the scenes/") != null) bts = true;
+    };
+    try t.expectEqual(@as(usize, 2), extras_n);
+    try t.expect(trailer); // trailers/teaser.mkv → .../trailers/
+    try t.expect(bts); // -behindthescenes → .../behind the scenes/
+
+    unlinkAt("{s}/The.Matrix.1999.1080p.mkv", .{root});
+    unlinkAt("{s}/trailers/teaser.mkv", .{root});
+    unlinkAt("{s}/The.Matrix.1999.1080p-behindthescenes.mkv", .{root});
+    rmdirAt("{s}/trailers", .{root});
     rmdirAt("{s}", .{root});
 }
 
