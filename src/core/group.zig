@@ -21,6 +21,7 @@ const drm = @import("drm.zig");
 const naming = @import("naming.zig");
 const musicbrainz = @import("../providers/musicbrainz.zig");
 const tmdb = @import("../providers/tmdb.zig");
+const extras_mod = @import("extras.zig");
 
 /// Optional online enrichers, one per family. Absent → offline for that kind.
 pub const Online = struct {
@@ -55,17 +56,7 @@ const Sidecar = struct {
     ext: []const u8,
 };
 
-const Cover = struct { abs: []const u8, dir: []const u8, ext: []const u8 };
-
-fn isCoverImage(base: []const u8) bool {
-    const ext = std.fs.path.extension(base);
-    const is_img = std.ascii.eqlIgnoreCase(ext, ".jpg") or std.ascii.eqlIgnoreCase(ext, ".jpeg") or std.ascii.eqlIgnoreCase(ext, ".png");
-    if (!is_img) return false;
-    const stem = base[0 .. base.len - ext.len];
-    const names = [_][]const u8{ "cover", "folder", "front", "albumart", "album" };
-    for (names) |n| if (std.ascii.eqlIgnoreCase(stem, n)) return true;
-    return false;
-}
+const Cover = struct { abs: []const u8, dir: []const u8, ext: []const u8, kind: extras_mod.Image };
 
 fn musicAlbum(c: *Cand) []const u8 {
     return c.track.?.album orelse "Unknown Album";
@@ -178,6 +169,20 @@ fn albumRootOf(p: []const u8) []const u8 {
     return dir;
 }
 
+/// Destination media folder a companion file (image/extra) attaches to:
+/// album root for music, movie folder for a movie, series root for TV.
+fn mediaFolderOf(c: *Cand) ?[]const u8 {
+    const pd = c.primary_dst orelse return null;
+    return switch (c.mkind) {
+        .music => albumRootOf(pd),
+        .tv => blk: {
+            const season = std.fs.path.dirname(pd) orelse break :blk null;
+            break :blk std.fs.path.dirname(season) orelse season;
+        },
+        else => std.fs.path.dirname(pd),
+    };
+}
+
 pub fn buildPlan(
     arena: std.mem.Allocator,
     io: std.Io,
@@ -227,9 +232,9 @@ pub fn buildPlan(
             continue;
         }
 
-        if (isCoverImage(base)) {
+        if (extras_mod.imageFromName(base)) |img_kind| {
             const ext = try arena.dupe(u8, if (ext_dot.len > 0) ext_dot[1..] else ext_dot);
-            try covers.append(arena, .{ .abs = abs, .dir = d, .ext = ext });
+            try covers.append(arena, .{ .abs = abs, .dir = d, .ext = ext, .kind = img_kind });
             continue;
         }
 
@@ -508,20 +513,30 @@ pub fn buildPlan(
         try unclassified.append(arena, sc.abs);
     }
 
-    // ---- Phase C2: attach album covers --------------------------------
+    // ---- Phase C2: attach images (poster/backdrop/logo/thumb/banner) ---
+    // Per (group, image-kind) counter so multiple backdrops number cleanly.
+    var img_counts = std.StringHashMap(u32).init(arena);
     for (covers.items) |cov| {
         var attached = false;
         for (media.items) |c| {
-            if (c.mkind != .music) continue;
             const same_dir = std.mem.eql(u8, c.dir, cov.dir) or
                 (c.album_dir != null and std.mem.eql(u8, c.album_dir.?, cov.dir));
             if (!same_dir) continue;
-            if (c.primary_dst) |pd| {
-                const album_root = albumRootOf(pd);
-                const dst = try std.fmt.allocPrint(arena, "{s}/cover.{s}", .{ album_root, cov.ext });
-                try gbs.items[c.group_idx].items.append(arena, .{ .src = cov.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = "cover" });
-                attached = true;
-            }
+            const folder = mediaFolderOf(c) orelse break;
+            // Music album cover stays `cover.{ext}` (Jellyfin music); everything
+            // else uses the canonical Jellyfin image name.
+            const ckey = try std.fmt.allocPrint(arena, "{d}|{s}", .{ c.group_idx, @tagName(cov.kind) });
+            const n = img_counts.get(ckey) orelse 0;
+            try img_counts.put(ckey, n + 1);
+            const name = if (c.mkind == .music and cov.kind == .poster)
+                try std.fmt.allocPrint(arena, "cover.{s}", .{cov.ext})
+            else if (n == 0)
+                try extras_mod.imageOutName(arena, cov.kind, cov.ext)
+            else
+                try std.fmt.allocPrint(arena, "{s}-{d}.{s}", .{ @tagName(cov.kind), n, cov.ext });
+            const dst = try std.fmt.allocPrint(arena, "{s}/{s}", .{ folder, name });
+            try gbs.items[c.group_idx].items.append(arena, .{ .src = cov.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = "image" });
+            attached = true;
             break;
         }
         if (!attached) try unclassified.append(arena, cov.abs);
@@ -656,6 +671,40 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
     unlinkAt("{s}/track a.mp3", .{root});
     unlinkAt("{s}/track b.flac", .{root});
     unlinkAt("{s}/cover.jpg", .{root});
+    rmdirAt("{s}", .{root});
+}
+
+test "buildPlan places Jellyfin images by canonical name (no-probe)" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const pid = std.c.getpid();
+    var rb: [256]u8 = undefined;
+    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-img-{d}", .{pid});
+    mkdirAt("{s}", .{root});
+    try writeFileAt("{s}/The.Matrix.1999.1080p.mkv", .{root}, "aaaa");
+    try writeFileAt("{s}/poster.jpg", .{root}, "p");
+    try writeFileAt("{s}/fanart.jpg", .{root}, "f");
+
+    var threaded = std.Io.Threaded.init(t.allocator, .{});
+    defer threaded.deinit();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const p = try buildPlan(a, threaded.io(), root, cfg, false, .{});
+
+    var poster = false;
+    var backdrop = false;
+    for (p.groups) |g| for (g.items) |it| {
+        const dv = it.dst orelse continue;
+        if (std.mem.endsWith(u8, dv, "/poster.jpg")) poster = true;
+        if (std.mem.endsWith(u8, dv, "/backdrop.jpg")) backdrop = true;
+    };
+    try t.expect(poster); // poster.jpg kept as poster.jpg
+    try t.expect(backdrop); // fanart.jpg → backdrop.jpg
+
+    unlinkAt("{s}/The.Matrix.1999.1080p.mkv", .{root});
+    unlinkAt("{s}/poster.jpg", .{root});
+    unlinkAt("{s}/fanart.jpg", .{root});
     rmdirAt("{s}", .{root});
 }
 
