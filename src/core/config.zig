@@ -20,6 +20,9 @@ pub const Config = struct {
     tv_template: []const u8,
     movie_template: []const u8,
     music_template: []const u8,
+    musicbrainz_enabled: bool = false,
+    musicbrainz_contact: ?[]const u8 = null,
+    write_tags: bool = false,
 };
 
 pub fn freeConfig(alloc: std.mem.Allocator, cfg: Config) void {
@@ -27,6 +30,7 @@ pub fn freeConfig(alloc: std.mem.Allocator, cfg: Config) void {
     alloc.free(cfg.tv_template);
     alloc.free(cfg.movie_template);
     alloc.free(cfg.music_template);
+    if (cfg.musicbrainz_contact) |c| alloc.free(c);
 }
 
 const Preset = struct { tv: []const u8, movie: []const u8, music: []const u8 };
@@ -69,6 +73,9 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
     var movie_template: ?[]const u8 = null;
     var music_preset: ?[]const u8 = null;
     var music_template: ?[]const u8 = null;
+    var musicbrainz: ?[]const u8 = null;
+    var musicbrainz_contact: ?[]const u8 = null;
+    var write_tags: ?[]const u8 = null;
 
     var it = std.mem.tokenizeScalar(u8, text, '\n');
     while (it.next()) |raw| {
@@ -86,8 +93,18 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
         else if (std.mem.eql(u8, key, "tv_template")) tv_template = val
         else if (std.mem.eql(u8, key, "movie_template")) movie_template = val
         else if (std.mem.eql(u8, key, "music_preset")) music_preset = val
-        else if (std.mem.eql(u8, key, "music_template")) music_template = val;
+        else if (std.mem.eql(u8, key, "music_template")) music_template = val
+        else if (std.mem.eql(u8, key, "musicbrainz")) musicbrainz = val
+        else if (std.mem.eql(u8, key, "musicbrainz_contact")) musicbrainz_contact = val
+        else if (std.mem.eql(u8, key, "write_tags")) write_tags = val;
     }
+
+    const boolOn = struct {
+        fn f(v: ?[]const u8) bool {
+            const s = v orelse return false;
+            return std.mem.eql(u8, s, "on") or std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "1");
+        }
+    }.f;
 
     const tv = try resolve("tv", tv_template, tv_preset, preset);
     const movie = try resolve("movie", movie_template, movie_preset, preset);
@@ -101,7 +118,17 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
     const mt = try alloc.dupe(u8, movie);
     errdefer alloc.free(mt);
     const mu = try alloc.dupe(u8, music);
-    return .{ .library_root = lr, .tv_template = tt, .movie_template = mt, .music_template = mu };
+    errdefer alloc.free(mu);
+    const mb_contact = if (musicbrainz_contact) |v| try alloc.dupe(u8, v) else null;
+    return .{
+        .library_root = lr,
+        .tv_template = tt,
+        .movie_template = mt,
+        .music_template = mu,
+        .musicbrainz_enabled = boolOn(musicbrainz),
+        .musicbrainz_contact = mb_contact,
+        .write_tags = boolOn(write_tags),
+    };
 }
 
 fn configPath(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
@@ -200,4 +227,31 @@ test "explicit template overrides preset" {
 
 test "unknown preset errors" {
     try t.expectError(error.UnknownPreset, parseLines(t.allocator, "preset = nope"));
+}
+
+test "parseLines reads musicbrainz toggle and contact" {
+    const a = t.allocator;
+    const cfg = try parseLines(a,
+        \\musicbrainz = on
+        \\musicbrainz_contact = me@example.com
+    );
+    defer freeConfig(a, cfg);
+    try t.expect(cfg.musicbrainz_enabled);
+    try t.expectEqualStrings("me@example.com", cfg.musicbrainz_contact.?);
+}
+
+test "parseLines musicbrainz + write_tags default off" {
+    const a = t.allocator;
+    const cfg = try parseLines(a, "");
+    defer freeConfig(a, cfg);
+    try t.expect(!cfg.musicbrainz_enabled);
+    try t.expectEqual(@as(?[]const u8, null), cfg.musicbrainz_contact);
+    try t.expect(!cfg.write_tags);
+}
+
+test "parseLines reads write_tags toggle" {
+    const a = t.allocator;
+    const cfg = try parseLines(a, "write_tags = on");
+    defer freeConfig(a, cfg);
+    try t.expect(cfg.write_tags);
 }
