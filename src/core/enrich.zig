@@ -14,6 +14,7 @@ const movie = @import("../kinds/movie.zig");
 const probe = @import("probe.zig");
 const plan = @import("plan.zig");
 const musicbrainz = @import("../providers/musicbrainz.zig");
+const tmdb = @import("../providers/tmdb.zig");
 
 pub const TvFields = struct {
     series: []const u8,
@@ -189,6 +190,55 @@ pub fn mergeMusic(
     return .{ .fields = f, .warnings = try warns.toOwnedSlice(alloc) };
 }
 
+/// Merge a TMDB movie match into a movie's fields: attach ids + language, and
+/// adopt the canonical title/year unless the filename disagrees (then keep it
+/// and warn). Field slices borrow from `base`/`info`; warnings are allocated.
+pub fn mergeMovieOnline(alloc: std.mem.Allocator, base: plan.Fields, info: tmdb.MovieInfo) !MusicEnrichResult {
+    var f = base;
+    var warns: std.ArrayList([]const u8) = .empty;
+    errdefer freeAll(alloc, &warns);
+
+    f.tmdb_id = info.tmdb_id;
+    f.imdb_id = info.imdb_id;
+    if (info.original_language) |l| f.original_language = l;
+
+    if (info.title.len > 0) {
+        if (f.title == null or std.ascii.eqlIgnoreCase(f.title.?, info.title)) {
+            f.title = info.title;
+        } else {
+            try warns.append(alloc, try std.fmt.allocPrint(alloc, "TMDB suggests title \"{s}\"", .{info.title}));
+        }
+    }
+    if (info.year) |y| {
+        if (f.year == null) {
+            f.year = y;
+        } else if (f.year.? != y) {
+            try warns.append(alloc, try std.fmt.allocPrint(alloc, "TMDB year {d} vs filename {d}", .{ y, f.year.? }));
+        }
+    }
+    return .{ .fields = f, .warnings = try warns.toOwnedSlice(alloc) };
+}
+
+/// Merge a TMDB series match (+ optional episode title) into an episode's
+/// fields: canonical series name, series year, ids, language, and the episode
+/// title when TMDB has one (filename episode titles are usually absent/noisy).
+pub fn mergeTvOnline(alloc: std.mem.Allocator, base: plan.Fields, s: tmdb.SeriesInfo, episode_title: ?[]const u8) !MusicEnrichResult {
+    var f = base;
+    var warns: std.ArrayList([]const u8) = .empty;
+    errdefer freeAll(alloc, &warns);
+
+    f.tmdb_id = s.tmdb_id;
+    f.imdb_id = s.imdb_id;
+    f.tvdb_id = s.tvdb_id;
+    if (s.original_language) |l| f.original_language = l;
+    if (s.name.len > 0) f.series = s.name;
+    if (s.year != null) f.series_year = s.year;
+    if (episode_title) |et| if (et.len > 0) {
+        f.title = et;
+    };
+    return .{ .fields = f, .warnings = try warns.toOwnedSlice(alloc) };
+}
+
 const t = std.testing;
 
 fn epOf(series: []const u8, s: u32, e: u32, title: ?[]const u8, q: ?[]const u8) tv.Episode {
@@ -281,6 +331,30 @@ test "mergeMusic fills year, canonical title, multi-artist, mbids" {
     try t.expectEqual(@as(usize, 2), r.fields.artists.len); // multi-artist
     try t.expectEqualStrings("rel-1", r.fields.release_mbid.?);
     try t.expectEqualStrings("rec-1", r.fields.recording_mbid.?);
+}
+
+test "mergeMovieOnline fills canonical title/year/ids/lang" {
+    const a = t.allocator;
+    const info = tmdb.MovieInfo{ .tmdb_id = "603", .imdb_id = "tt0133093", .title = "The Matrix", .year = 1999, .original_language = "en" };
+    const base = plan.Fields{ .title = "the matrix", .year = 1999, .ext = "mkv" };
+    const r = try mergeMovieOnline(a, base, info);
+    defer freeWarnings(a, r.warnings);
+    try t.expectEqualStrings("The Matrix", r.fields.title.?);
+    try t.expectEqualStrings("603", r.fields.tmdb_id.?);
+    try t.expectEqualStrings("en", r.fields.original_language.?);
+}
+
+test "mergeTvOnline fills episode title + series year + ids" {
+    const a = t.allocator;
+    const s = tmdb.SeriesInfo{ .tmdb_id = "95396", .tvdb_id = "371980", .name = "Severance", .year = 2022, .original_language = "en" };
+    const base = plan.Fields{ .series = "severance", .season = 1, .episode = 1, .ext = "mkv" };
+    const r = try mergeTvOnline(a, base, s, "Good News About Hell");
+    defer freeWarnings(a, r.warnings);
+    try t.expectEqualStrings("Severance", r.fields.series.?);
+    try t.expectEqual(@as(u32, 2022), r.fields.series_year.?);
+    try t.expectEqualStrings("Good News About Hell", r.fields.title.?);
+    try t.expectEqualStrings("95396", r.fields.tmdb_id.?);
+    try t.expectEqualStrings("371980", r.fields.tvdb_id.?);
 }
 
 test "mergeMusic keeps a tag-authoritative album but warns on MB difference" {
