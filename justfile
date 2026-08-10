@@ -176,13 +176,14 @@ catalog-info:
 
 # Reorganize DIR's TV / movies / music into the library. Applies by default;
 # pass --dry-run (-n) to preview. Undo any run with `just undo`.
-# FLAGS (all optional): --dry-run  --to LIB  --offline
+# FLAGS (all optional): --dry-run  --to LIB  --offline  --write-tags
 #   --on-conflict skip|suffix|overwrite  --plan FILE  --from FILE
 # e.g. `just organize ~/Downloads/down/Show --dry-run`
 #      `just organize ~/Downloads/down/Show --to ~/Media`
 # --offline skips MusicBrainz even when enabled in config (musicbrainz = on).
+# --write-tags rewrites FLAC/MP3 tags (multi-artist) on apply (backed up; undoable).
 organize DIR="" *FLAGS="": build
-    @if [ -z "{{DIR}}" ]; then echo "usage: just organize DIR [--dry-run] [--to LIB] [--offline] [--on-conflict skip|suffix|overwrite] [--plan FILE] [--from FILE]"; exit 1; fi
+    @if [ -z "{{DIR}}" ]; then echo "usage: just organize DIR [--dry-run] [--to LIB] [--offline] [--write-tags] [--on-conflict skip|suffix|overwrite] [--plan FILE] [--from FILE]"; exit 1; fi
     ./zig-out/bin/shelve organize "{{DIR}}" {{FLAGS}}
 
 # Review & edit a reorg in the browser, then apply on click (undo with `just undo`).
@@ -210,6 +211,10 @@ music-smoke: build
 # Live MusicBrainz smoke (hits the network at 1 req/sec; MB_SMOKE-gated).
 mb-smoke: build
     MB_SMOKE=1 ./scripts/mb-smoke.sh
+
+# Tag write-back smoke: --write-tags writes multi-artist FLAC/MP3; undo restores.
+tag-smoke: build
+    ./scripts/tag-smoke.sh
 
 # Print where shelve keeps organizer state (config + undo journals).
 shelve-info:

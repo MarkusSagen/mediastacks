@@ -107,9 +107,18 @@ Still open (own future specs):
       deferred). Unit-tested with `http.MockClient`; live check `just mb-smoke`
       (`MB_SMOKE=1`). Enrichment also recovers mojibake album/title tags that
       ffprobe lost offline.
-- [ ] **C — tag write-back (the multi-artist fix).** Write multi-value
-      artist tags so a track lists under *each* artist; embed cover/album/year.
-      Needs the file-mutation/write-back safety design.
+- [x] **C — tag write-back (the multi-artist fix)** (done 2026-08-10).
+      `kinds/music_tags.zig` native writers: FLAC (multiple `ARTIST=` Vorbis
+      comments) + MP3 (ID3v2.4 `TPE1` null-separated multi-value), plus album/
+      album-artist/title/year/track/disc + MusicBrainz IDs. Pure byte assembly
+      (`buildId3v24`/`buildFlac`/`buildMp3`), `writeTags` = temp file + atomic
+      rename (never in place). Opt-in: `--write-tags`/`--no-write-tags` or config
+      `write_tags = on` (default off). `apply` backs up each file to
+      `$XDG_DATA_HOME/stacks/backup/<ts>/` + journals a `tagwrite` entry; `shelve
+      undo` restores the original bytes. Unit round-trip tests + `scripts/tag-smoke.sh`
+      (real ffmpeg: multi-artist confirmed, byte-identical undo).
+      Deferred: cover-art embedding (APIC / FLAC PICTURE), formats beyond FLAC/MP3
+      (`.m4a` skipped w/ warning), a web "write tags" checkbox (config-driven for now).
 
 ## Phase 3 — review surfaces over the Plan JSON
 
