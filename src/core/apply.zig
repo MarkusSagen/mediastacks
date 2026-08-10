@@ -8,6 +8,9 @@ const journal = @import("journal.zig");
 const standardize = @import("standardize.zig");
 const clock = @import("../util/clock.zig");
 const music_tags = @import("../kinds/music_tags.zig");
+const nfo = @import("nfo.zig");
+const mkind = @import("kind.zig");
+const music = @import("../kinds/music.zig");
 
 pub const OnConflict = enum { skip, suffix, overwrite };
 
@@ -88,10 +91,12 @@ fn trashPath(alloc: std.mem.Allocator, root: []const u8, from: []const u8, creat
 /// Perform the filesystem work and return the in-memory journal. All
 /// journal strings are owned by `alloc`. Split out from `apply` so tests
 /// don't touch the real XDG data dir.
-pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, tag_opts: TagOpts, emit_ignore: bool) !Outcome {
+pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, tag_opts: TagOpts, emit_ignore: bool, write_nfo: bool) !Outcome {
     const created = clock.nowSeconds();
     var entries: std.ArrayList(journal.Entry) = .empty;
     errdefer entries.deinit(alloc);
+    var nfo_seen = std.StringHashMap(void).init(alloc);
+    defer nfo_seen.deinit();
 
     var moved: u32 = 0;
     var trashed: u32 = 0;
@@ -115,6 +120,9 @@ pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConf
 
                     if (tag_opts.write and g.kind == .music and item.role == .primary) {
                         try maybeWriteTags(alloc, &entries, tag_opts.backup_dir, final, item, created);
+                    }
+                    if (write_nfo and item.role == .primary) {
+                        try writeNfos(alloc, &entries, &nfo_seen, on_conflict, g.kind, item, final);
                     }
                 },
                 .trash => {
@@ -147,6 +155,68 @@ pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConf
     };
 }
 
+/// Album root for a music destination (grandparent when the parent is a
+/// `CD N`/`Disc N` disc folder), so album/artist NFO land at the right level.
+fn nfoAlbumRoot(dir: []const u8) []const u8 {
+    const b = std.fs.path.basename(dir);
+    if (music.discFromDirName(b) != null) return std.fs.path.dirname(dir) orelse dir;
+    return dir;
+}
+
+/// Write one NFO file: skip when already seen this run, or when it exists and
+/// on-conflict is `skip` (respects the user's own NFO). Journals `.create`.
+fn emitNfo(alloc: std.mem.Allocator, entries: *std.ArrayList(journal.Entry), seen: *std.StringHashMap(void), on_conflict: OnConflict, path: []const u8, bytes: []const u8) !void {
+    defer alloc.free(bytes);
+    if (seen.contains(path)) return;
+    try seen.put(path, {});
+    if (exists(path) and on_conflict == .skip) return;
+    if (writeBytes(path, bytes)) try entries.append(alloc, .{ .action = .create, .from = try alloc.dupe(u8, ""), .to = try alloc.dupe(u8, path) });
+}
+
+/// Write the Jellyfin NFO sidecars for a primary item at destination `final`.
+fn writeNfos(alloc: std.mem.Allocator, entries: *std.ArrayList(journal.Entry), seen: *std.StringHashMap(void), on_conflict: OnConflict, kind: mkind.MediaKind, item: plan.Item, final: []const u8) !void {
+    const f = item.fields orelse return;
+    const dir = std.fs.path.dirname(final) orelse return;
+    switch (kind) {
+        .movie => {
+            const path = try std.fs.path.join(alloc, &.{ dir, "movie.nfo" });
+            try emitNfo(alloc, entries, seen, on_conflict, path, try nfo.movieNfo(alloc, f));
+        },
+        .tv => {
+            const ext = std.fs.path.extension(final);
+            const stem = final[0 .. final.len - ext.len];
+            const ep_path = try std.fmt.allocPrint(alloc, "{s}.nfo", .{stem});
+            try emitNfo(alloc, entries, seen, on_conflict, ep_path, try nfo.episodeNfo(alloc, f));
+            const season_nfo = try std.fs.path.join(alloc, &.{ dir, "season.nfo" });
+            try emitNfo(alloc, entries, seen, on_conflict, season_nfo, try nfo.seasonNfo(alloc, f.season orelse 0));
+            if (std.fs.path.dirname(dir)) |series_root| {
+                const show_nfo = try std.fs.path.join(alloc, &.{ series_root, "tvshow.nfo" });
+                try emitNfo(alloc, entries, seen, on_conflict, show_nfo, try nfo.tvshowNfo(alloc, f));
+            }
+        },
+        .music => {
+            const album_root = nfoAlbumRoot(dir);
+            const album_nfo = try std.fs.path.join(alloc, &.{ album_root, "album.nfo" });
+            try emitNfo(alloc, entries, seen, on_conflict, album_nfo, try nfo.albumNfo(alloc, f));
+            if (std.fs.path.dirname(album_root)) |artist_root| {
+                const artist_nfo = try std.fs.path.join(alloc, &.{ artist_root, "artist.nfo" });
+                try emitNfo(alloc, entries, seen, on_conflict, artist_nfo, try nfo.artistNfo(alloc, f.album_artist orelse "", null));
+            }
+        },
+        else => {},
+    }
+}
+
+fn writeBytes(path: []const u8, bytes: []const u8) bool {
+    var pz: [4096]u8 = undefined;
+    if (path.len >= pz.len) return false;
+    const pzp = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return false;
+    const fp = std.c.fopen(pzp.ptr, "wb") orelse return false;
+    defer _ = std.c.fclose(fp);
+    if (bytes.len > 0) _ = std.c.fwrite(bytes.ptr, 1, bytes.len, fp);
+    return true;
+}
+
 fn touchEmpty(path: []const u8) bool {
     var pz: [4096]u8 = undefined;
     if (path.len >= pz.len) return false;
@@ -157,7 +227,7 @@ fn touchEmpty(path: []const u8) bool {
 }
 
 /// Apply `p` and persist the journal under the env's XDG data dir.
-pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, env: *std.process.Environ.Map, tag_opts: TagOpts, emit_ignore: bool) !Result {
+pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, env: *std.process.Environ.Map, tag_opts: TagOpts, emit_ignore: bool, write_nfo: bool) !Result {
     var opts = tag_opts;
     if (opts.write and opts.backup_dir == null) {
         // Backups live beside the undo journals.
@@ -166,7 +236,7 @@ pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, en
         const parent = std.fs.path.dirname(d) orelse d; // $XDG_DATA_HOME/stacks
         opts.backup_dir = try std.fs.path.join(alloc, &.{ parent, "backup" });
     }
-    const out = try applyInMemory(alloc, p, on_conflict, opts, emit_ignore);
+    const out = try applyInMemory(alloc, p, on_conflict, opts, emit_ignore, write_nfo);
     const jpath = try journal.write(alloc, env, out.journal);
     return .{ .moved = out.moved, .trashed = out.trashed, .skipped = out.skipped, .journal_path = jpath };
 }
@@ -273,6 +343,40 @@ fn readBytes(alloc: std.mem.Allocator, path: []const u8) ?[]u8 {
     return buf.toOwnedSlice(alloc) catch null;
 }
 
+test "apply writes movie.nfo and undo removes it" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    const pid = std.c.getpid();
+    var srcb: [256]u8 = undefined;
+    const src = try std.fmt.bufPrint(&srcb, "/tmp/stacks-nfo-{d}-src.mkv", .{pid});
+    var outb: [256]u8 = undefined;
+    const outdir = try std.fmt.bufPrint(&outb, "/tmp/stacks-nfo-{d}-out", .{pid});
+    var dstb: [360]u8 = undefined;
+    const dst = try std.fmt.bufPrint(&dstb, "{s}/The Matrix (1999)/The Matrix (1999).mkv", .{outdir});
+    var sz: [256]u8 = undefined;
+    writeFile(try std.fmt.bufPrintZ(&sz, "{s}", .{src}), "v");
+
+    var items = [_]plan.Item{.{ .src = src, .role = .primary, .op = .move, .dst = dst, .reason = "", .fields = .{ .title = "The Matrix", .year = 1999, .tmdb_id = "603", .ext = "mkv" } }};
+    var groups = [_]plan.Group{.{ .kind = .movie, .title = "The Matrix", .items = items[0..] }};
+    const p = plan.Plan{ .library_root = "/tmp", .source = "/tmp", .groups = groups[0..] };
+
+    const out = try applyInMemory(a, p, .skip, .{}, false, true);
+    defer journal.freeOwned(a, out.journal);
+    var nb: [360]u8 = undefined;
+    const nfo_path = try std.fmt.bufPrint(&nb, "{s}/The Matrix (1999)/movie.nfo", .{outdir});
+    try t.expect(exists(nfo_path));
+    const body = readBytes(a, nfo_path).?;
+    try t.expect(std.mem.indexOf(u8, body, "<tmdbid>603</tmdbid>") != null);
+
+    try undo(a, out.journal);
+    try t.expect(!exists(nfo_path)); // nfo removed
+    try t.expect(exists(src)); // media moved back
+
+    var z: [360]u8 = undefined;
+    _ = std.c.unlink((std.fmt.bufPrintZ(&z, "{s}", .{src}) catch unreachable).ptr);
+}
+
 test "apply emits .ignore in the trash tree and undo removes it" {
     const a = t.allocator;
     const pid = std.c.getpid();
@@ -287,7 +391,7 @@ test "apply emits .ignore in the trash tree and undo removes it" {
     var groups = [_]plan.Group{.{ .kind = .unknown, .title = "junk", .items = items[0..] }};
     const p = plan.Plan{ .library_root = root, .source = "/tmp", .groups = groups[0..] };
 
-    const out = try applyInMemory(a, p, .skip, .{}, true);
+    const out = try applyInMemory(a, p, .skip, .{}, true, false);
     defer journal.freeOwned(a, out.journal);
     var igb: [320]u8 = undefined;
     const ig = try std.fmt.bufPrint(&igb, "{s}/.stacks-trash/.ignore", .{root});
@@ -329,7 +433,7 @@ test "apply writes tags with backup and undo restores original bytes" {
     var groups = [_]plan.Group{.{ .kind = .music, .title = "Album", .items = items[0..] }};
     const p = plan.Plan{ .library_root = "/tmp", .source = "/tmp", .groups = groups[0..] };
 
-    const out = try applyInMemory(a, p, .skip, .{ .write = true, .backup_dir = backup_dir }, false);
+    const out = try applyInMemory(a, p, .skip, .{ .write = true, .backup_dir = backup_dir }, false, false);
     defer journal.freeOwned(a, out.journal);
     try t.expect(exists(dst));
     const back = readBytes(a, dst).?;
@@ -367,7 +471,7 @@ test "apply moves a primary and undo restores it" {
     var groups = [_]plan.Group{.{ .kind = .tv, .title = "Show", .items = items[0..] }};
     const p = plan.Plan{ .library_root = "/tmp", .source = "/tmp", .groups = groups[0..] };
 
-    const out = try applyInMemory(a, p, .skip, .{}, false);
+    const out = try applyInMemory(a, p, .skip, .{}, false, false);
     defer journal.freeOwned(a, out.journal);
     try t.expectEqual(@as(u32, 1), out.moved);
     try t.expect(exists(dst));

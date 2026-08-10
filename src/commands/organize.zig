@@ -20,6 +20,7 @@ const Opts = struct {
     no_probe: bool = false,
     offline: bool = false,
     write_tags_flag: ?bool = null,
+    write_nfo_flag: ?bool = null,
     plan_out: ?[]const u8 = null,
     from: ?[]const u8 = null,
     on_conflict: apply_mod.OnConflict = .skip,
@@ -61,6 +62,10 @@ fn parseArgs(args: []const []const u8) !Opts {
             o.write_tags_flag = true;
         } else if (std.mem.eql(u8, a, "--no-write-tags")) {
             o.write_tags_flag = false;
+        } else if (std.mem.eql(u8, a, "--nfo")) {
+            o.write_nfo_flag = true;
+        } else if (std.mem.eql(u8, a, "--no-nfo")) {
+            o.write_nfo_flag = false;
         } else if (std.mem.eql(u8, a, "--plan")) {
             i += 1;
             if (i >= args.len) return error.MissingValue;
@@ -278,7 +283,8 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     }
 
     const write_tags = opts.write_tags_flag orelse cfg.write_tags;
-    const res = apply_mod.apply(ctx.arena, p, opts.on_conflict, ctx.env, .{ .write = write_tags }, cfg.emit_ignore) catch |err| {
+    const write_nfo = opts.write_nfo_flag orelse cfg.write_nfo;
+    const res = apply_mod.apply(ctx.arena, p, opts.on_conflict, ctx.env, .{ .write = write_tags }, cfg.emit_ignore, write_nfo) catch |err| {
         try ctx.stderr.print("apply failed: {s}\n", .{@errorName(err)});
         return 2;
     };
