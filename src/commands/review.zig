@@ -10,6 +10,7 @@ const review = @import("../web/review.zig");
 const http = @import("../util/http.zig");
 const httpcache = @import("../util/httpcache.zig");
 const musicbrainz = @import("../providers/musicbrainz.zig");
+const tmdb = @import("../providers/tmdb.zig");
 const standardize = @import("../core/standardize.zig");
 
 fn mbCacheDir(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
@@ -86,12 +87,18 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         }
         const d = dir orelse return usage(ctx);
         var real = http.RealHttpClient{ .io = ctx.io };
-        var caching = httpcache.CachingHttpClient{ .inner = real.client(), .dir = try mbCacheDir(ctx.arena, ctx.env) };
-        var mb = musicbrainz.MusicBrainz{ .http_client = caching.client(), .contact = cfg.musicbrainz_contact };
-        var enricher = musicbrainz.Enricher.init(ctx.arena, &mb);
-        const mb_ptr: ?*musicbrainz.Enricher =
-            if (cfg.musicbrainz_enabled and !offline) &enricher else null;
-        break :blk group.buildPlan(ctx.arena, ctx.io, d, cfg, !no_probe, mb_ptr) catch |err| {
+        const cache_dir = try mbCacheDir(ctx.arena, ctx.env);
+        var caching_mb = httpcache.CachingHttpClient{ .inner = real.client(), .dir = cache_dir, .throttle_ms = 1100 };
+        var caching_tmdb = httpcache.CachingHttpClient{ .inner = real.client(), .dir = cache_dir, .throttle_ms = 250 };
+        var mb = musicbrainz.MusicBrainz{ .http_client = caching_mb.client(), .contact = cfg.musicbrainz_contact };
+        var music_enr = musicbrainz.Enricher.init(ctx.arena, &mb);
+        var tmdb_api = tmdb.Tmdb{ .http_client = caching_tmdb.client(), .api_key = cfg.tmdb_key orelse "" };
+        var video_enr = tmdb.Enricher.init(ctx.arena, &tmdb_api);
+        const online = group.Online{
+            .music = if (cfg.musicbrainz_enabled and !offline) &music_enr else null,
+            .video = if (cfg.tmdb_key != null and !offline) &video_enr else null,
+        };
+        break :blk group.buildPlan(ctx.arena, ctx.io, d, cfg, !no_probe, online) catch |err| {
             try ctx.stderr.print("cannot scan {s}: {s}\n", .{ d, @errorName(err) });
             return 2;
         };

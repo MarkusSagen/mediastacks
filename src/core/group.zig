@@ -20,6 +20,13 @@ const enrich = @import("enrich.zig");
 const drm = @import("drm.zig");
 const naming = @import("naming.zig");
 const musicbrainz = @import("../providers/musicbrainz.zig");
+const tmdb = @import("../providers/tmdb.zig");
+
+/// Optional online enrichers, one per family. Absent → offline for that kind.
+pub const Online = struct {
+    music: ?*musicbrainz.Enricher = null,
+    video: ?*tmdb.Enricher = null,
+};
 
 const Cand = struct {
     abs: []const u8,
@@ -177,7 +184,7 @@ pub fn buildPlan(
     dir_path: []const u8,
     cfg: config.Config,
     probe_enabled: bool,
-    mb: ?*musicbrainz.Enricher,
+    online: Online,
 ) !plan.Plan {
     var media: std.ArrayList(*Cand) = .empty;
     var sidecars: std.ArrayList(Sidecar) = .empty;
@@ -332,6 +339,23 @@ pub fn buildPlan(
                 cp.*.fields = f;
                 cp.*.dst = try naming.dstFor(arena, cfg, .tv, f);
             }
+            // TMDB enrichment (opt-in): canonical series name/year + ids +
+            // per-episode titles; recompute dst. Offline plan untouched on miss.
+            if (online.video) |venr| {
+                if (venr.lookupSeries(arena, gb.title, null) catch null) |s| {
+                    var it2 = best.valueIterator();
+                    while (it2.next()) |cp| {
+                        const et = venr.episodeTitle(arena, s.tmdb_id, cp.*.ep.?.season, cp.*.ep.?.episode) catch null;
+                        const m = try enrich.mergeTvOnline(arena, cp.*.fields.?, s, et);
+                        cp.*.fields = m.fields;
+                        cp.*.dst = try naming.dstFor(arena, cfg, .tv, m.fields);
+                        for (m.warnings) |w| try gb.warnings.append(arena, w);
+                    }
+                    if (s.name.len > 0) gb.title = s.name;
+                    if (s.year != null) gb.year = s.year;
+                    try gb.warnings.append(arena, try std.fmt.allocPrint(arena, "TMDB: matched \"{s}\"", .{s.name}));
+                } else try gb.warnings.append(arena, "TMDB: no confident match");
+            }
             // Assign roles + emit items. Every candidate carries its
             // episode's primary fields so a sidecar matching a duplicate
             // still resolves to the primary's destination.
@@ -357,12 +381,25 @@ pub fn buildPlan(
             const f = plan.Fields{ .title = winner.mv.?.title, .year = winner.mv.?.year, .ext = winner.mv.?.ext };
             winner.fields = f;
             winner.dst = try naming.dstFor(arena, cfg, .movie, f);
+            // TMDB enrichment (opt-in): canonical title/year + ids + language;
+            // recompute dst. Offline plan untouched on miss.
+            if (online.video) |venr| {
+                if (venr.lookupMovie(arena, winner.mv.?.title, winner.mv.?.year) catch null) |info| {
+                    const m = try enrich.mergeMovieOnline(arena, winner.fields.?, info);
+                    winner.fields = m.fields;
+                    winner.dst = try naming.dstFor(arena, cfg, .movie, m.fields);
+                    for (m.warnings) |w| try gb.warnings.append(arena, w);
+                    if (info.title.len > 0) gb.title = info.title;
+                    if (info.year != null) gb.year = info.year;
+                    try gb.warnings.append(arena, try std.fmt.allocPrint(arena, "TMDB: matched \"{s}\"", .{info.title}));
+                } else try gb.warnings.append(arena, "TMDB: no confident match");
+            }
             for (cands.items) |c| {
                 for (c.warnings) |w| try gb.warnings.append(arena, w);
                 c.primary_dst = winner.dst;
-                c.fields = f;
+                c.fields = winner.fields;
                 if (c == winner) {
-                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = winner.dst, .reason = "", .media = mediaOf(winner), .fields = f });
+                    try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = winner.dst, .reason = "", .media = mediaOf(winner), .fields = winner.fields });
                 } else {
                     try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate of primary" });
                 }
@@ -408,7 +445,7 @@ pub fn buildPlan(
             // MusicBrainz enrichment (opt-in). Corrects the winners' fields in
             // place and recomputes dst; the offline plan is untouched when the
             // enricher is null or returns no confident match.
-            if (mb) |enr| {
+            if (online.music) |enr| {
                 const album_from_folder = !hadUsableAlbumTag(cands.items);
                 const rel = enr.lookupAlbum(arena, meta.album, meta.album_artist, best.count(), meta.year) catch null;
                 if (rel) |release| {
@@ -600,7 +637,7 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
     const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
-    const p = try buildPlan(a, threaded.io(), root, cfg, false, null); // no probe
+    const p = try buildPlan(a, threaded.io(), root, cfg, false, .{}); // no probe
 
     var music_groups: usize = 0;
     var primaries: usize = 0;
@@ -639,7 +676,7 @@ test "buildPlan rolls CD subfolders into one multi-disc album (no-probe)" {
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
     const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
-    const p = try buildPlan(a, threaded.io(), root, cfg, false, null); // no probe: disc comes from folder names
+    const p = try buildPlan(a, threaded.io(), root, cfg, false, .{}); // no probe: disc comes from folder names
 
     var music_groups: usize = 0;
     var primaries: usize = 0;
@@ -685,7 +722,7 @@ test "buildPlan flags a DRM video and skips probing" {
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
     const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
-    const p = try buildPlan(a, threaded.io(), root, cfg, true, null); // probe_enabled
+    const p = try buildPlan(a, threaded.io(), root, cfg, true, .{}); // probe_enabled
 
     var warned = false;
     var media_present = false;
@@ -734,7 +771,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
         .movie_template = config.DEFAULT_MOVIE,
         .music_template = config.DEFAULT_MUSIC,
     };
-    const p = try buildPlan(a, io, root, cfg, false, null); // probe off: deterministic, no ffprobe dep
+    const p = try buildPlan(a, io, root, cfg, false, .{}); // probe off: deterministic, no ffprobe dep
 
     var tv_groups: usize = 0;
     var primaries: usize = 0;
