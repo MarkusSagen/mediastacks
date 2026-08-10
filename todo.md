@@ -97,8 +97,16 @@ Still open (own future specs):
         release-style filename parsing to recover; deferred.
   - [ ] **Audiobooks misclassified as music** (`.mp3` chapters) — still
         deferred to the audiobook kind (long duration, chapter naming, `.m4b`).
-- [ ] **B — MusicBrainz enrichment.** Fill missing/wrong album, year,
-      canonical artist names, cover (needs the online-provider layer, Phase 4).
+- [x] **B — MusicBrainz enrichment** (done 2026-08-10). `providers/musicbrainz.zig`
+      (search release by album+artist+track-count → detail with recordings +
+      artist-credits; canonical title/year, per-track titles + multi-artist,
+      release/recording MBIDs). `util/httpcache.zig` disk cache + 1 req/sec
+      throttle. Pure `enrich.mergeMusic` (fill-missing, keep tag-authoritative,
+      warn on difference). Config `musicbrainz = on` (default off) +
+      `musicbrainz_contact`; `--offline` bypass. Cover URL recorded (download
+      deferred). Unit-tested with `http.MockClient`; live check `just mb-smoke`
+      (`MB_SMOKE=1`). Enrichment also recovers mojibake album/title tags that
+      ffprobe lost offline.
 - [ ] **C — tag write-back (the multi-artist fix).** Write multi-value
       artist tags so a track lists under *each* artist; embed cover/album/year.
       Needs the file-mutation/write-back safety design.

@@ -207,6 +207,10 @@ review-smoke: build
 music-smoke: build
     ./scripts/music-smoke.sh
 
+# Live MusicBrainz smoke (hits the network at 1 req/sec; MB_SMOKE-gated).
+mb-smoke: build
+    MB_SMOKE=1 ./scripts/mb-smoke.sh
+
 # Print where shelve keeps organizer state (config + undo journals).
 shelve-info:
     @echo "config:  ${XDG_CONFIG_HOME:-$HOME/.config}/stacks/config.toml"; \
