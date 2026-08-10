@@ -11,8 +11,8 @@ const std = @import("std");
 // mis-detects otherwise), and template `sanitize` strips the characters
 // Jellyfin reserves (< > : " / \ | ? *).
 pub const DEFAULT_ROOT = "~/Media";
-pub const DEFAULT_TV = "Shows/{series}/Season {season:02}/{series} S{season:02}E{episode:02} - {title}.{ext}";
-pub const DEFAULT_MOVIE = "Movies/{title} ({year})/{title} ({year}).{ext}";
+pub const DEFAULT_TV = "Shows/{series} ({series_year}) [{id}]/Season {season:02}/{series} S{season:02}E{episode:02} - {title}.{ext}";
+pub const DEFAULT_MOVIE = "Movies/{title} ({year}) [{id}]/{title} ({year}) [{id}].{ext}";
 pub const DEFAULT_MUSIC = "Music/{album_artist}/{album} ({year})/{track:02} - {title}.{ext}";
 
 pub const Config = struct {

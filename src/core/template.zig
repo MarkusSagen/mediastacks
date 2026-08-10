@@ -312,6 +312,10 @@ fn collapseSpaces(allocator: std.mem.Allocator, src: []const u8) ![]u8 {
             i += 3;
             continue;
         }
+        if (s.len >= 3 and s[0] == ' ' and s[1] == '[' and s[2] == ']') {
+            i += 3;
+            continue;
+        }
         if (s.len >= 4 and s[0] == '/' and std.mem.eql(u8, s[0..4], "/ - ")) {
             try stripped.append(allocator, '/');
             i += 4;
@@ -475,6 +479,27 @@ test "renderFields drops empty parenthesized year" {
     const out = try renderFields(alloc, "Music/{album_artist}/{album} ({year})/{track:02} - {title}.{ext}", &fields);
     defer alloc.free(out);
     try expectEqualStrings("Music/Solo/NoYear/01 - Song.mp3", out);
+}
+
+test "renderFields drops empty square-bracket id" {
+    const alloc = test_alloc;
+    const fields = [_]Field{
+        .{ .name = "title", .value = "The Matrix" },
+        .{ .name = "year", .value = "1999" },
+        .{ .name = "id", .value = "" },
+        .{ .name = "ext", .value = "mkv" },
+    };
+    const out = try renderFields(alloc, "Movies/{title} ({year}) [{id}]/{title} ({year}) [{id}].{ext}", &fields);
+    defer alloc.free(out);
+    try expectEqualStrings("Movies/The Matrix (1999)/The Matrix (1999).mkv", out);
+}
+
+test "renderFields keeps a present id" {
+    const alloc = test_alloc;
+    const fields = [_]Field{ .{ .name = "title", .value = "The Matrix" }, .{ .name = "year", .value = "1999" }, .{ .name = "id", .value = "tmdbid-603" }, .{ .name = "ext", .value = "mkv" } };
+    const out = try renderFields(alloc, "Movies/{title} ({year}) [{id}]/{title} ({year}) [{id}].{ext}", &fields);
+    defer alloc.free(out);
+    try expectEqualStrings("Movies/The Matrix (1999) [tmdbid-603]/The Matrix (1999) [tmdbid-603].mkv", out);
 }
 
 test "renderFields drops empty year before extension" {

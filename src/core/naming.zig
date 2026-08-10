@@ -12,6 +12,16 @@ fn u32str(arena: std.mem.Allocator, n: u32) ![]u8 {
     return std.fmt.allocPrint(arena, "{d}", .{n});
 }
 
+/// Jellyfin provider-id token for the `{id}` field: tmdb → imdb → tvdb, or ""
+/// when none is known or `cfg.id_suffix` is off.
+fn idToken(arena: std.mem.Allocator, cfg: config.Config, f: plan.Fields) ![]const u8 {
+    if (!cfg.id_suffix) return "";
+    if (f.tmdb_id) |x| return std.fmt.allocPrint(arena, "tmdbid-{s}", .{x});
+    if (f.imdb_id) |x| return std.fmt.allocPrint(arena, "imdbid-{s}", .{x});
+    if (f.tvdb_id) |x| return std.fmt.allocPrint(arena, "tvdbid-{s}", .{x});
+    return "";
+}
+
 /// Render the library-relative + rooted destination for `f` under `k`'s
 /// template. Owned by `arena`.
 pub fn dstFor(arena: std.mem.Allocator, cfg: config.Config, k: kind.MediaKind, f: plan.Fields) ![]u8 {
@@ -19,6 +29,8 @@ pub fn dstFor(arena: std.mem.Allocator, cfg: config.Config, k: kind.MediaKind, f
         .tv => blk: {
             const fields = [_]template.Field{
                 .{ .name = "series", .value = f.series orelse "" },
+                .{ .name = "series_year", .value = if (f.series_year) |y| try u32str(arena, y) else "" },
+                .{ .name = "id", .value = try idToken(arena, cfg, f) },
                 .{ .name = "season", .value = try u32str(arena, f.season orelse 0) },
                 .{ .name = "episode", .value = try u32str(arena, f.episode orelse 0) },
                 .{ .name = "title", .value = f.title orelse "" },
@@ -31,6 +43,7 @@ pub fn dstFor(arena: std.mem.Allocator, cfg: config.Config, k: kind.MediaKind, f
             const fields = [_]template.Field{
                 .{ .name = "title", .value = f.title orelse "" },
                 .{ .name = "year", .value = year_str },
+                .{ .name = "id", .value = try idToken(arena, cfg, f) },
                 .{ .name = "ext", .value = f.ext orelse "" },
             };
             break :blk try template.renderFields(arena, cfg.movie_template, &fields);
@@ -92,5 +105,32 @@ test "dstFor renders a movie path" {
     const a = arena_state.allocator();
     const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
     const out = try dstFor(a, cfg, .movie, .{ .title = "The Matrix", .year = 1999, .ext = "mkv" });
+    try t.expectEqualStrings("/lib/Movies/The Matrix (1999)/The Matrix (1999).mkv", out);
+}
+
+test "dstFor movie with tmdb id in folder and file" {
+    var a_s = std.heap.ArenaAllocator.init(t.allocator);
+    defer a_s.deinit();
+    const a = a_s.allocator();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const out = try dstFor(a, cfg, .movie, .{ .title = "The Matrix", .year = 1999, .ext = "mkv", .tmdb_id = "603", .imdb_id = "tt0133093" });
+    try t.expectEqualStrings("/lib/Movies/The Matrix (1999) [tmdbid-603]/The Matrix (1999) [tmdbid-603].mkv", out);
+}
+
+test "dstFor tv with series year + id on series folder" {
+    var a_s = std.heap.ArenaAllocator.init(t.allocator);
+    defer a_s.deinit();
+    const a = a_s.allocator();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const out = try dstFor(a, cfg, .tv, .{ .series = "Severance", .season = 1, .episode = 1, .title = "Good News About Hell", .ext = "mkv", .series_year = 2022, .tmdb_id = "95396" });
+    try t.expectEqualStrings("/lib/Shows/Severance (2022) [tmdbid-95396]/Season 01/Severance S01E01 - Good News About Hell.mkv", out);
+}
+
+test "dstFor id_suffix off drops the id" {
+    var a_s = std.heap.ArenaAllocator.init(t.allocator);
+    defer a_s.deinit();
+    const a = a_s.allocator();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .id_suffix = false };
+    const out = try dstFor(a, cfg, .movie, .{ .title = "The Matrix", .year = 1999, .ext = "mkv", .tmdb_id = "603" });
     try t.expectEqualStrings("/lib/Movies/The Matrix (1999)/The Matrix (1999).mkv", out);
 }
