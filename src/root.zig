@@ -53,6 +53,7 @@ pub const format_registry = @import("formats/registry.zig");
 pub const provider = @import("providers/provider.zig");
 pub const openlibrary = @import("providers/openlibrary.zig");
 pub const musicbrainz = @import("providers/musicbrainz.zig");
+pub const tmdb = @import("providers/tmdb.zig");
 
 pub const convert = @import("convert/convert.zig");
 
