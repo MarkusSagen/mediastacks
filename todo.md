@@ -144,6 +144,19 @@ transcripts — kin to music/podcasts), NOT lumped with ebooks. Config gains
 - [ ] **TUI review (Phase 3b).** Same edit-op model over the Plan in a
       libvaxis terminal UI (`tui/review.zig`) — load `--from`, edit, apply.
 
+## Jellyfin-native library
+
+- [x] **Jellyfin-native library** (done 2026-08-10). `core/extras.zig` recognizers
+      (extras subfolders + `-trailer`/`-behindthescenes`… suffixes; full image
+      aliases; version/part labels). group.zig: extras → their Jellyfin subfolder
+      (`behind the scenes/`, `trailers/`…) as `Role.extra`; full image-name set
+      on output (`poster/backdrop/logo/thumb/banner`, music stays `cover.jpg`,
+      numbered backdrops); **size-aware sample trashing** (tiny promo → junk,
+      real sample → extra). `Fields.edition/part` → `Movie (Year) - 1080p.mkv` /
+      `-cd2.mkv`. `apply` drops a Jellyfin **`.ignore`** in `.stacks-trash/`
+      (config `emit_ignore`, default on), journaled + undoable via `Action.create`.
+- [ ] **NFO sidecar writing** — next (`core/nfo.zig`, spec written).
+
 ## Phase 4 — online enrichment (opt-in)
 
 - [x] **TMDB (movies + TV)** (done 2026-08-10). `providers/tmdb.zig`

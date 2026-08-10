@@ -65,6 +65,7 @@ check "subtitle sidecar landed alongside" 'find "$LIB/Shows" -iname "*S01E05*.sr
 check "Season 01 directory created" 'find "$LIB/Shows" -type d -iname "Season 01" | grep -q .'
 check ".DS_Store moved to trash (gone from source)" '[[ ! -f "$SRC/.DS_Store" ]]'
 check "trash directory populated" 'find "$LIB/.stacks-trash" -name ".DS_Store" | grep -q .'
+check "trash tree carries a Jellyfin .ignore" '[[ -f "$LIB/.stacks-trash/.ignore" ]]'
 # The larger copy (Kitsune, 8 bytes) wins as primary and moves; the smaller
 # skyanime copy is the duplicate and stays put.
 check "duplicate copy left in place" '[[ -f "$SRC/witch.hat.atelier.s01e04.1080p.web.h264-skyanime.mkv" ]]'

@@ -88,7 +88,7 @@ fn trashPath(alloc: std.mem.Allocator, root: []const u8, from: []const u8, creat
 /// Perform the filesystem work and return the in-memory journal. All
 /// journal strings are owned by `alloc`. Split out from `apply` so tests
 /// don't touch the real XDG data dir.
-pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, tag_opts: TagOpts) !Outcome {
+pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, tag_opts: TagOpts, emit_ignore: bool) !Outcome {
     const created = clock.nowSeconds();
     var entries: std.ArrayList(journal.Entry) = .empty;
     errdefer entries.deinit(alloc);
@@ -128,6 +128,17 @@ pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConf
         }
     }
 
+    // Drop a Jellyfin `.ignore` in the trash tree so it's never scanned as media.
+    if (emit_ignore and trashed > 0) {
+        const ig_dir = try std.fmt.allocPrint(alloc, "{s}/.stacks-trash", .{p.library_root});
+        defer alloc.free(ig_dir);
+        standardize.mkdirParents(ig_dir) catch {};
+        const ig = try std.fmt.allocPrint(alloc, "{s}/.ignore", .{ig_dir});
+        if (!exists(ig)) {
+            if (touchEmpty(ig)) try entries.append(alloc, .{ .action = .create, .from = try alloc.dupe(u8, ""), .to = ig });
+        }
+    }
+
     return .{
         .journal = .{ .created = created, .entries = try entries.toOwnedSlice(alloc) },
         .moved = moved,
@@ -136,8 +147,17 @@ pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConf
     };
 }
 
+fn touchEmpty(path: []const u8) bool {
+    var pz: [4096]u8 = undefined;
+    if (path.len >= pz.len) return false;
+    const pzp = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return false;
+    const fp = std.c.fopen(pzp.ptr, "wb") orelse return false;
+    _ = std.c.fclose(fp);
+    return true;
+}
+
 /// Apply `p` and persist the journal under the env's XDG data dir.
-pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, env: *std.process.Environ.Map, tag_opts: TagOpts) !Result {
+pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, env: *std.process.Environ.Map, tag_opts: TagOpts, emit_ignore: bool) !Result {
     var opts = tag_opts;
     if (opts.write and opts.backup_dir == null) {
         // Backups live beside the undo journals.
@@ -146,7 +166,7 @@ pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, en
         const parent = std.fs.path.dirname(d) orelse d; // $XDG_DATA_HOME/stacks
         opts.backup_dir = try std.fs.path.join(alloc, &.{ parent, "backup" });
     }
-    const out = try applyInMemory(alloc, p, on_conflict, opts);
+    const out = try applyInMemory(alloc, p, on_conflict, opts, emit_ignore);
     const jpath = try journal.write(alloc, env, out.journal);
     return .{ .moved = out.moved, .trashed = out.trashed, .skipped = out.skipped, .journal_path = jpath };
 }
@@ -217,6 +237,14 @@ pub fn undo(alloc: std.mem.Allocator, j: journal.Journal) !void {
                     standardize.copyAcrossDevices(bzp, fzp) catch {};
                 }
             },
+            .create => {
+                // Undo a created file (e.g. a `.ignore`) by removing it.
+                var fz: [4096]u8 = undefined;
+                if (e.to.len < fz.len) {
+                    const fzp = std.fmt.bufPrintZ(&fz, "{s}", .{e.to}) catch continue;
+                    _ = std.c.unlink(fzp.ptr);
+                }
+            },
             .move, .trash => moveFile(e.to, e.from) catch {},
         }
     }
@@ -243,6 +271,34 @@ fn readBytes(alloc: std.mem.Allocator, path: []const u8) ?[]u8 {
         buf.appendSlice(alloc, chunk[0..n]) catch return null;
     }
     return buf.toOwnedSlice(alloc) catch null;
+}
+
+test "apply emits .ignore in the trash tree and undo removes it" {
+    const a = t.allocator;
+    const pid = std.c.getpid();
+    var rootb: [256]u8 = undefined;
+    const root = try std.fmt.bufPrint(&rootb, "/tmp/stacks-ign-{d}", .{pid});
+    var srcb: [256]u8 = undefined;
+    const src = try std.fmt.bufPrint(&srcb, "/tmp/stacks-ign-{d}-junk.txt", .{pid});
+    var sz: [256]u8 = undefined;
+    writeFile(try std.fmt.bufPrintZ(&sz, "{s}", .{src}), "junk");
+
+    var items = [_]plan.Item{.{ .src = src, .role = .junk, .op = .trash, .dst = null, .reason = "junk" }};
+    var groups = [_]plan.Group{.{ .kind = .unknown, .title = "junk", .items = items[0..] }};
+    const p = plan.Plan{ .library_root = root, .source = "/tmp", .groups = groups[0..] };
+
+    const out = try applyInMemory(a, p, .skip, .{}, true);
+    defer journal.freeOwned(a, out.journal);
+    var igb: [320]u8 = undefined;
+    const ig = try std.fmt.bufPrint(&igb, "{s}/.stacks-trash/.ignore", .{root});
+    try t.expect(exists(ig));
+
+    try undo(a, out.journal);
+    try t.expect(!exists(ig)); // created file removed
+
+    // cleanup
+    var z: [320]u8 = undefined;
+    _ = std.c.unlink((std.fmt.bufPrintZ(&z, "{s}", .{src}) catch unreachable).ptr);
 }
 
 test "apply writes tags with backup and undo restores original bytes" {
@@ -273,7 +329,7 @@ test "apply writes tags with backup and undo restores original bytes" {
     var groups = [_]plan.Group{.{ .kind = .music, .title = "Album", .items = items[0..] }};
     const p = plan.Plan{ .library_root = "/tmp", .source = "/tmp", .groups = groups[0..] };
 
-    const out = try applyInMemory(a, p, .skip, .{ .write = true, .backup_dir = backup_dir });
+    const out = try applyInMemory(a, p, .skip, .{ .write = true, .backup_dir = backup_dir }, false);
     defer journal.freeOwned(a, out.journal);
     try t.expect(exists(dst));
     const back = readBytes(a, dst).?;
@@ -311,7 +367,7 @@ test "apply moves a primary and undo restores it" {
     var groups = [_]plan.Group{.{ .kind = .tv, .title = "Show", .items = items[0..] }};
     const p = plan.Plan{ .library_root = "/tmp", .source = "/tmp", .groups = groups[0..] };
 
-    const out = try applyInMemory(a, p, .skip, .{});
+    const out = try applyInMemory(a, p, .skip, .{}, false);
     defer journal.freeOwned(a, out.journal);
     try t.expectEqual(@as(u32, 1), out.moved);
     try t.expect(exists(dst));

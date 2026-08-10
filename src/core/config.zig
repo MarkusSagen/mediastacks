@@ -25,6 +25,7 @@ pub const Config = struct {
     write_tags: bool = false,
     tmdb_key: ?[]const u8 = null,
     id_suffix: bool = true,
+    emit_ignore: bool = true,
 };
 
 pub fn freeConfig(alloc: std.mem.Allocator, cfg: Config) void {
@@ -81,6 +82,7 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
     var write_tags: ?[]const u8 = null;
     var tmdb_key: ?[]const u8 = null;
     var id_suffix: ?[]const u8 = null;
+    var emit_ignore: ?[]const u8 = null;
 
     var it = std.mem.tokenizeScalar(u8, text, '\n');
     while (it.next()) |raw| {
@@ -103,7 +105,8 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
         else if (std.mem.eql(u8, key, "musicbrainz_contact")) musicbrainz_contact = val
         else if (std.mem.eql(u8, key, "write_tags")) write_tags = val
         else if (std.mem.eql(u8, key, "tmdb_key")) tmdb_key = val
-        else if (std.mem.eql(u8, key, "id_suffix")) id_suffix = val;
+        else if (std.mem.eql(u8, key, "id_suffix")) id_suffix = val
+        else if (std.mem.eql(u8, key, "emit_ignore")) emit_ignore = val;
     }
 
     const boolOn = struct {
@@ -137,6 +140,7 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
         .write_tags = boolOn(write_tags),
         .tmdb_key = if (tmdb_key) |v| try alloc.dupe(u8, v) else null,
         .id_suffix = if (id_suffix) |v| boolOn(v) else true,
+        .emit_ignore = if (emit_ignore) |v| boolOn(v) else true,
     };
 }
 

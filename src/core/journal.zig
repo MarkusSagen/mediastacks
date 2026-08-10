@@ -6,7 +6,7 @@
 const std = @import("std");
 const standardize = @import("standardize.zig");
 
-pub const Action = enum { move, trash, tagwrite };
+pub const Action = enum { move, trash, tagwrite, create };
 pub const Entry = struct { action: Action, from: []const u8, to: []const u8 };
 pub const Journal = struct { created: i64, entries: []Entry };
 
