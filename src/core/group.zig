@@ -792,6 +792,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
                         if (std.mem.endsWith(u8, dv, ".srt")) sidecar_dst_ok = true;
                     }
                 },
+                .extra => {},
             }
             if (it.op == .trash) trashed += 1;
         }

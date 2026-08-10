@@ -5,7 +5,7 @@
 const std = @import("std");
 const kind = @import("kind.zig");
 
-pub const Role = enum { primary, sidecar, duplicate, junk };
+pub const Role = enum { primary, sidecar, duplicate, junk, extra };
 pub const Op = enum { move, copy, trash, skip };
 
 /// Optional technical facts from ffprobe, shown in the plan and reused by
@@ -26,6 +26,9 @@ pub const Fields = struct {
     title: ?[]const u8 = null,
     year: ?u32 = null,
     ext: ?[]const u8 = null,
+    // movie version/part (Jellyfin)
+    edition: ?[]const u8 = null,
+    part: ?u32 = null,
     // music
     album_artist: ?[]const u8 = null,
     album: ?[]const u8 = null,

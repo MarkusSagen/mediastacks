@@ -130,7 +130,7 @@ fn printPlan(alloc: std.mem.Allocator, w: *std.Io.Writer, p: plan_mod.Plan, home
     for (p.groups) |g| {
         for (g.items) |it| {
             switch (it.role) {
-                .primary, .sidecar => if (it.dst) |d| try keep.append(alloc, .{ .dst = d, .media = it.media }),
+                .primary, .sidecar, .extra => if (it.dst) |d| try keep.append(alloc, .{ .dst = d, .media = it.media }),
                 .duplicate => try dups.append(alloc, std.fs.path.basename(it.src)),
                 .junk => try junk.append(alloc, std.fs.path.basename(it.src)),
             }

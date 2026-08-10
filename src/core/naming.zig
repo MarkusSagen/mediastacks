@@ -12,6 +12,18 @@ fn u32str(arena: std.mem.Allocator, n: u32) ![]u8 {
     return std.fmt.allocPrint(arena, "{d}", .{n});
 }
 
+/// Insert `suffix` before the final path component's extension.
+/// `.../Film (1999).mkv` + `-cd2` → `.../Film (1999)-cd2.mkv`.
+fn spliceBeforeExt(arena: std.mem.Allocator, rel: []const u8, suffix: []const u8) ![]u8 {
+    const slash = std.mem.lastIndexOfScalar(u8, rel, '/') orelse 0;
+    const dot_rel = std.mem.lastIndexOfScalar(u8, rel[slash..], '.');
+    if (dot_rel) |dr| {
+        const dot = slash + dr;
+        return std.fmt.allocPrint(arena, "{s}{s}{s}", .{ rel[0..dot], suffix, rel[dot..] });
+    }
+    return std.fmt.allocPrint(arena, "{s}{s}", .{ rel, suffix });
+}
+
 /// Jellyfin provider-id token for the `{id}` field: tmdb → imdb → tvdb, or ""
 /// when none is known or `cfg.id_suffix` is off.
 fn idToken(arena: std.mem.Allocator, cfg: config.Config, f: plan.Fields) ![]const u8 {
@@ -46,7 +58,11 @@ pub fn dstFor(arena: std.mem.Allocator, cfg: config.Config, k: kind.MediaKind, f
                 .{ .name = "id", .value = try idToken(arena, cfg, f) },
                 .{ .name = "ext", .value = f.ext orelse "" },
             };
-            break :blk try template.renderFields(arena, cfg.movie_template, &fields);
+            var rel = try template.renderFields(arena, cfg.movie_template, &fields);
+            // Jellyfin multi-part / version labels live on the *file* stem.
+            if (f.part) |p| rel = try spliceBeforeExt(arena, rel, try std.fmt.allocPrint(arena, "-cd{d}", .{p}));
+            if (f.edition) |e| rel = try spliceBeforeExt(arena, rel, try std.fmt.allocPrint(arena, " - {s}", .{e}));
+            break :blk rel;
         },
         .music => blk: {
             const fields = [_]template.Field{
@@ -124,6 +140,17 @@ test "dstFor tv with series year + id on series folder" {
     const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
     const out = try dstFor(a, cfg, .tv, .{ .series = "Severance", .season = 1, .episode = 1, .title = "Good News About Hell", .ext = "mkv", .series_year = 2022, .tmdb_id = "95396" });
     try t.expectEqualStrings("/lib/Shows/Severance (2022) [tmdbid-95396]/Season 01/Severance S01E01 - Good News About Hell.mkv", out);
+}
+
+test "dstFor movie with edition and part labels" {
+    var a_s = std.heap.ArenaAllocator.init(t.allocator);
+    defer a_s.deinit();
+    const a = a_s.allocator();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const ed = try dstFor(a, cfg, .movie, .{ .title = "Film", .year = 1999, .ext = "mkv", .edition = "1080p" });
+    try t.expectEqualStrings("/lib/Movies/Film (1999)/Film (1999) - 1080p.mkv", ed);
+    const pt = try dstFor(a, cfg, .movie, .{ .title = "Film", .year = 1999, .ext = "mkv", .part = 2 });
+    try t.expectEqualStrings("/lib/Movies/Film (1999)/Film (1999)-cd2.mkv", pt);
 }
 
 test "dstFor id_suffix off drops the id" {
