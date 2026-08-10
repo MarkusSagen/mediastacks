@@ -132,7 +132,177 @@ pub fn readTextValues(alloc: std.mem.Allocator, tag: []const u8, frame_id: [4]u8
     return null;
 }
 
+// ---- FLAC Vorbis-comment rewrite --------------------------------------
+
+/// Build a new FLAC file: keep every metadata block except VORBIS_COMMENT,
+/// append a fresh VORBIS_COMMENT from `tags`, then the original audio frames
+/// verbatim. Returns Error.MalformedFile on a bad marker/blocks.
+pub fn buildFlac(alloc: std.mem.Allocator, original: []const u8, tags: TagSet) Error![]u8 {
+    if (original.len < 4 or !std.mem.eql(u8, original[0..4], "fLaC")) return Error.MalformedFile;
+
+    const KeptBlock = struct { btype: u8, data: []const u8 };
+    var kept: std.ArrayList(KeptBlock) = .empty;
+    defer kept.deinit(alloc);
+
+    var i: usize = 4;
+    while (true) {
+        if (i + 4 > original.len) return Error.MalformedFile;
+        const header = original[i];
+        const is_last = (header & 0x80) != 0;
+        const btype = header & 0x7f;
+        const len = (@as(usize, original[i + 1]) << 16) | (@as(usize, original[i + 2]) << 8) | @as(usize, original[i + 3]);
+        const data_start = i + 4;
+        if (data_start + len > original.len) return Error.MalformedFile;
+        if (btype != 4) { // drop the existing VORBIS_COMMENT (type 4)
+            kept.append(alloc, .{ .btype = btype, .data = original[data_start .. data_start + len] }) catch return Error.OutOfMemory;
+        }
+        i = data_start + len;
+        if (is_last) break;
+    }
+    const audio = original[i..];
+
+    // Build the VORBIS_COMMENT payload.
+    var vc: std.ArrayList(u8) = .empty;
+    defer vc.deinit(alloc);
+    const vendor = "stacks";
+    vc.appendSlice(alloc, &le32(vendor.len)) catch return Error.OutOfMemory;
+    vc.appendSlice(alloc, vendor) catch return Error.OutOfMemory;
+
+    var comments: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (comments.items) |c| alloc.free(c);
+        comments.deinit(alloc);
+    }
+    const addC = struct {
+        fn f(al: std.mem.Allocator, list: *std.ArrayList([]const u8), key: []const u8, val: []const u8) !void {
+            try list.append(al, try std.fmt.allocPrint(al, "{s}={s}", .{ key, val }));
+        }
+    }.f;
+    for (tags.artists) |ar| addC(alloc, &comments, "ARTIST", ar) catch return Error.OutOfMemory;
+    if (tags.album_artist) |v| addC(alloc, &comments, "ALBUMARTIST", v) catch return Error.OutOfMemory;
+    if (tags.album) |v| addC(alloc, &comments, "ALBUM", v) catch return Error.OutOfMemory;
+    if (tags.title) |v| addC(alloc, &comments, "TITLE", v) catch return Error.OutOfMemory;
+    if (tags.year) |y| {
+        var buf: [16]u8 = undefined;
+        const s = std.fmt.bufPrint(&buf, "{d}", .{y}) catch return Error.OutOfMemory;
+        addC(alloc, &comments, "DATE", s) catch return Error.OutOfMemory;
+    }
+    if (tags.track) |n| {
+        var buf: [16]u8 = undefined;
+        const s = std.fmt.bufPrint(&buf, "{d}", .{n}) catch return Error.OutOfMemory;
+        addC(alloc, &comments, "TRACKNUMBER", s) catch return Error.OutOfMemory;
+    }
+    if (tags.disc) |n| {
+        var buf: [16]u8 = undefined;
+        const s = std.fmt.bufPrint(&buf, "{d}", .{n}) catch return Error.OutOfMemory;
+        addC(alloc, &comments, "DISCNUMBER", s) catch return Error.OutOfMemory;
+    }
+    if (tags.release_mbid) |v| addC(alloc, &comments, "MUSICBRAINZ_ALBUMID", v) catch return Error.OutOfMemory;
+    if (tags.recording_mbid) |v| addC(alloc, &comments, "MUSICBRAINZ_TRACKID", v) catch return Error.OutOfMemory;
+
+    vc.appendSlice(alloc, &le32(comments.items.len)) catch return Error.OutOfMemory;
+    for (comments.items) |c| {
+        vc.appendSlice(alloc, &le32(c.len)) catch return Error.OutOfMemory;
+        vc.appendSlice(alloc, c) catch return Error.OutOfMemory;
+    }
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(alloc);
+    out.appendSlice(alloc, "fLaC") catch return Error.OutOfMemory;
+    for (kept.items) |b| {
+        out.append(alloc, b.btype & 0x7f) catch return Error.OutOfMemory; // clear last-block
+        out.appendSlice(alloc, &.{ @intCast((b.data.len >> 16) & 0xff), @intCast((b.data.len >> 8) & 0xff), @intCast(b.data.len & 0xff) }) catch return Error.OutOfMemory;
+        out.appendSlice(alloc, b.data) catch return Error.OutOfMemory;
+    }
+    out.append(alloc, 0x84) catch return Error.OutOfMemory; // last-block | type 4
+    out.appendSlice(alloc, &.{ @intCast((vc.items.len >> 16) & 0xff), @intCast((vc.items.len >> 8) & 0xff), @intCast(vc.items.len & 0xff) }) catch return Error.OutOfMemory;
+    out.appendSlice(alloc, vc.items) catch return Error.OutOfMemory;
+    out.appendSlice(alloc, audio) catch return Error.OutOfMemory;
+    return out.toOwnedSlice(alloc);
+}
+
+/// Test/util: values of `key` (e.g. "ARTIST") in a FLAC's VORBIS_COMMENT.
+pub fn readVorbisValues(alloc: std.mem.Allocator, flac: []const u8, key: []const u8) !?[]const []const u8 {
+    if (flac.len < 4 or !std.mem.eql(u8, flac[0..4], "fLaC")) return null;
+    var i: usize = 4;
+    while (true) {
+        if (i + 4 > flac.len) return null;
+        const header = flac[i];
+        const is_last = (header & 0x80) != 0;
+        const btype = header & 0x7f;
+        const len = (@as(usize, flac[i + 1]) << 16) | (@as(usize, flac[i + 2]) << 8) | @as(usize, flac[i + 3]);
+        const ds = i + 4;
+        if (ds + len > flac.len) return null;
+        if (btype == 4) {
+            const blk = flac[ds .. ds + len];
+            var p: usize = 0;
+            const vlen = rd_le32(blk[p .. p + 4]);
+            p += 4 + vlen;
+            const count = rd_le32(blk[p .. p + 4]);
+            p += 4;
+            var vals: std.ArrayList([]const u8) = .empty;
+            var n: u32 = 0;
+            while (n < count) : (n += 1) {
+                const clen = rd_le32(blk[p .. p + 4]);
+                p += 4;
+                const comment = blk[p .. p + clen];
+                p += clen;
+                if (std.mem.indexOfScalar(u8, comment, '=')) |eq| {
+                    if (std.ascii.eqlIgnoreCase(comment[0..eq], key)) {
+                        try vals.append(alloc, try alloc.dupe(u8, comment[eq + 1 ..]));
+                    }
+                }
+            }
+            return try vals.toOwnedSlice(alloc);
+        }
+        i = ds + len;
+        if (is_last) break;
+    }
+    return null;
+}
+
 const t = std.testing;
+
+/// Test/util: minimal synthetic FLAC — marker + STREAMINFO + VORBIS_COMMENT +
+/// fake audio. Exposed so apply.zig tests can seed a file.
+pub fn synthFlacForTest(alloc: std.mem.Allocator) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(alloc, "fLaC");
+    // STREAMINFO: type 0, not last, length 34 (content zeroed).
+    try out.append(alloc, 0x00);
+    try out.appendSlice(alloc, &.{ 0x00, 0x00, 0x22 });
+    try out.appendNTimes(alloc, 0x00, 34);
+    // VORBIS_COMMENT: type 4, last-block, one ARTIST=Old comment.
+    var vc: std.ArrayList(u8) = .empty;
+    defer vc.deinit(alloc);
+    const vendor = "old";
+    try vc.appendSlice(alloc, &le32(vendor.len));
+    try vc.appendSlice(alloc, vendor);
+    try vc.appendSlice(alloc, &le32(1));
+    const c0 = "ARTIST=Old";
+    try vc.appendSlice(alloc, &le32(c0.len));
+    try vc.appendSlice(alloc, c0);
+    try out.append(alloc, 0x84);
+    try out.appendSlice(alloc, &.{ @intCast((vc.items.len >> 16) & 0xff), @intCast((vc.items.len >> 8) & 0xff), @intCast(vc.items.len & 0xff) });
+    try out.appendSlice(alloc, vc.items);
+    try out.appendSlice(alloc, "AUDIOFRAMESHERE");
+    return out.toOwnedSlice(alloc);
+}
+
+test "buildFlac replaces VORBIS_COMMENT with multi ARTIST, keeps audio" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const orig = try synthFlacForTest(a);
+    const out = try buildFlac(a, orig, .{ .artists = &.{ "A", "B" }, .album = "Alb", .title = "T", .track = 3, .year = 2001 });
+    try t.expectEqualStrings("fLaC", out[0..4]);
+    const artists = (try readVorbisValues(a, out, "ARTIST")).?;
+    try t.expectEqual(@as(usize, 2), artists.len);
+    try t.expectEqualStrings("A", artists[0]);
+    try t.expectEqualStrings("B", artists[1]);
+    try t.expectEqualStrings("Alb", (try readVorbisValues(a, out, "ALBUM")).?[0]);
+    try t.expect(std.mem.endsWith(u8, out, "AUDIOFRAMESHERE"));
+}
 
 test "buildId3v24 emits multi-value TPE1 that round-trips" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
