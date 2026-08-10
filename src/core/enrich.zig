@@ -12,6 +12,8 @@ const std = @import("std");
 const tv = @import("../kinds/tv.zig");
 const movie = @import("../kinds/movie.zig");
 const probe = @import("probe.zig");
+const plan = @import("plan.zig");
+const musicbrainz = @import("../providers/musicbrainz.zig");
 
 pub const TvFields = struct {
     series: []const u8,
@@ -127,6 +129,66 @@ pub fn mergeMovie(alloc: std.mem.Allocator, mv: movie.Movie, p: ?probe.Probe) !M
     return .{ .fields = f, .warnings = try warns.toOwnedSlice(alloc) };
 }
 
+pub const MusicEnrichResult = struct { fields: plan.Fields, warnings: []const []const u8 };
+
+fn findTrack(release: musicbrainz.Release, position: u32) ?musicbrainz.TrackInfo {
+    for (release.tracks) |tk| if (tk.position == position) return tk;
+    return null;
+}
+
+/// Heuristic: a title that starts with a track-number prefix (e.g. "01 ",
+/// "03 - ") is filename-derived and safe to replace with a canonical title.
+fn titleLooksFilename(s: []const u8) bool {
+    var i: usize = 0;
+    while (i < s.len and std.ascii.isDigit(s[i])) : (i += 1) {}
+    return i >= 1 and i <= 3 and i < s.len and (s[i] == ' ' or s[i] == '-' or s[i] == '_' or s[i] == '.');
+}
+
+/// Merge a MusicBrainz release into one track's fields. `album_from_folder`
+/// marks that `base.album` was derived from the source folder (A.1 fallback),
+/// in which case MB's canonical album wins; otherwise a tag-authoritative
+/// album is kept and any MB difference is only a warning. Fills missing
+/// year/album-artist; replaces filename-derived titles; populates multi-artist
+/// credits + MBIDs. Field slices borrow from `base`/`release`; only warnings
+/// are newly allocated.
+pub fn mergeMusic(
+    alloc: std.mem.Allocator,
+    base: plan.Fields,
+    position: u32,
+    release: musicbrainz.Release,
+    album_from_folder: bool,
+) !MusicEnrichResult {
+    var f = base;
+    var warns: std.ArrayList([]const u8) = .empty;
+    errdefer freeAll(alloc, &warns);
+
+    if (release.title.len > 0) {
+        if (album_from_folder or f.album == null) {
+            f.album = release.title;
+        } else if (f.album) |cur| {
+            if (!std.ascii.eqlIgnoreCase(cur, release.title)) {
+                try warns.append(alloc, try std.fmt.allocPrint(alloc, "MusicBrainz suggests album \"{s}\"", .{release.title}));
+            }
+        }
+    }
+    if ((f.album_artist == null or f.album_artist.?.len == 0) and release.album_artist.len > 0) {
+        f.album_artist = release.album_artist;
+    }
+    if (f.year == null and release.year != null) f.year = release.year;
+    f.release_mbid = release.mbid;
+
+    if (findTrack(release, position)) |tk| {
+        if (tk.title.len > 0) {
+            const looks_filename = f.title == null or titleLooksFilename(f.title.?);
+            if (looks_filename) f.title = tk.title;
+        }
+        if (tk.artists.len > 0) f.artists = tk.artists;
+        if (tk.recording_mbid) |rid| f.recording_mbid = rid;
+    }
+
+    return .{ .fields = f, .warnings = try warns.toOwnedSlice(alloc) };
+}
+
 const t = std.testing;
 
 fn epOf(series: []const u8, s: u32, e: u32, title: ?[]const u8, q: ?[]const u8) tv.Episode {
@@ -202,4 +264,35 @@ test "no probe mirrors parsed fields, no warnings" {
     try t.expectEqual(@as(u32, 7), r.fields.episode);
     try t.expectEqualStrings("720p", r.fields.quality.?);
     try t.expectEqual(@as(usize, 0), r.warnings.len);
+}
+
+test "mergeMusic fills year, canonical title, multi-artist, mbids" {
+    const a = t.allocator;
+    const rel = musicbrainz.Release{
+        .mbid = "rel-1", .title = "Blue", .album_artist = "Eric Clapton", .year = 1998,
+        .tracks = &.{.{ .position = 1, .title = "Layla", .recording_mbid = "rec-1", .artists = &.{ "Eric Clapton", "Duane Allman" } }},
+    };
+    const base = plan.Fields{ .album_artist = "Eric Clapton", .album = "blue album folder", .title = "01 layla", .track = 1, .ext = "flac" };
+    const r = try mergeMusic(a, base, 1, rel, true); // album came from folder
+    defer freeWarnings(a, r.warnings);
+    try t.expectEqualStrings("Blue", r.fields.album.?); // folder → canonical
+    try t.expectEqual(@as(u32, 1998), r.fields.year.?); // filled
+    try t.expectEqualStrings("Layla", r.fields.title.?); // canonical title
+    try t.expectEqual(@as(usize, 2), r.fields.artists.len); // multi-artist
+    try t.expectEqualStrings("rel-1", r.fields.release_mbid.?);
+    try t.expectEqualStrings("rec-1", r.fields.recording_mbid.?);
+}
+
+test "mergeMusic keeps a tag-authoritative album but warns on MB difference" {
+    const a = t.allocator;
+    const rel = musicbrainz.Release{ .mbid = "r", .title = "Canonical Name", .album_artist = "X", .year = 2000, .tracks = &.{} };
+    const base = plan.Fields{ .album_artist = "X", .album = "Tagged Name", .title = "Song", .track = 1, .ext = "flac" };
+    const r = try mergeMusic(a, base, 1, rel, false); // album from a real tag
+    defer freeWarnings(a, r.warnings);
+    try t.expectEqualStrings("Tagged Name", r.fields.album.?); // not overwritten
+    var warned = false;
+    for (r.warnings) |w| if (std.mem.indexOf(u8, w, "MusicBrainz") != null) {
+        warned = true;
+    };
+    try t.expect(warned);
 }
