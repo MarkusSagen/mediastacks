@@ -6,7 +6,7 @@
 const std = @import("std");
 const standardize = @import("standardize.zig");
 
-pub const Action = enum { move, trash };
+pub const Action = enum { move, trash, tagwrite };
 pub const Entry = struct { action: Action, from: []const u8, to: []const u8 };
 pub const Journal = struct { created: i64, entries: []Entry };
 
@@ -111,6 +111,25 @@ pub fn freeOwned(alloc: std.mem.Allocator, j: Journal) void {
 }
 
 const t = std.testing;
+
+test "journal round-trips a tagwrite entry" {
+    const a = t.allocator;
+    const pid = std.c.getpid();
+    var db: [256]u8 = undefined;
+    const d = try std.fmt.bufPrint(&db, "/tmp/stacks-jtw-{d}", .{pid});
+    var entries = [_]Entry{.{ .action = .tagwrite, .from = "/lib/a.flac", .to = "/backup/1/a.flac" }};
+    const j = Journal{ .created = 7, .entries = entries[0..] };
+    const jpath = try writeTo(a, d, j);
+    defer a.free(jpath);
+    const loaded = try load(a, jpath);
+    defer freeOwned(a, loaded);
+    try t.expectEqual(Action.tagwrite, loaded.entries[0].action);
+    try t.expectEqualStrings("/backup/1/a.flac", loaded.entries[0].to);
+    var pz: [512]u8 = undefined;
+    _ = std.c.unlink((std.fmt.bufPrintZ(&pz, "{s}", .{jpath}) catch unreachable).ptr);
+    _ = std.c.unlink((std.fmt.bufPrintZ(&pz, "{s}/latest", .{d}) catch unreachable).ptr);
+    _ = std.c.rmdir((std.fmt.bufPrintZ(&pz, "{s}", .{d}) catch unreachable).ptr);
+}
 
 test "journal writeTo + latestIn + load round-trips" {
     const a = t.allocator;
