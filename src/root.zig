@@ -58,6 +58,7 @@ pub const hash = @import("util/hash.zig");
 pub const isbn = @import("util/isbn.zig");
 pub const fuzzy = @import("util/fuzzy.zig");
 pub const http = @import("util/http.zig");
+pub const httpcache = @import("util/httpcache.zig");
 pub const shutdown = @import("util/shutdown.zig");
 
 pub const web_api = @import("web/api.zig");
