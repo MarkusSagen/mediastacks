@@ -155,7 +155,13 @@ transcripts — kin to music/podcasts), NOT lumped with ebooks. Config gains
       real sample → extra). `Fields.edition/part` → `Movie (Year) - 1080p.mkv` /
       `-cd2.mkv`. `apply` drops a Jellyfin **`.ignore`** in `.stacks-trash/`
       (config `emit_ignore`, default on), journaled + undoable via `Action.create`.
-- [ ] **NFO sidecar writing** — next (`core/nfo.zig`, spec written).
+- [x] **NFO sidecar writing** (done 2026-08-10). `core/nfo.zig` pure builders
+      (movie/episode/tvshow/season/album/artist) with title/year/language +
+      provider IDs (`<tmdbid>`+`<uniqueid>`), XML-escaped. `apply` writes them per
+      primary + once per series/season/album/artist container (derived from item
+      + group kind), journaled `Action.create` (undo unlinks); on-conflict-skip
+      respects a user's existing NFO. Config `write_nfo` (default on) + `--nfo`/
+      `--no-nfo`. `scripts/nfo-smoke.sh`. Books `.opf`/`ComicInfo.xml` → Phase 2.
 
 ## Phase 4 — online enrichment (opt-in)
 

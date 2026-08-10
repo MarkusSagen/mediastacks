@@ -220,6 +220,10 @@ tmdb-smoke: build
 tag-smoke: build
     ./scripts/tag-smoke.sh
 
+# NFO sidecar smoke: --nfo writes movie.nfo; undo removes it.
+nfo-smoke: build
+    ./scripts/nfo-smoke.sh
+
 # Print where shelve keeps organizer state (config + undo journals).
 shelve-info:
     @echo "config:  ${XDG_CONFIG_HOME:-$HOME/.config}/stacks/config.toml"; \
