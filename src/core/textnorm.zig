@@ -10,8 +10,11 @@ const std = @import("std");
 /// Clean `s`. Owned by `alloc`.
 pub fn clean(alloc: std.mem.Allocator, s: []const u8) ![]u8 {
     const a = try decodeEntities(alloc, s);
+    defer alloc.free(a);
     const b = try fixMojibake(alloc, a);
+    defer alloc.free(b);
     const c = try foldQuotes(alloc, b);
+    defer alloc.free(c);
     return finalizeWhitespace(alloc, c);
 }
 
@@ -84,9 +87,16 @@ fn fixMojibake(alloc: std.mem.Allocator, s: []const u8) ![]u8 {
         .{ .needle = "\u{e2}\u{20ac}\u{201c}", .repl = "\u{2013}" }, // –
     };
     var cur = try alloc.dupe(u8, s);
-    for (table) |e| cur = try replaceAll(alloc, cur, e.needle, e.repl);
+    for (table) |e| {
+        const next = try replaceAll(alloc, cur, e.needle, e.repl);
+        alloc.free(cur);
+        cur = next;
+    }
     // (b) Latin-1 double-encoding (Ã©→é): re-interpret codepoints as bytes.
-    if (try latin1Redecode(alloc, cur)) |r| return r;
+    if (try latin1Redecode(alloc, cur)) |r| {
+        alloc.free(cur);
+        return r;
+    }
     return cur;
 }
 
