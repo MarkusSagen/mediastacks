@@ -24,6 +24,7 @@ $$(".tab").forEach((tab) => tab.addEventListener("click", () => {
   $$(".tab").forEach((t) => t.classList.toggle("active", t === tab));
   $$(".view").forEach((s) => s.classList.toggle("active", s.dataset.view === v));
   $("#apply-bar").hidden = !(v === "organize" && currentPlan && hasWork(currentPlan));
+  if (v === "library" && !libLoaded) loadLibrary();
 }));
 
 // ── toast ──────────────────────────────────────────────────────────
@@ -52,6 +53,37 @@ async function loadConfig() {
       `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("") +
       `<p class="hint">Edit these in <code>$XDG_CONFIG_HOME/stacks/config.toml</code>. In-app editing lands in a later slice.</p>`;
   } catch {}
+}
+
+// ── library ────────────────────────────────────────────────────────
+let libLoaded = false;
+$("#lib-refresh").addEventListener("click", () => { libLoaded = false; loadLibrary(); });
+
+async function loadLibrary() {
+  const host = $("#library");
+  host.innerHTML = `<div class="empty">Scanning library…</div>`;
+  try {
+    const d = await (await fetch("/api/library")).json();
+    const sections = (d.kinds || []).filter((k) => k.items.length).map((k) => {
+      const items = k.items.slice().sort((a, b) => (a.subtitle + " " + a.title).localeCompare(b.subtitle + " " + b.title));
+      return `<section class="lib-section"><h3>${esc(k.label)} <span class="lib-count">${items.length}</span></h3>
+        <div class="lib-grid">${items.map(cardHtml).join("")}</div></section>`;
+    }).join("");
+    host.innerHTML = sections || `<div class="empty">Library is empty at <code>${esc(d.library_root || "")}</code>.<div class="hint">Organize a folder to populate it.</div></div>`;
+    $$("#library img.lib-cover[data-src]").forEach((img) => {
+      img.src = img.dataset.src;
+      img.addEventListener("error", () => { const ph = document.createElement("div"); ph.className = "lib-cover ph"; img.replaceWith(ph); });
+    });
+    libLoaded = true;
+  } catch { host.innerHTML = `<div class="empty">Could not read the library.</div>`; }
+}
+
+function cardHtml(it) {
+  const cover = it.cover ? `<img class="lib-cover" data-src="${esc(it.cover)}" alt="">` : `<div class="lib-cover ph"></div>`;
+  const sub = it.subtitle ? `<div class="lib-sub">${esc(it.subtitle)}</div>` : "";
+  return `<div class="lib-card">${cover}
+    <div class="lib-title" title="${esc(it.title)}">${esc(it.title)}</div>${sub}
+    <div class="lib-meta">${it.count} file${it.count === 1 ? "" : "s"}</div></div>`;
 }
 
 // ── organize ───────────────────────────────────────────────────────

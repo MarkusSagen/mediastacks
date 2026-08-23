@@ -8,6 +8,7 @@ const std = @import("std");
 const plan = @import("../core/plan.zig");
 const config = @import("../core/config.zig");
 const group = @import("../core/group.zig");
+const classify_mod = @import("../core/classify.zig");
 const apply_mod = @import("../core/apply.zig");
 const review = @import("review.zig");
 const static = @import("static.zig");
@@ -138,6 +139,8 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
 
     if (std.mem.eql(u8, path, "/api/config")) return handleConfig(app, request);
     if (std.mem.eql(u8, path, "/api/organize")) return handleOrganize(io, app, request, target);
+    if (std.mem.eql(u8, path, "/api/library")) return handleLibrary(io, app, request);
+    if (std.mem.eql(u8, path, "/api/cover")) return handleCover(app, request, target);
 
     // These operate on the current plan (must exist).
     if (std.mem.eql(u8, path, "/api/plan")) {
@@ -194,6 +197,168 @@ fn handleConfig(app: *App, request: *std.http.Server.Request) !void {
 
 fn boolStr(b: bool) []const u8 {
     return if (b) "true" else "false";
+}
+
+// ── library browse ─────────────────────────────────────────────────
+
+const KindScan = struct { root: []const u8, kind: []const u8, label: []const u8, depth: u8 };
+const kind_scans = [_]KindScan{
+    .{ .root = "Movies", .kind = "movie", .label = "Movies", .depth = 1 },
+    .{ .root = "Shows", .kind = "tv", .label = "Shows", .depth = 1 },
+    .{ .root = "Music", .kind = "music", .label = "Music", .depth = 2 },
+    .{ .root = "Audiobooks", .kind = "audiobook", .label = "Audiobooks", .depth = 2 },
+    .{ .root = "Comics", .kind = "comic", .label = "Comics", .depth = 1 },
+};
+
+const Item = struct { count: u32 = 0, cover: ?[]const u8 = null };
+
+fn isCoverName(base: []const u8) bool {
+    const names = [_][]const u8{ "cover.jpg", "cover.jpeg", "cover.png", "poster.jpg", "poster.png", "folder.jpg", "folder.png" };
+    for (names) |n| if (std.ascii.eqlIgnoreCase(base, n)) return true;
+    return false;
+}
+
+fn jsonEsc(arena: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (s) |c| switch (c) {
+        '"' => try out.appendSlice(arena, "\\\""),
+        '\\' => try out.appendSlice(arena, "\\\\"),
+        '\n' => try out.appendSlice(arena, "\\n"),
+        '\r' => {},
+        '\t' => try out.appendSlice(arena, "\\t"),
+        else => try out.append(arena, c),
+    };
+    return out.toOwnedSlice(arena);
+}
+
+/// Scan `library_root` and report items per kind (depth-1 folders for
+/// Movies/Shows/Comics; depth-2 Artist/Album | Author/Book for Music/Audiobooks).
+/// One walk per kind aggregates media counts + a cover per item.
+fn handleLibrary(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
+    var arena_state = std.heap.ArenaAllocator.init(app.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const lib = app.base_cfg.library_root;
+
+    var body: std.ArrayList(u8) = .empty;
+    try body.appendSlice(arena, "{\"library_root\":\"");
+    try body.appendSlice(arena, try jsonEsc(arena, lib));
+    try body.appendSlice(arena, "\",\"kinds\":[");
+
+    const cwd = std.Io.Dir.cwd();
+    var first_kind = true;
+    for (kind_scans) |ks| {
+        const kroot = try std.fs.path.join(arena, &.{ lib, ks.root });
+        var map = std.StringHashMap(Item).init(arena);
+        var dir = cwd.openDir(io, kroot, .{ .iterate = true }) catch {
+            continue; // kind root doesn't exist yet
+        };
+        defer dir.close(io);
+        var walker = dir.walk(arena) catch continue;
+        defer walker.deinit();
+        while (walker.next(io) catch null) |entry| {
+            if (entry.kind != .file) continue;
+            const p = entry.path;
+            // item key = first `depth` path components.
+            var comps: usize = 0;
+            var key_end: usize = 0;
+            for (p, 0..) |ch, idx| {
+                if (ch == '/') {
+                    comps += 1;
+                    if (comps == ks.depth) {
+                        key_end = idx;
+                        break;
+                    }
+                }
+            }
+            if (key_end == 0) continue; // shallower than an item
+            const key = p[0..key_end];
+            const base = std.fs.path.basename(p);
+            const gop = try map.getOrPut(try arena.dupe(u8, key));
+            if (!gop.found_existing) gop.value_ptr.* = .{};
+            if (isCoverName(base)) {
+                if (gop.value_ptr.cover == null) gop.value_ptr.cover = try std.fs.path.join(arena, &.{ kroot, p });
+            } else if (classify_mod.classify(base, false) != .unknown) {
+                gop.value_ptr.count += 1;
+            }
+        }
+
+        if (!first_kind) try body.appendSlice(arena, ",");
+        first_kind = false;
+        try body.appendSlice(arena, try std.fmt.allocPrint(arena, "{{\"kind\":\"{s}\",\"label\":\"{s}\",\"items\":[", .{ ks.kind, ks.label }));
+        var first_item = true;
+        var it = map.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const item = e.value_ptr.*;
+            // title/subtitle from the key components
+            var title = key;
+            var subtitle: []const u8 = "";
+            if (ks.depth == 2) {
+                if (std.mem.lastIndexOfScalar(u8, key, '/')) |s| {
+                    subtitle = key[0..s];
+                    title = key[s + 1 ..];
+                }
+            }
+            if (!first_item) try body.appendSlice(arena, ",");
+            first_item = false;
+            try body.appendSlice(arena, try std.fmt.allocPrint(arena, "{{\"title\":\"{s}\",\"subtitle\":\"{s}\",\"count\":{d}", .{ try jsonEsc(arena, title), try jsonEsc(arena, subtitle), item.count }));
+            if (item.cover) |cov| {
+                try body.appendSlice(arena, ",\"cover\":\"/api/cover?path=");
+                try body.appendSlice(arena, try urlEncode(arena, cov));
+                try body.appendSlice(arena, "\"");
+            }
+            try body.appendSlice(arena, "}");
+        }
+        try body.appendSlice(arena, "]}");
+    }
+    try body.appendSlice(arena, "]}");
+    try respondJson(request, body.items);
+}
+
+fn urlEncode(arena: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (s) |ch| {
+        const safe = std.ascii.isAlphanumeric(ch) or ch == '-' or ch == '_' or ch == '.' or ch == '/' or ch == '~';
+        if (safe) {
+            try out.append(arena, ch);
+        } else {
+            const hex = "0123456789ABCDEF";
+            try out.append(arena, '%');
+            try out.append(arena, hex[ch >> 4]);
+            try out.append(arena, hex[ch & 0x0f]);
+        }
+    }
+    return out.toOwnedSlice(arena);
+}
+
+/// Serve a cover image, but only from within the library root (path allowlist).
+fn handleCover(app: *App, request: *std.http.Server.Request, target: []const u8) !void {
+    const enc = queryValue(target, "path") orelse return request.respond("", .{ .status = .not_found });
+    const p = try urlDecode(app.gpa, enc);
+    defer app.gpa.free(p);
+    if (!std.mem.startsWith(u8, p, app.base_cfg.library_root)) return request.respond("", .{ .status = .forbidden });
+    if (std.mem.indexOf(u8, p, "..") != null) return request.respond("", .{ .status = .forbidden });
+
+    var pz: [4096]u8 = undefined;
+    if (p.len >= pz.len) return request.respond("", .{ .status = .not_found });
+    const pzp = std.fmt.bufPrintZ(&pz, "{s}", .{p}) catch return request.respond("", .{ .status = .not_found });
+    const fp = std.c.fopen(pzp.ptr, "rb") orelse return request.respond("", .{ .status = .not_found });
+    defer _ = std.c.fclose(fp);
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(app.gpa);
+    var chunk: [64 * 1024]u8 = undefined;
+    while (true) {
+        const n = std.c.fread(&chunk, 1, chunk.len, fp);
+        if (n == 0) break;
+        try buf.appendSlice(app.gpa, chunk[0..n]);
+        if (buf.items.len > 16 * 1024 * 1024) break;
+    }
+    const ctype = if (std.ascii.endsWithIgnoreCase(p, ".png")) "image/png" else "image/jpeg";
+    try request.respond(buf.items, .{ .status = .ok, .extra_headers = &.{
+        .{ .name = "content-type", .value = ctype },
+        .{ .name = "cache-control", .value = "max-age=3600" },
+    } });
 }
 
 /// Build a fresh plan for `?dir=…` (offline by default; `&online=1` enables

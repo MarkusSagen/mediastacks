@@ -55,7 +55,11 @@
       the Plan → grouped-by-kind cards w/ covers/thumbs + keep/skip/trash +
       inline retitle (reuses `/api/edit`,`/api/apply`,`/api/thumb`) → Apply with
       write-tags/nfo toggles. `scripts/app-smoke.sh` (7 checks, headless HTTP).
-- [ ] Slice 2 — Library browse by kind (scan library_root).
+- [x] Slice 2 — Library browse (done 2026-08-23). `/api/library` scans
+      `library_root` per kind (depth-1 Movies/Shows/Comics; depth-2 Music/
+      Audiobooks) → items with cover + media count; `/api/cover` serves images
+      (path-allowlisted to the library root). Library tab: gallery grid of cards
+      (cover/title/subtitle/count), lazy covers, Rescan button. app-smoke +3.
 - [ ] Slice 3 — Undo history (list + revert).
 - [ ] Slice 4 — Settings (config editor); + online-enrichment toggle in Organize.
 

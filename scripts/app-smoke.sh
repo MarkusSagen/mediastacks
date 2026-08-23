@@ -35,4 +35,11 @@ APP="$(curl -s -X POST "http://127.0.0.1:$PORT/api/apply?write_tags=0&write_nfo=
 chk "apply moved 2" 'grep -q "\"moved\":2" <<<"$APP"'
 chk "files landed in library" '[[ "$(find "$LIB" -name "*.mkv" | wc -l | tr -d " ")" == 2 ]]'
 
+# Library browse should now report the organized show.
+LIBJSON="$(curl -s "http://127.0.0.1:$PORT/api/library")"
+chk "library lists the Shows kind" 'grep -q "\"kind\":\"tv\"" <<<"$LIBJSON"'
+chk "library found the series item" 'grep -q "witch hat atelier" <<<"$LIBJSON"'
+# Cover endpoint rejects paths outside the library root.
+chk "cover endpoint blocks traversal" '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/cover?path=/etc/hosts")" == "403" ]]'
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; [[ "$FAIL" -eq 0 ]]

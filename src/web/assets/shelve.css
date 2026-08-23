@@ -116,6 +116,19 @@ main { padding: 16px; max-width: 1100px; margin: 0 auto; }
 }
 .apply-summary { color: var(--ink-mute); font-size: 12px; margin-right: auto; }
 
+/* ── library ── */
+.library-bar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.lib-section { margin-bottom: 28px; }
+.lib-section h3 { font-size: 14px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+.lib-count { color: var(--ink-faint); font-weight: 400; font-size: 12px; }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
+.lib-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-card); }
+.lib-cover { width: 100%; aspect-ratio: 2/3; object-fit: cover; background: var(--surface-2); display: block; }
+.lib-cover.ph { background: linear-gradient(135deg, var(--surface-2), var(--surface-3)); }
+.lib-title { font-weight: 600; font-size: 13px; padding: 8px 10px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-sub { color: var(--ink-mute); font-size: 12px; padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-meta { color: var(--ink-faint); font-size: 11px; padding: 2px 10px 10px; }
+
 /* ── settings ── */
 .settings { display: flex; flex-direction: column; gap: 8px; max-width: 560px; }
 .settings .row { display: flex; justify-content: space-between; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
