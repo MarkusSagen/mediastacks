@@ -14,7 +14,23 @@
       `plan.Item.cover_src` stamped on music primaries; `apply` reads bytes+mime.
       `tag-smoke.sh` verifies embedded art via ffprobe.
 
-## Next (user-sequenced): audiobooks → comics → language/subtitle policy + remux
+## Audiobooks (in progress)
+
+- [x] **Audiobook kind** (done 2026-08-23). `MediaKind.audiobook` + own
+      `Audiobooks/` root; conservative detection (`.m4b` by ext; audiobook
+      keyword in path; genre Audiobook/Speech/Spoken — genre added to music
+      tags). Grouped by source folder; author = consensus album_artist/artist,
+      book = album tag or folder name. Configurable `audiobook_template`
+      (default `Audiobooks/{author_sort}/{album}/{track:02} - {title}.{ext}`;
+      author last-name-first via `naming.authorSort`); single .m4b collapses to
+      `{book}.{ext}`. Embedded cover + tag write-back + external cover.jpg reused.
+      Verified on the real LOTR audiobook → `Audiobooks/Tolkien, J.R.R/…`
+      (was misfiled as music — A.1 gap resolved).
+- [ ] **m4b creation** (`--make-m4b`, opt-in): merge chapter mp3s → one
+      chaptered `.m4b` (ffmpeg AAC + ffmetadata chapters + embedded cover),
+      journaled/undoable, sources kept. NEXT.
+
+## Next (user-sequenced): m4b creation → comics → language/subtitle policy + remux
 
 ## Guiding principle: one shared interface, kind-specific only where it must be
 
