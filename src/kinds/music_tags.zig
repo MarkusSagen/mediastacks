@@ -16,6 +16,8 @@ pub const TagSet = struct {
     year: ?u32 = null,
     release_mbid: ?[]const u8 = null,
     recording_mbid: ?[]const u8 = null,
+    cover: ?[]const u8 = null, // raw image bytes (front cover), embedded when set
+    cover_mime: []const u8 = "image/jpeg",
 };
 
 pub const Error = error{ UnsupportedFormat, MalformedFile, OutOfMemory, IoError };
@@ -27,6 +29,9 @@ fn le32(n: usize) [4]u8 {
 }
 fn rd_le32(b: []const u8) u32 {
     return @as(u32, b[0]) | (@as(u32, b[1]) << 8) | (@as(u32, b[2]) << 16) | (@as(u32, b[3]) << 24);
+}
+fn be32(n: usize) [4]u8 {
+    return .{ @intCast((n >> 24) & 0xff), @intCast((n >> 16) & 0xff), @intCast((n >> 8) & 0xff), @intCast(n & 0xff) };
 }
 
 /// 4-byte synchsafe integer (7 bits per byte), big-endian — the ID3v2 size form.
@@ -75,6 +80,23 @@ fn appendTxxx(alloc: std.mem.Allocator, out: *std.ArrayList(u8), desc: []const u
     try out.appendSlice(alloc, payload.items);
 }
 
+/// An APIC frame carrying a front-cover picture (type 0x03). Payload:
+/// encoding(0x03) + mime + 0x00 + picture-type + desc(0x00) + image bytes.
+fn appendApic(alloc: std.mem.Allocator, out: *std.ArrayList(u8), mime: []const u8, img: []const u8) !void {
+    var payload: std.ArrayList(u8) = .empty;
+    defer payload.deinit(alloc);
+    try payload.append(alloc, 0x03); // text encoding (UTF-8, for the description)
+    try payload.appendSlice(alloc, mime);
+    try payload.append(alloc, 0x00); // mime terminator
+    try payload.append(alloc, 0x03); // picture type: front cover
+    try payload.append(alloc, 0x00); // empty description + terminator
+    try payload.appendSlice(alloc, img);
+    try out.appendSlice(alloc, "APIC");
+    try out.appendSlice(alloc, &synchsafe(@intCast(payload.items.len)));
+    try out.appendSlice(alloc, &[_]u8{ 0, 0 });
+    try out.appendSlice(alloc, payload.items);
+}
+
 fn appendNumFrame(alloc: std.mem.Allocator, out: *std.ArrayList(u8), id: [4]u8, n: u32) !void {
     var buf: [16]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "{d}", .{n}) catch return;
@@ -95,6 +117,7 @@ pub fn buildId3v24(alloc: std.mem.Allocator, tags: TagSet) ![]u8 {
     if (tags.disc) |n| try appendNumFrame(alloc, &frames, "TPOS".*, n);
     if (tags.release_mbid) |v| try appendTxxx(alloc, &frames, "MusicBrainz Album Id", v);
     if (tags.recording_mbid) |v| try appendTxxx(alloc, &frames, "MusicBrainz Release Track Id", v);
+    if (tags.cover) |img| try appendApic(alloc, &frames, tags.cover_mime, img);
 
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
@@ -206,6 +229,23 @@ pub fn buildFlac(alloc: std.mem.Allocator, original: []const u8, tags: TagSet) E
         vc.appendSlice(alloc, c) catch return Error.OutOfMemory;
     }
 
+    // Optional PICTURE block (type 6, front cover) built when a cover is given.
+    var pic: std.ArrayList(u8) = .empty;
+    defer pic.deinit(alloc);
+    if (tags.cover) |img| {
+        pic.appendSlice(alloc, &be32(3)) catch return Error.OutOfMemory; // picture type: front cover
+        pic.appendSlice(alloc, &be32(tags.cover_mime.len)) catch return Error.OutOfMemory;
+        pic.appendSlice(alloc, tags.cover_mime) catch return Error.OutOfMemory;
+        pic.appendSlice(alloc, &be32(0)) catch return Error.OutOfMemory; // description length 0
+        pic.appendSlice(alloc, &be32(0)) catch return Error.OutOfMemory; // width
+        pic.appendSlice(alloc, &be32(0)) catch return Error.OutOfMemory; // height
+        pic.appendSlice(alloc, &be32(0)) catch return Error.OutOfMemory; // color depth
+        pic.appendSlice(alloc, &be32(0)) catch return Error.OutOfMemory; // #colors
+        pic.appendSlice(alloc, &be32(img.len)) catch return Error.OutOfMemory;
+        pic.appendSlice(alloc, img) catch return Error.OutOfMemory;
+    }
+    const have_pic = tags.cover != null;
+
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
     out.appendSlice(alloc, "fLaC") catch return Error.OutOfMemory;
@@ -214,9 +254,15 @@ pub fn buildFlac(alloc: std.mem.Allocator, original: []const u8, tags: TagSet) E
         out.appendSlice(alloc, &.{ @intCast((b.data.len >> 16) & 0xff), @intCast((b.data.len >> 8) & 0xff), @intCast(b.data.len & 0xff) }) catch return Error.OutOfMemory;
         out.appendSlice(alloc, b.data) catch return Error.OutOfMemory;
     }
-    out.append(alloc, 0x84) catch return Error.OutOfMemory; // last-block | type 4
+    // VORBIS_COMMENT (type 4) — last block only when no PICTURE follows.
+    out.append(alloc, if (have_pic) @as(u8, 0x04) else 0x84) catch return Error.OutOfMemory;
     out.appendSlice(alloc, &.{ @intCast((vc.items.len >> 16) & 0xff), @intCast((vc.items.len >> 8) & 0xff), @intCast(vc.items.len & 0xff) }) catch return Error.OutOfMemory;
     out.appendSlice(alloc, vc.items) catch return Error.OutOfMemory;
+    if (have_pic) {
+        out.append(alloc, 0x86) catch return Error.OutOfMemory; // last-block | type 6 (PICTURE)
+        out.appendSlice(alloc, &.{ @intCast((pic.items.len >> 16) & 0xff), @intCast((pic.items.len >> 8) & 0xff), @intCast(pic.items.len & 0xff) }) catch return Error.OutOfMemory;
+        out.appendSlice(alloc, pic.items) catch return Error.OutOfMemory;
+    }
     out.appendSlice(alloc, audio) catch return Error.OutOfMemory;
     return out.toOwnedSlice(alloc);
 }
@@ -453,6 +499,55 @@ test "buildId3v24 emits multi-value TPE1 that round-trips" {
     try t.expectEqualStrings("Layla", (try readTextValues(a, tag, "TIT2".*)).?[0]);
     try t.expectEqualStrings("1970", (try readTextValues(a, tag, "TDRC".*)).?[0]);
     try t.expectEqualStrings("Derek and the Dominos", (try readTextValues(a, tag, "TPE2".*)).?[0]);
+}
+
+/// Test/util: does a FLAC carry a PICTURE (type 6) metadata block?
+fn flacHasPicture(flac: []const u8) bool {
+    if (flac.len < 4 or !std.mem.eql(u8, flac[0..4], "fLaC")) return false;
+    var i: usize = 4;
+    while (true) {
+        if (i + 4 > flac.len) return false;
+        const header = flac[i];
+        const is_last = (header & 0x80) != 0;
+        const btype = header & 0x7f;
+        const len = (@as(usize, flac[i + 1]) << 16) | (@as(usize, flac[i + 2]) << 8) | @as(usize, flac[i + 3]);
+        if (btype == 6) return true;
+        i += 4 + len;
+        if (is_last) break;
+    }
+    return false;
+}
+
+test "buildFlac embeds a PICTURE when cover is set" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const orig = try synthFlacForTest(a);
+    const img = "\xff\xd8\xffFAKEJPEGDATA";
+    const out = try buildFlac(a, orig, .{ .artists = &.{"A"}, .album = "Alb", .cover = img, .cover_mime = "image/jpeg" });
+    try t.expect(flacHasPicture(out));
+    try t.expect(std.mem.indexOf(u8, out, "image/jpeg") != null);
+    try t.expect(std.mem.indexOf(u8, out, "FAKEJPEGDATA") != null);
+    try t.expect(std.mem.endsWith(u8, out, "AUDIOFRAMESHERE")); // audio still intact
+    // still round-trips the comments
+    const artists = (try readVorbisValues(a, out, "ARTIST")).?;
+    try t.expectEqual(@as(usize, 1), artists.len);
+    // no cover → no PICTURE
+    const out2 = try buildFlac(a, orig, .{ .artists = &.{"A"} });
+    try t.expect(!flacHasPicture(out2));
+}
+
+test "buildId3v24 embeds an APIC when cover is set" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const img = "\xff\xd8\xffFAKEJPEGDATA";
+    const tag = try buildId3v24(a, .{ .title = "T", .cover = img, .cover_mime = "image/jpeg" });
+    try t.expect(std.mem.indexOf(u8, tag, "APIC") != null);
+    try t.expect(std.mem.indexOf(u8, tag, "image/jpeg") != null);
+    try t.expect(std.mem.indexOf(u8, tag, "FAKEJPEGDATA") != null);
+    const tag2 = try buildId3v24(a, .{ .title = "T" });
+    try t.expect(std.mem.indexOf(u8, tag2, "APIC") == null);
 }
 
 test "buildId3v24 with no artists omits TPE1" {
