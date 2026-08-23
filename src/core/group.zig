@@ -560,6 +560,13 @@ pub fn buildPlan(
                 try std.fmt.allocPrint(arena, "{s}-{d}.{s}", .{ @tagName(cov.kind), n, cov.ext });
             const dst = try std.fmt.allocPrint(arena, "{s}/{s}", .{ folder, name });
             try gbs.items[c.group_idx].items.append(arena, .{ .src = cov.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = "image" });
+            // For a music album cover, stamp its source on the album's primaries
+            // so tag write-back can embed it into each track (APIC/PICTURE).
+            if (c.mkind == .music and cov.kind == .poster) {
+                for (gbs.items[c.group_idx].items.items) |*it| {
+                    if (it.role == .primary) it.cover_src = cov.abs;
+                }
+            }
             attached = true;
             break;
         }

@@ -54,6 +54,9 @@ pub const Item = struct {
     reason: []const u8 = "",
     media: ?MediaInfo = null,
     fields: ?Fields = null,
+    /// Source path of the album's cover image, stamped on music primaries so
+    /// tag write-back can embed it (APIC/PICTURE). Not serialized-critical.
+    cover_src: ?[]const u8 = null,
 };
 
 pub const Group = struct {

@@ -282,7 +282,17 @@ fn maybeWriteTags(
     const bzp = std.fmt.bufPrintZ(&bz, "{s}", .{backup}) catch return;
     standardize.copyAcrossDevices(fzp, bzp) catch return; // no backup → no write
 
-    music_tags.writeTags(alloc, target, tagSetFromFields(fields)) catch return;
+    var ts = tagSetFromFields(fields);
+    // Embed the album cover so file-based players (Apple Music, Sonos, …) show
+    // art. Read the cover bytes from its source; skip embedding if unreadable.
+    if (item.cover_src) |cs| {
+        if (readBytes(alloc, cs)) |bytes| {
+            ts.cover = bytes;
+            ts.cover_mime = if (std.ascii.endsWithIgnoreCase(cs, ".png")) "image/png" else "image/jpeg";
+        }
+    }
+
+    music_tags.writeTags(alloc, target, ts) catch return;
     try entries.append(alloc, .{ .action = .tagwrite, .from = try alloc.dupe(u8, target), .to = backup });
 }
 
