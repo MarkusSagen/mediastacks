@@ -1,5 +1,21 @@
 # stacks — roadmap & follow-ups
 
+## Recently done (2026-08-23)
+
+- [x] **Text normalization** — `core/textnorm.zig` (pure): folds apostrophe/quote
+      lookalikes (`´` `` ` `` `'` `"` → ASCII), repairs mojibake (`Ã©`→`é`,
+      cp1252 `â€™`→`'`), decodes HTML entities, strips zero-width/control chars,
+      collapses whitespace. Wired at parse (`music.fromTags`, `tv.parse`,
+      `movie.parse`, `cleanAlbumFolder`) → flows to grouping keys, filenames,
+      tags, NFO. Always-on.
+- [x] **Embedded cover art + player compat** — `music_tags` embeds the album
+      cover (FLAC `PICTURE`, MP3 `APIC`) on `--write-tags`, so Apple Music /
+      Sonos / Samsung / Sony show art; external `cover.jpg` + NFO still written.
+      `plan.Item.cover_src` stamped on music primaries; `apply` reads bytes+mime.
+      `tag-smoke.sh` verifies embedded art via ffprobe.
+
+## Next (user-sequenced): audiobooks → comics → language/subtitle policy + remux
+
 ## Guiding principle: one shared interface, kind-specific only where it must be
 
 Keep **as much shared across media kinds as possible, for as long as it makes
