@@ -26,11 +26,15 @@
       `{book}.{ext}`. Embedded cover + tag write-back + external cover.jpg reused.
       Verified on the real LOTR audiobook → `Audiobooks/Tolkien, J.R.R/…`
       (was misfiled as music — A.1 gap resolved).
-- [ ] **m4b creation** (`--make-m4b`, opt-in): merge chapter mp3s → one
-      chaptered `.m4b` (ffmpeg AAC + ffmetadata chapters + embedded cover),
-      journaled/undoable, sources kept. NEXT.
+- [x] **m4b creation** (done 2026-08-23) — `shelve makem4b DIR [--to LIB]
+      [--out FILE] [--bitrate B]` (its own subcommand, keeps `apply` io-free):
+      `kinds/audiobook.zig` probes each chapter's duration, builds an ffmetadata
+      `[CHAPTER]` list + concat list, runs ffmpeg (AAC, embedded cover, chapters)
+      → one `{book}.m4b` in `Audiobooks/{author_sort}/{book}/`. Sources kept; the
+      new file is journaled (`.create`) so `shelve undo` removes it.
+      `scripts/m4b-smoke.sh` (7 checks, real ffmpeg).
 
-## Next (user-sequenced): m4b creation → comics → language/subtitle policy + remux
+## Next (user-sequenced): comics → language/subtitle policy + remux
 
 ## Guiding principle: one shared interface, kind-specific only where it must be
 
