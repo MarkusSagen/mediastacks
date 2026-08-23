@@ -43,6 +43,9 @@ pub const Fields = struct {
     imdb_id: ?[]const u8 = null,
     tvdb_id: ?[]const u8 = null,
     original_language: ?[]const u8 = null,
+    // comic
+    issue: ?f32 = null,
+    volume: ?u32 = null,
 };
 
 pub const Item = struct {

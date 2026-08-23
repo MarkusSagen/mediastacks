@@ -15,6 +15,7 @@ const plan = @import("plan.zig");
 const tv = @import("../kinds/tv.zig");
 const movie = @import("../kinds/movie.zig");
 const music = @import("../kinds/music.zig");
+const comic = @import("../kinds/comic.zig");
 const probe = @import("probe.zig");
 const enrich = @import("enrich.zig");
 const drm = @import("drm.zig");
@@ -38,6 +39,7 @@ const Cand = struct {
     ep: ?tv.Episode = null,
     mv: ?movie.Movie = null,
     track: ?music.Track = null,
+    cm: ?comic.Comic = null,
     probe: ?probe.Probe = null,
     warnings: []const []const u8 = &.{},
     group_idx: usize = 0,
@@ -328,6 +330,11 @@ pub fn buildPlan(
                 }
                 try media.append(arena, c);
             }
+        } else if (mk == .comic) {
+            const c = try arena.create(Cand);
+            c.* = .{ .abs = abs, .dir = d, .stem = stem, .size = statSize(io, abs), .mkind = .comic };
+            c.cm = try comic.parse(arena, base);
+            try media.append(arena, c);
         } else {
             try unclassified.append(arena, abs);
         }
@@ -344,6 +351,7 @@ pub fn buildPlan(
             .movie => try std.fmt.allocPrint(arena, "mv|{s}|{?d}", .{ try lower(arena, c.mv.?.title), c.mv.?.year }),
             .music => try std.fmt.allocPrint(arena, "mu|{s}", .{c.album_dir.?}),
             .audiobook => try std.fmt.allocPrint(arena, "ab|{s}", .{c.album_dir.?}),
+            .comic => try std.fmt.allocPrint(arena, "co|{s}", .{try lower(arena, c.cm.?.series)}),
             else => unreachable,
         };
 
@@ -354,11 +362,13 @@ pub fn buildPlan(
                 .tv => c.ep.?.series,
                 .movie => c.mv.?.title,
                 .music, .audiobook => musicAlbum(c),
+                .comic => c.cm.?.series,
                 else => "",
             };
             const gyear = switch (c.mkind) {
                 .movie => c.mv.?.year,
                 .music => c.track.?.year,
+                .comic => c.cm.?.year,
                 else => null,
             };
             try gbs.append(arena, .{
@@ -457,6 +467,17 @@ pub fn buildPlan(
                 } else {
                     try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate of primary" });
                 }
+            }
+        } else if (gb.kind == .comic) {
+            // One series folder; each file is an issue. No best-copy dedup.
+            for (cands.items) |c| {
+                const cm = c.cm.?;
+                const f = plan.Fields{ .series = cm.series, .issue = cm.issue, .volume = cm.volume, .year = cm.year, .ext = cm.ext };
+                c.fields = f;
+                c.dst = try naming.dstFor(arena, cfg, .comic, f);
+                c.primary_dst = c.dst;
+                c.role = .primary;
+                try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = c.dst, .reason = "", .fields = f });
             }
         } else if (gb.kind == .audiobook) {
             // One book per source folder. author = consensus album_artist/artist;
@@ -769,7 +790,7 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK, .comic_template = config.DEFAULT_COMIC };
     const p = try buildPlan(a, threaded.io(), root, cfg, false, .{}); // no probe
 
     var music_groups: usize = 0;
@@ -792,6 +813,44 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
     rmdirAt("{s}", .{root});
 }
 
+test "buildPlan routes comics to Comics/{series} (no-probe)" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const pid = std.c.getpid();
+    var rb: [256]u8 = undefined;
+    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-comic-{d}", .{pid});
+    mkdirAt("{s}", .{root});
+    try writeFileAt("{s}/Saga #12 (2018).cbz", .{root}, "a");
+    try writeFileAt("{s}/Saga #13 (2018).cbz", .{root}, "b");
+
+    var threaded = std.Io.Threaded.init(t.allocator, .{});
+    defer threaded.deinit();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK, .comic_template = config.DEFAULT_COMIC };
+    const p = try buildPlan(a, threaded.io(), root, cfg, false, .{});
+
+    var comic_groups: usize = 0;
+    var n12 = false;
+    var n13 = false;
+    for (p.groups) |g| {
+        if (g.kind != .comic) continue;
+        comic_groups += 1;
+        for (g.items) |it| {
+            const dv = it.dst orelse "";
+            if (std.mem.eql(u8, dv, "/lib/Comics/Saga/Saga #012 (2018).cbz")) n12 = true;
+            if (std.mem.eql(u8, dv, "/lib/Comics/Saga/Saga #013 (2018).cbz")) n13 = true;
+        }
+    }
+    try t.expectEqual(@as(usize, 1), comic_groups); // one series
+    try t.expect(n12);
+    try t.expect(n13);
+
+    unlinkAt("{s}/Saga #12 (2018).cbz", .{root});
+    unlinkAt("{s}/Saga #13 (2018).cbz", .{root});
+    rmdirAt("{s}", .{root});
+}
+
 test "buildPlan routes audiobooks to Audiobooks root (no-probe)" {
     var arena_state = std.heap.ArenaAllocator.init(t.allocator);
     defer arena_state.deinit();
@@ -810,7 +869,7 @@ test "buildPlan routes audiobooks to Audiobooks root (no-probe)" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK, .comic_template = config.DEFAULT_COMIC };
     const p = try buildPlan(a, threaded.io(), root, cfg, false, .{});
 
     var ab_groups: usize = 0;
@@ -855,7 +914,7 @@ test "buildPlan routes extras to Jellyfin subfolders (no-probe)" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK, .comic_template = config.DEFAULT_COMIC };
     const p = try buildPlan(a, threaded.io(), root, cfg, false, .{});
 
     var trailer = false;
@@ -894,7 +953,7 @@ test "buildPlan places Jellyfin images by canonical name (no-probe)" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK, .comic_template = config.DEFAULT_COMIC };
     const p = try buildPlan(a, threaded.io(), root, cfg, false, .{});
 
     var poster = false;
@@ -929,7 +988,7 @@ test "buildPlan rolls CD subfolders into one multi-disc album (no-probe)" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK, .comic_template = config.DEFAULT_COMIC };
     const p = try buildPlan(a, threaded.io(), root, cfg, false, .{}); // no probe: disc comes from folder names
 
     var music_groups: usize = 0;
@@ -975,7 +1034,7 @@ test "buildPlan flags a DRM video and skips probing" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK, .comic_template = config.DEFAULT_COMIC };
     const p = try buildPlan(a, threaded.io(), root, cfg, true, .{}); // probe_enabled
 
     var warned = false;
@@ -1025,6 +1084,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
         .movie_template = config.DEFAULT_MOVIE,
         .music_template = config.DEFAULT_MUSIC,
         .audiobook_template = config.DEFAULT_AUDIOBOOK,
+        .comic_template = config.DEFAULT_COMIC,
     };
     const p = try buildPlan(a, io, root, cfg, false, .{}); // probe off: deterministic, no ffprobe dep
 

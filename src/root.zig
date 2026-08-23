@@ -25,6 +25,7 @@ pub const extras = @import("core/extras.zig");
 pub const nfo = @import("core/nfo.zig");
 pub const textnorm = @import("core/textnorm.zig");
 pub const audiobook = @import("kinds/audiobook.zig");
+pub const comic = @import("kinds/comic.zig");
 pub const naming = @import("core/naming.zig");
 pub const journal = @import("core/journal.zig");
 pub const apply = @import("core/apply.zig");
