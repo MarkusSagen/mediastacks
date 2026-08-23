@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const exec = @import("../util/exec.zig");
+const textnorm = @import("../core/textnorm.zig");
 
 pub const Tags = struct {
     title: ?[]const u8 = null,
@@ -110,10 +111,10 @@ pub fn fromTags(alloc: std.mem.Allocator, tags: Tags, basename: []const u8) !Tra
     const ext = try alloc.dupe(u8, if (ext_dot.len > 0) ext_dot[1..] else ext_dot);
     const stem = basename[0 .. basename.len - ext_dot.len];
     return .{
-        .title = try toUtf8(alloc, tags.title orelse stem),
-        .artists = if (tags.artist) |ar| try splitArtists(alloc, try toUtf8(alloc, ar)) else &.{},
-        .album_artist = if (tags.album_artist) |x| try toUtf8(alloc, x) else null,
-        .album = if (tags.album) |x| try toUtf8(alloc, x) else null,
+        .title = try textnorm.clean(alloc, try toUtf8(alloc, tags.title orelse stem)),
+        .artists = if (tags.artist) |ar| try splitArtists(alloc, try textnorm.clean(alloc, try toUtf8(alloc, ar))) else &.{},
+        .album_artist = if (tags.album_artist) |x| try textnorm.clean(alloc, try toUtf8(alloc, x)) else null,
+        .album = if (tags.album) |x| try textnorm.clean(alloc, try toUtf8(alloc, x)) else null,
         .track = if (tags.track) |x| firstInt(x) else null,
         .disc = if (tags.disc) |x| firstInt(x) else null,
         .year = blk: {
@@ -208,7 +209,7 @@ pub fn cleanAlbumFolder(alloc: std.mem.Allocator, folder: []const u8, album_arti
         if (rest.len > 0) s = rest;
     }
     s = std.mem.trim(u8, s, " \t\r\n");
-    return alloc.dupe(u8, if (s.len > 0) s else folder);
+    return textnorm.clean(alloc, if (s.len > 0) s else folder);
 }
 
 /// Consensus album metadata over a folder's tracks. `album_artist` = a usable

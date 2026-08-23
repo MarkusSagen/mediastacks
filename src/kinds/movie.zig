@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const kind = @import("../core/kind.zig");
+const textnorm = @import("../core/textnorm.zig");
 
 pub const Movie = struct {
     title: []const u8,
@@ -95,7 +96,9 @@ pub fn parse(alloc: std.mem.Allocator, basename: []const u8) !Movie {
     errdefer if (quality) |x| alloc.free(x);
     const ext_owned = try alloc.dupe(u8, ext);
 
-    return Movie{ .title = title, .year = year, .quality = quality, .ext = ext_owned };
+    const title_clean = try textnorm.clean(alloc, title);
+    alloc.free(title);
+    return Movie{ .title = title_clean, .year = year, .quality = quality, .ext = ext_owned };
 }
 
 const t = std.testing;

@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const kind = @import("../core/kind.zig");
+const textnorm = @import("../core/textnorm.zig");
 
 pub const Episode = struct {
     series: []const u8,
@@ -90,9 +91,15 @@ pub fn parse(alloc: std.mem.Allocator, basename: []const u8) !?Episode {
 
     const se = findSE(stem) orelse return null;
 
-    const series = try kind.cleanName(alloc, stem[0..se.start]);
+    const raw_series = try kind.cleanName(alloc, stem[0..se.start]);
+    const series = try textnorm.clean(alloc, raw_series);
+    alloc.free(raw_series);
     errdefer alloc.free(series);
-    const title = try extractTitle(alloc, stem[se.end..]);
+    const title = if (try extractTitle(alloc, stem[se.end..])) |raw| blk: {
+        const cleaned = try textnorm.clean(alloc, raw);
+        alloc.free(raw);
+        break :blk cleaned;
+    } else null;
     errdefer if (title) |x| alloc.free(x);
     const quality = try findQuality(alloc, stem);
     errdefer if (quality) |x| alloc.free(x);
