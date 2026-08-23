@@ -25,6 +25,7 @@ $$(".tab").forEach((tab) => tab.addEventListener("click", () => {
   $$(".view").forEach((s) => s.classList.toggle("active", s.dataset.view === v));
   $("#apply-bar").hidden = !(v === "organize" && currentPlan && hasWork(currentPlan));
   if (v === "library" && !libLoaded) loadLibrary();
+  if (v === "undo") loadUndo();
 }));
 
 // ── toast ──────────────────────────────────────────────────────────
@@ -36,23 +37,52 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
 }
 
-// ── config → header + settings ─────────────────────────────────────
+// ── config → header + settings (editable) ─────────────────────────
 async function loadConfig() {
   try {
     const c = await (await fetch("/api/config")).json();
     $("#stats").textContent = "library: " + c.library_root;
-    const rows = [
-      ["library_root", c.library_root],
-      ["write_tags (default)", String(c.write_tags)],
-      ["write_nfo (default)", String(c.write_nfo)],
-      ["id_suffix", String(c.id_suffix)],
-      ["MusicBrainz", c.musicbrainz ? "on" : "off"],
-      ["TMDB key", c.tmdb ? "set" : "—"],
-    ];
-    $("#settings").innerHTML = rows.map(([k, v]) =>
-      `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("") +
-      `<p class="hint">Edit these in <code>$XDG_CONFIG_HOME/stacks/config.toml</code>. In-app editing lands in a later slice.</p>`;
+    renderSettings(c);
   } catch {}
+}
+
+function textRow(key, label, val, ph) {
+  return `<label class="set-row"><span class="k">${esc(label)}</span>
+    <input class="set-input" data-key="${key}" type="text" value="${esc(val || "")}" placeholder="${esc(ph || "")}" autocomplete="off" spellcheck="false"></label>`;
+}
+function toggleRow(key, label, on, hint) {
+  return `<label class="set-row"><span class="k">${esc(label)}${hint ? ` <span class="hint">${esc(hint)}</span>` : ""}</span>
+    <input class="set-toggle" data-key="${key}" type="checkbox"${on ? " checked" : ""}></label>`;
+}
+
+function renderSettings(c) {
+  $("#settings").innerHTML =
+    textRow("library_root", "Library root", c.library_root, "~/Media") +
+    toggleRow("write_tags", "Write tags + cover", c.write_tags, "default on apply") +
+    toggleRow("write_nfo", "Write NFO sidecars", c.write_nfo, "Jellyfin/Kodi") +
+    toggleRow("id_suffix", "Provider ID in names", c.id_suffix, "[tmdbid-…]") +
+    toggleRow("emit_ignore", "Emit .ignore files", c.emit_ignore, "exclude extras") +
+    toggleRow("musicbrainz", "MusicBrainz enrichment", c.musicbrainz) +
+    textRow("musicbrainz_contact", "MusicBrainz contact", c.musicbrainz_contact, "you@example.com") +
+    textRow("tmdb_key", "TMDB API key", c.tmdb_key, "for movie/TV lookup") +
+    `<div class="set-actions"><button id="settings-save" class="primary" type="button">Save settings</button>
+      <span class="hint">Written to <code>config.toml</code>. Applies to the next Preview.</span></div>`;
+  $("#settings-save").addEventListener("click", saveSettings);
+}
+
+async function saveSettings() {
+  const body = {};
+  $$("#settings .set-input").forEach((i) => { body[i.dataset.key] = i.value.trim(); });
+  $$("#settings .set-toggle").forEach((i) => { body[i.dataset.key] = i.checked; });
+  const btn = $("#settings-save"); btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const res = await fetch("/api/config", { method: "POST", body: JSON.stringify(body) });
+    if (!res.ok) { toast((await res.text()).trim() || "Save failed"); return; }
+    toast("Settings saved");
+    loadConfig();      // refresh header + form from disk
+    libLoaded = false; // library root may have changed
+  } catch { toast("Save failed"); }
+  finally { btn.disabled = false; btn.textContent = "Save settings"; }
 }
 
 // ── library ────────────────────────────────────────────────────────
@@ -84,6 +114,38 @@ function cardHtml(it) {
   return `<div class="lib-card">${cover}
     <div class="lib-title" title="${esc(it.title)}">${esc(it.title)}</div>${sub}
     <div class="lib-meta">${it.count} file${it.count === 1 ? "" : "s"}</div></div>`;
+}
+
+// ── undo ───────────────────────────────────────────────────────────
+async function loadUndo() {
+  const host = $("#undo");
+  host.innerHTML = `<div class="empty">Loading history…</div>`;
+  try {
+    const d = await (await fetch("/api/undo/list")).json();
+    if (!d.runs || !d.runs.length) { host.innerHTML = `<div class="empty">No undo history yet.<div class="hint">Applied runs show up here.</div></div>`; return; }
+    host.innerHTML = `<div class="undo-list">${d.runs.map(undoRowHtml).join("")}</div>`;
+    $$("#undo button.revert").forEach((b) => b.addEventListener("click", () => revertRun(b.dataset.id)));
+  } catch { host.innerHTML = `<div class="empty">Could not read undo history.</div>`; }
+}
+function undoRowHtml(r) {
+  const when = new Date(r.created * 1000).toLocaleString();
+  const parts = [];
+  if (r.moved) parts.push(`${r.moved} moved`);
+  if (r.trashed) parts.push(`${r.trashed} trashed`);
+  if (r.wrote) parts.push(`${r.wrote} written`);
+  return `<div class="undo-row">
+    <div><div class="undo-when">${esc(when)}</div><div class="undo-sum">${esc(parts.join(" · ") || "no changes")}</div></div>
+    <button class="ghost revert" data-id="${esc(r.id)}" type="button">Revert</button>
+  </div>`;
+}
+async function revertRun(id) {
+  try {
+    const res = await fetch("/api/undo/revert?id=" + encodeURIComponent(id), { method: "POST" });
+    if (!res.ok) { toast("Revert failed"); return; }
+    toast("Reverted");
+    loadUndo();
+    libLoaded = false; // library changed
+  } catch { toast("Revert failed"); }
 }
 
 // ── organize ───────────────────────────────────────────────────────

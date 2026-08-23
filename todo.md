@@ -60,10 +60,19 @@
       Audiobooks) → items with cover + media count; `/api/cover` serves images
       (path-allowlisted to the library root). Library tab: gallery grid of cards
       (cover/title/subtitle/count), lazy covers, Rescan button. app-smoke +3.
-- [ ] Slice 3 — Undo history (list + revert).
-- [ ] Slice 4 — Settings (config editor); + online-enrichment toggle in Organize.
+- [x] Slice 3 — Undo history (done 2026-08-23). `/api/undo/list` enumerates
+      journals (id/created/moved/trashed/wrote, newest first); `/api/undo/revert
+      ?id=` reverts via `apply.undo` then renames the journal `.undone`. Undo tab:
+      row per run (timestamp + summary + Revert). Fixed a server panic on empty
+      POST bodies (consume body before `respond`). app-smoke +3.
+- [x] Slice 4 — Settings editor (done 2026-08-23). GET `/api/config` returns all
+      editable fields; POST merges into `config.toml` preserving comments/custom
+      keys/templates (`config.save`), then reloads `base_cfg` so the next Preview
+      uses it. Settings tab: text inputs + toggles + Save. app-smoke +2.
+      TODO(deferred): online-enrichment toggle in the Organize view (app.zig still
+      passes `Online{}` — offline-only).
 
-## Next: UI slices 2–4 → language/subtitle policy + remux
+## Next: language/subtitle policy + remux
 
 ## Guiding principle: one shared interface, kind-specific only where it must be
 

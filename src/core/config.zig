@@ -3,6 +3,7 @@
 //! `key = value` lines; a missing file yields all defaults.
 
 const std = @import("std");
+const standardize = @import("standardize.zig");
 
 // Jellyfin-style defaults (also parse cleanly in Plex/Kodi):
 //   Shows/Series/Season 01/Series S01E01 - Title.mkv
@@ -204,6 +205,63 @@ fn readFileZ(alloc: std.mem.Allocator, path: []const u8) !?[]u8 {
         try buf.appendSlice(alloc, chunk[0..n]);
     }
     return try buf.toOwnedSlice(alloc);
+}
+
+fn writeFileZ(path: []const u8, bytes: []const u8) !void {
+    var pz: [4096]u8 = undefined;
+    if (path.len >= pz.len) return error.PathTooLong;
+    const path_z = try std.fmt.bufPrintZ(&pz, "{s}", .{path});
+    const fp = std.c.fopen(path_z.ptr, "wb") orelse return error.OpenFailed;
+    defer _ = std.c.fclose(fp);
+    if (bytes.len > 0 and std.c.fwrite(bytes.ptr, 1, bytes.len, fp) != bytes.len) return error.WriteFailed;
+}
+
+/// Merge `updates` (each `[key, value]`) into `config.toml`, preserving all
+/// other lines and comments. Existing keys are rewritten in place; new keys
+/// appended. Creates the file (and its dir) if absent.
+pub fn save(alloc: std.mem.Allocator, env: *std.process.Environ.Map, updates: []const [2][]const u8) !void {
+    const path = try configPath(alloc, env);
+    defer alloc.free(path);
+    if (std.fs.path.dirname(path)) |d| standardize.mkdirParents(d) catch {};
+    const existing = (try readFileZ(alloc, path)) orelse try alloc.dupe(u8, "");
+    defer alloc.free(existing);
+
+    var done = try alloc.alloc(bool, updates.len);
+    defer alloc.free(done);
+    @memset(done, false);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(alloc);
+
+    var it = std.mem.splitScalar(u8, existing, '\n');
+    var first = true;
+    while (it.next()) |line| {
+        if (it.peek() == null and line.len == 0) break; // drop trailing empty from split
+        if (!first) try out.append(alloc, '\n');
+        first = false;
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        var replaced = false;
+        if (trimmed.len > 0 and trimmed[0] != '#') {
+            if (std.mem.indexOfScalar(u8, trimmed, '=')) |eq| {
+                const key = std.mem.trim(u8, trimmed[0..eq], " \t");
+                for (updates, 0..) |u, i| {
+                    if (!done[i] and std.mem.eql(u8, key, u[0])) {
+                        try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} = {s}", .{ u[0], u[1] }));
+                        done[i] = true;
+                        replaced = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!replaced) try out.appendSlice(alloc, line);
+    }
+    for (updates, 0..) |u, i| if (!done[i]) {
+        if (out.items.len > 0) try out.append(alloc, '\n');
+        try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} = {s}", .{ u[0], u[1] }));
+    };
+    try out.append(alloc, '\n');
+    try writeFileZ(path, out.items);
 }
 
 /// Load config from disk (or defaults if absent), with `~` expanded in

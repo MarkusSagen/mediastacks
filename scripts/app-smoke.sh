@@ -42,4 +42,17 @@ chk "library found the series item" 'grep -q "witch hat atelier" <<<"$LIBJSON"'
 # Cover endpoint rejects paths outside the library root.
 chk "cover endpoint blocks traversal" '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/cover?path=/etc/hosts")" == "403" ]]'
 
+# Undo history (slice 3): the apply above wrote a journal → list shows it → revert restores.
+UNDO="$(curl -s "http://127.0.0.1:$PORT/api/undo/list")"
+chk "undo lists the applied run" 'grep -q "\"moved\":2" <<<"$UNDO"'
+RUNID="$(grep -o "\"id\":\"[^\"]*\"" <<<"$UNDO" | head -1 | sed "s/.*:\"//;s/\"//")"
+curl -s -X POST "http://127.0.0.1:$PORT/api/undo/revert?id=$RUNID" >/dev/null
+chk "revert emptied the library" '[[ "$(find "$LIB" -name "*.mkv" | wc -l | tr -d " ")" == 0 ]]'
+chk "revert restored the source" '[[ -f "$SRC/witch.hat.atelier.s01e01.1080p.web.h264-x.mkv" ]]'
+
+# Settings editor (slice 4): POST merges into config.toml + reloads.
+curl -s -X POST "http://127.0.0.1:$PORT/api/config" -d '{"write_tags":true,"musicbrainz":true,"tmdb_key":"KEY123"}' >/dev/null
+chk "settings persisted to config.toml" 'grep -q "write_tags = on" "$XDG_CONFIG_HOME/stacks/config.toml"'
+chk "settings reload reflects POST" 'curl -s "http://127.0.0.1:$PORT/api/config" | grep -q "\"tmdb_key\":\"KEY123\""'
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; [[ "$FAIL" -eq 0 ]]
