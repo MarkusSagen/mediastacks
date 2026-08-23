@@ -49,6 +49,7 @@ pub fn classify(basename: []const u8, is_dir: bool) kind.MediaKind {
     if (extIn(ext, &VIDEO_EXT)) {
         return if (hasSeasonEpisode(stem)) .tv else .movie;
     }
+    if (std.ascii.eqlIgnoreCase(ext, ".m4b")) return .audiobook; // always an audiobook
     if (extIn(ext, &AUDIO_EXT)) return .music;
     if (extIn(ext, &EBOOK_EXT)) return .ebook;
     if (extIn(ext, &COMIC_EXT)) return .comic;
@@ -69,6 +70,7 @@ test "classify detects music from audio extensions" {
     try t.expectEqual(kind.MediaKind.music, classify("03 - Layla.mp3", false));
     try t.expectEqual(kind.MediaKind.music, classify("song.flac", false));
     try t.expectEqual(kind.MediaKind.music, classify("x.m4a", false));
+    try t.expectEqual(kind.MediaKind.audiobook, classify("The Hobbit.m4b", false));
 }
 
 test "classify routes ebook, comic, and pdf" {

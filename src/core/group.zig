@@ -68,6 +68,27 @@ fn musicAlbum(c: *Cand) []const u8 {
     return c.track.?.album orelse "Unknown Album";
 }
 
+/// Conservative audiobook signals — a keyword anywhere in the source path.
+fn pathIsAudiobook(abs: []const u8) bool {
+    var buf: [1024]u8 = undefined;
+    if (abs.len >= buf.len) return false;
+    const lo = std.ascii.lowerString(buf[0..abs.len], abs);
+    const kws = [_][]const u8{ "audiobook", "audio book", "audiobooks", "unabridged", "read by" };
+    for (kws) |k| if (std.mem.indexOf(u8, lo, k) != null) return true;
+    return false;
+}
+
+/// A genre tag that marks spoken-word/audiobook content.
+fn genreIsAudiobook(genre: ?[]const u8) bool {
+    const g = genre orelse return false;
+    var buf: [128]u8 = undefined;
+    if (g.len >= buf.len) return false;
+    const lo = std.ascii.lowerString(buf[0..g.len], g);
+    const kws = [_][]const u8{ "audiobook", "audio book", "spoken", "speech" };
+    for (kws) |k| if (std.mem.indexOf(u8, lo, k) != null) return true;
+    return false;
+}
+
 /// True if any track carries a usable (non-empty, non-mojibake) album tag —
 /// i.e. the album name is tag-authoritative rather than folder-derived.
 fn hadUsableAlbumTag(cands: []const *Cand) bool {
@@ -263,7 +284,7 @@ pub fn buildPlan(
         }
 
         const mk = classify_mod.classify(base, false);
-        if (mk == .music) {
+        if (mk == .music or mk == .audiobook) {
             const c = try arena.create(Cand);
             c.* = .{ .abs = abs, .dir = d, .stem = stem, .size = statSize(io, abs), .mkind = .music };
             c.track = if (inspect) try music.parse(arena, io, abs) else try music.fromTags(arena, .{}, base);
@@ -272,6 +293,9 @@ pub fn buildPlan(
             c.disc = c.track.?.disc orelse sub_disc;
             // A "CD N"/"Disc N" subfolder rolls up to its parent album dir.
             c.album_dir = if (sub_disc != null) (std.fs.path.dirname(d) orelse d) else d;
+            // Conservative audiobook detection: .m4b, an audiobook keyword in the
+            // path, or an audiobook/spoken genre tag. Otherwise it stays music.
+            c.mkind = if (mk == .audiobook or pathIsAudiobook(abs) or genreIsAudiobook(c.track.?.genre)) .audiobook else .music;
             try media.append(arena, c);
         } else if (mk == .tv or mk == .movie) {
             const c = try arena.create(Cand);
@@ -319,6 +343,7 @@ pub fn buildPlan(
             .tv => try std.fmt.allocPrint(arena, "tv|{s}|{d}", .{ try lower(arena, c.ep.?.series), c.ep.?.season }),
             .movie => try std.fmt.allocPrint(arena, "mv|{s}|{?d}", .{ try lower(arena, c.mv.?.title), c.mv.?.year }),
             .music => try std.fmt.allocPrint(arena, "mu|{s}", .{c.album_dir.?}),
+            .audiobook => try std.fmt.allocPrint(arena, "ab|{s}", .{c.album_dir.?}),
             else => unreachable,
         };
 
@@ -328,7 +353,7 @@ pub fn buildPlan(
             const gtitle = switch (c.mkind) {
                 .tv => c.ep.?.series,
                 .movie => c.mv.?.title,
-                .music => musicAlbum(c),
+                .music, .audiobook => musicAlbum(c),
                 else => "",
             };
             const gyear = switch (c.mkind) {
@@ -432,6 +457,48 @@ pub fn buildPlan(
                 } else {
                     try gb.items.append(arena, .{ .src = c.abs, .role = .duplicate, .op = .skip, .dst = null, .reason = "duplicate of primary" });
                 }
+            }
+        } else if (gb.kind == .audiobook) {
+            // One book per source folder. author = consensus album_artist/artist;
+            // book title = album tag, else the folder name. Each file is a chapter
+            // (no best-copy dedup); a single file collapses to "{book}.{ext}".
+            var author: []const u8 = "Unknown Author";
+            for (cands.items) |c| if (c.track.?.album_artist) |aa| {
+                if (aa.len > 0) {
+                    author = aa;
+                    break;
+                }
+            };
+            if (std.mem.eql(u8, author, "Unknown Author")) for (cands.items) |c| {
+                if (c.track.?.artists.len > 0) {
+                    author = c.track.?.artists[0];
+                    break;
+                }
+            };
+            var book: []const u8 = std.fs.path.basename(cands.items[0].album_dir.?);
+            for (cands.items) |c| if (c.track.?.album) |al| {
+                if (al.len > 0) {
+                    book = al;
+                    break;
+                }
+            };
+            gb.title = book;
+            const single = cands.items.len == 1;
+            for (cands.items) |c| {
+                const chapter_title = if (single) book else (c.track.?.title orelse c.stem);
+                const f = plan.Fields{
+                    .album_artist = author,
+                    .album = book,
+                    .title = chapter_title,
+                    .track = if (single) null else c.track.?.track,
+                    .artists = c.track.?.artists,
+                    .ext = c.track.?.ext,
+                };
+                c.fields = f;
+                c.dst = try naming.dstFor(arena, cfg, .audiobook, f);
+                c.primary_dst = c.dst;
+                c.role = .primary;
+                try gb.items.append(arena, .{ .src = c.abs, .role = .primary, .op = .move, .dst = c.dst, .reason = "", .fields = f });
             }
         } else {
             // Music: one album per source folder. Consensus album/artist/year
@@ -552,7 +619,7 @@ pub fn buildPlan(
             const ckey = try std.fmt.allocPrint(arena, "{d}|{s}", .{ c.group_idx, @tagName(cov.kind) });
             const n = img_counts.get(ckey) orelse 0;
             try img_counts.put(ckey, n + 1);
-            const name = if (c.mkind == .music and cov.kind == .poster)
+            const name = if ((c.mkind == .music or c.mkind == .audiobook) and cov.kind == .poster)
                 try std.fmt.allocPrint(arena, "cover.{s}", .{cov.ext})
             else if (n == 0)
                 try extras_mod.imageOutName(arena, cov.kind, cov.ext)
@@ -562,7 +629,7 @@ pub fn buildPlan(
             try gbs.items[c.group_idx].items.append(arena, .{ .src = cov.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = "image" });
             // For a music album cover, stamp its source on the album's primaries
             // so tag write-back can embed it into each track (APIC/PICTURE).
-            if (c.mkind == .music and cov.kind == .poster) {
+            if ((c.mkind == .music or c.mkind == .audiobook) and cov.kind == .poster) {
                 for (gbs.items[c.group_idx].items.items) |*it| {
                     if (it.role == .primary) it.cover_src = cov.abs;
                 }
@@ -702,7 +769,7 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const p = try buildPlan(a, threaded.io(), root, cfg, false, .{}); // no probe
 
     var music_groups: usize = 0;
@@ -725,6 +792,53 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
     rmdirAt("{s}", .{root});
 }
 
+test "buildPlan routes audiobooks to Audiobooks root (no-probe)" {
+    var arena_state = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const pid = std.c.getpid();
+    var rb: [256]u8 = undefined;
+    // Path contains "Audiobooks" → keyword detection routes the mp3 chapters.
+    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-ab-{d}/Audiobooks", .{pid});
+    mkdirAt("/tmp/stacks-ab-{d}", .{pid});
+    mkdirAt("{s}", .{root});
+    mkdirAt("{s}/1984", .{root});
+    try writeFileAt("{s}/1984/01.mp3", .{root}, "aaa");
+    try writeFileAt("{s}/1984/02.mp3", .{root}, "bbb");
+    try writeFileAt("{s}/The Hobbit.m4b", .{root}, "cccc"); // .m4b → audiobook by ext
+
+    var threaded = std.Io.Threaded.init(t.allocator, .{});
+    defer threaded.deinit();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
+    const p = try buildPlan(a, threaded.io(), root, cfg, false, .{});
+
+    var ab_groups: usize = 0;
+    var music_groups: usize = 0;
+    var under_audiobooks = false;
+    var m4b_ok = false;
+    for (p.groups) |g| {
+        if (g.kind == .audiobook) ab_groups += 1;
+        if (g.kind == .music) music_groups += 1;
+        for (g.items) |it| {
+            const dv = it.dst orelse continue;
+            if (std.mem.indexOf(u8, dv, "/Audiobooks/") != null) under_audiobooks = true;
+            if (std.mem.endsWith(u8, dv, ".m4b")) m4b_ok = true;
+        }
+    }
+    try t.expectEqual(@as(usize, 0), music_groups); // nothing misfiled as music
+    try t.expect(ab_groups >= 1);
+    try t.expect(under_audiobooks);
+    try t.expect(m4b_ok);
+
+    unlinkAt("{s}/1984/01.mp3", .{root});
+    unlinkAt("{s}/1984/02.mp3", .{root});
+    unlinkAt("{s}/The Hobbit.m4b", .{root});
+    rmdirAt("{s}/1984", .{root});
+    rmdirAt("{s}", .{root});
+    rmdirAt("/tmp/stacks-ab-{d}", .{pid});
+}
+
 test "buildPlan routes extras to Jellyfin subfolders (no-probe)" {
     var arena_state = std.heap.ArenaAllocator.init(t.allocator);
     defer arena_state.deinit();
@@ -741,7 +855,7 @@ test "buildPlan routes extras to Jellyfin subfolders (no-probe)" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const p = try buildPlan(a, threaded.io(), root, cfg, false, .{});
 
     var trailer = false;
@@ -780,7 +894,7 @@ test "buildPlan places Jellyfin images by canonical name (no-probe)" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const p = try buildPlan(a, threaded.io(), root, cfg, false, .{});
 
     var poster = false;
@@ -815,7 +929,7 @@ test "buildPlan rolls CD subfolders into one multi-disc album (no-probe)" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const p = try buildPlan(a, threaded.io(), root, cfg, false, .{}); // no probe: disc comes from folder names
 
     var music_groups: usize = 0;
@@ -861,7 +975,7 @@ test "buildPlan flags a DRM video and skips probing" {
 
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const p = try buildPlan(a, threaded.io(), root, cfg, true, .{}); // probe_enabled
 
     var warned = false;
@@ -910,6 +1024,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
         .tv_template = config.DEFAULT_TV,
         .movie_template = config.DEFAULT_MOVIE,
         .music_template = config.DEFAULT_MUSIC,
+        .audiobook_template = config.DEFAULT_AUDIOBOOK,
     };
     const p = try buildPlan(a, io, root, cfg, false, .{}); // probe off: deterministic, no ffprobe dep
 

@@ -14,12 +14,14 @@ pub const DEFAULT_ROOT = "~/Media";
 pub const DEFAULT_TV = "Shows/{series} ({series_year}) [{id}]/Season {season:02}/{series} S{season:02}E{episode:02} - {title}.{ext}";
 pub const DEFAULT_MOVIE = "Movies/{title} ({year}) [{id}]/{title} ({year}) [{id}].{ext}";
 pub const DEFAULT_MUSIC = "Music/{album_artist}/{album} ({year})/{track:02} - {title}.{ext}";
+pub const DEFAULT_AUDIOBOOK = "Audiobooks/{author_sort}/{album}/{track:02} - {title}.{ext}";
 
 pub const Config = struct {
     library_root: []const u8,
     tv_template: []const u8,
     movie_template: []const u8,
     music_template: []const u8,
+    audiobook_template: []const u8,
     musicbrainz_enabled: bool = false,
     musicbrainz_contact: ?[]const u8 = null,
     write_tags: bool = false,
@@ -34,25 +36,28 @@ pub fn freeConfig(alloc: std.mem.Allocator, cfg: Config) void {
     alloc.free(cfg.tv_template);
     alloc.free(cfg.movie_template);
     alloc.free(cfg.music_template);
+    alloc.free(cfg.audiobook_template);
     if (cfg.musicbrainz_contact) |c| alloc.free(c);
     if (cfg.tmdb_key) |k| alloc.free(k);
 }
 
-const Preset = struct { tv: []const u8, movie: []const u8, music: []const u8 };
+const Preset = struct { tv: []const u8, movie: []const u8, music: []const u8, audiobook: []const u8 };
 
 /// Built-in naming presets. jellyfin is the default. (All presets share the
-/// same music layout for now.)
+/// same music/audiobook layout for now.)
 fn presetByName(name: []const u8) ?Preset {
-    if (std.mem.eql(u8, name, "jellyfin")) return .{ .tv = DEFAULT_TV, .movie = DEFAULT_MOVIE, .music = DEFAULT_MUSIC };
+    if (std.mem.eql(u8, name, "jellyfin")) return .{ .tv = DEFAULT_TV, .movie = DEFAULT_MOVIE, .music = DEFAULT_MUSIC, .audiobook = DEFAULT_AUDIOBOOK };
     if (std.mem.eql(u8, name, "plex")) return .{
         .tv = "TV Shows/{series}/Season {season:02}/{series} - S{season:02}E{episode:02} - {title}.{ext}",
         .movie = DEFAULT_MOVIE,
         .music = DEFAULT_MUSIC,
+        .audiobook = DEFAULT_AUDIOBOOK,
     };
     if (std.mem.eql(u8, name, "kodi")) return .{
         .tv = "TV Shows/{series}/Season {season:02}/{series} S{season:02}E{episode:02} - {title}.{ext}",
         .movie = DEFAULT_MOVIE,
         .music = DEFAULT_MUSIC,
+        .audiobook = DEFAULT_AUDIOBOOK,
     };
     return null;
 }
@@ -78,6 +83,8 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
     var movie_template: ?[]const u8 = null;
     var music_preset: ?[]const u8 = null;
     var music_template: ?[]const u8 = null;
+    var audiobook_preset: ?[]const u8 = null;
+    var audiobook_template: ?[]const u8 = null;
     var musicbrainz: ?[]const u8 = null;
     var musicbrainz_contact: ?[]const u8 = null;
     var write_tags: ?[]const u8 = null;
@@ -103,6 +110,8 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
         else if (std.mem.eql(u8, key, "movie_template")) movie_template = val
         else if (std.mem.eql(u8, key, "music_preset")) music_preset = val
         else if (std.mem.eql(u8, key, "music_template")) music_template = val
+        else if (std.mem.eql(u8, key, "audiobook_preset")) audiobook_preset = val
+        else if (std.mem.eql(u8, key, "audiobook_template")) audiobook_template = val
         else if (std.mem.eql(u8, key, "musicbrainz")) musicbrainz = val
         else if (std.mem.eql(u8, key, "musicbrainz_contact")) musicbrainz_contact = val
         else if (std.mem.eql(u8, key, "write_tags")) write_tags = val
@@ -122,6 +131,7 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
     const tv = try resolve("tv", tv_template, tv_preset, preset);
     const movie = try resolve("movie", movie_template, movie_preset, preset);
     const music = try resolve("music", music_template, music_preset, preset);
+    const audiobook = try resolve("audiobook", audiobook_template, audiobook_preset, preset);
     const root = library_root orelse DEFAULT_ROOT;
 
     const lr = try alloc.dupe(u8, root);
@@ -132,12 +142,15 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
     errdefer alloc.free(mt);
     const mu = try alloc.dupe(u8, music);
     errdefer alloc.free(mu);
+    const ab = try alloc.dupe(u8, audiobook);
+    errdefer alloc.free(ab);
     const mb_contact = if (musicbrainz_contact) |v| try alloc.dupe(u8, v) else null;
     return .{
         .library_root = lr,
         .tv_template = tt,
         .movie_template = mt,
         .music_template = mu,
+        .audiobook_template = ab,
         .musicbrainz_enabled = boolOn(musicbrainz),
         .musicbrainz_contact = mb_contact,
         .write_tags = boolOn(write_tags),

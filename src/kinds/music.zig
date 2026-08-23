@@ -16,6 +16,7 @@ pub const Tags = struct {
     track: ?[]const u8 = null,
     disc: ?[]const u8 = null,
     date: ?[]const u8 = null,
+    genre: ?[]const u8 = null,
 };
 
 pub const Track = struct {
@@ -26,6 +27,7 @@ pub const Track = struct {
     track: ?u32 = null,
     disc: ?u32 = null,
     year: ?u32 = null,
+    genre: ?[]const u8 = null,
     ext: []const u8,
 };
 
@@ -117,6 +119,7 @@ pub fn fromTags(alloc: std.mem.Allocator, tags: Tags, basename: []const u8) !Tra
         .album = if (tags.album) |x| try textnorm.clean(alloc, try toUtf8(alloc, x)) else null,
         .track = if (tags.track) |x| firstInt(x) else null,
         .disc = if (tags.disc) |x| firstInt(x) else null,
+        .genre = if (tags.genre) |x| try alloc.dupe(u8, x) else null,
         .year = blk: {
             const v = if (tags.date) |x| firstInt(x) else null;
             break :blk if (v) |n| (if (n == 0) null else n) else null;
@@ -163,6 +166,7 @@ pub fn parse(alloc: std.mem.Allocator, io: std.Io, path: []const u8) !Track {
         .track = tagStr(tagsv, "track"),
         .disc = tagStr(tagsv, "disc") orelse tagStr(tagsv, "discnumber"),
         .date = tagStr(tagsv, "date"),
+        .genre = tagStr(tagsv, "genre"),
     };
     return fromTags(alloc, tags, base); // tags slices live in the arena; fromTags dupes into alloc
 }

@@ -34,6 +34,19 @@ fn idToken(arena: std.mem.Allocator, cfg: config.Config, f: plan.Fields) ![]cons
     return "";
 }
 
+/// "George Orwell" → "Orwell, George"; "J.R.R. Tolkien" → "Tolkien, J.R.R.";
+/// a single token or an already-"Last, First" value is kept as-is.
+fn authorSort(arena: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const n = std.mem.trim(u8, name, " \t");
+    if (n.len == 0) return "Unknown Author";
+    if (std.mem.indexOfScalar(u8, n, ',') != null) return arena.dupe(u8, n);
+    const sp = std.mem.lastIndexOfScalar(u8, n, ' ') orelse return arena.dupe(u8, n);
+    const surname = std.mem.trim(u8, n[sp + 1 ..], " \t");
+    const given = std.mem.trim(u8, n[0..sp], " \t");
+    if (surname.len == 0 or given.len == 0) return arena.dupe(u8, n);
+    return std.fmt.allocPrint(arena, "{s}, {s}", .{ surname, given });
+}
+
 /// Render the library-relative + rooted destination for `f` under `k`'s
 /// template. Owned by `arena`.
 pub fn dstFor(arena: std.mem.Allocator, cfg: config.Config, k: kind.MediaKind, f: plan.Fields) ![]u8 {
@@ -81,6 +94,17 @@ pub fn dstFor(arena: std.mem.Allocator, cfg: config.Config, k: kind.MediaKind, f
             }
             break :blk base_rel;
         },
+        .audiobook => blk: {
+            const fields = [_]template.Field{
+                .{ .name = "author_sort", .value = try authorSort(arena, f.album_artist orelse "") },
+                .{ .name = "author", .value = f.album_artist orelse "" },
+                .{ .name = "album", .value = f.album orelse "" },
+                .{ .name = "track", .value = if (f.track) |tr| try u32str(arena, tr) else "" },
+                .{ .name = "title", .value = f.title orelse "" },
+                .{ .name = "ext", .value = f.ext orelse "" },
+            };
+            break :blk try template.renderFields(arena, cfg.audiobook_template, &fields);
+        },
         else => return error.UnsupportedKind,
     };
     return std.fs.path.join(arena, &.{ cfg.library_root, rel });
@@ -92,7 +116,7 @@ test "dstFor renders a jellyfin tv path" {
     var arena_state = std.heap.ArenaAllocator.init(t.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const out = try dstFor(a, cfg, .tv, .{ .series = "Witch Hat Atelier", .season = 1, .episode = 12, .title = "The Shadow of Romonon", .ext = "mkv" });
     try t.expectEqualStrings("/lib/Shows/Witch Hat Atelier/Season 01/Witch Hat Atelier S01E12 - The Shadow of Romonon.mkv", out);
 }
@@ -101,7 +125,7 @@ test "dstFor renders a music path" {
     var arena_state = std.heap.ArenaAllocator.init(t.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const out = try dstFor(a, cfg, .music, .{ .album_artist = "Eric Clapton", .album = "Best of Blues", .year = 1998, .track = 3, .title = "Layla", .ext = "mp3" });
     try t.expectEqualStrings("/lib/Music/Eric Clapton/Best of Blues (1998)/03 - Layla.mp3", out);
 }
@@ -110,16 +134,29 @@ test "dstFor renders a multi-disc music path" {
     var arena_state = std.heap.ArenaAllocator.init(t.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const out = try dstFor(a, cfg, .music, .{ .album_artist = "Various Artists", .album = "Night of the Kings", .year = 1992, .disc = 2, .track = 3, .title = "Layla", .ext = "flac" });
     try t.expectEqualStrings("/lib/Music/Various Artists/Night of the Kings (1992)/CD2/03 - Layla.flac", out);
+}
+
+test "dstFor renders audiobook paths (author-sort; single-file collapses)" {
+    var a_s = std.heap.ArenaAllocator.init(t.allocator);
+    defer a_s.deinit();
+    const a = a_s.allocator();
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
+    // chaptered
+    const ch = try dstFor(a, cfg, .audiobook, .{ .album_artist = "George Orwell", .album = "1984", .track = 3, .title = "Chapter Three", .ext = "mp3" });
+    try t.expectEqualStrings("/lib/Audiobooks/Orwell, George/1984/03 - Chapter Three.mp3", ch);
+    // single .m4b (no track; title == book) collapses the "NN - " prefix
+    const one = try dstFor(a, cfg, .audiobook, .{ .album_artist = "George Orwell", .album = "1984", .title = "1984", .ext = "m4b" });
+    try t.expectEqualStrings("/lib/Audiobooks/Orwell, George/1984/1984.m4b", one);
 }
 
 test "dstFor renders a movie path" {
     var arena_state = std.heap.ArenaAllocator.init(t.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const out = try dstFor(a, cfg, .movie, .{ .title = "The Matrix", .year = 1999, .ext = "mkv" });
     try t.expectEqualStrings("/lib/Movies/The Matrix (1999)/The Matrix (1999).mkv", out);
 }
@@ -128,7 +165,7 @@ test "dstFor movie with tmdb id in folder and file" {
     var a_s = std.heap.ArenaAllocator.init(t.allocator);
     defer a_s.deinit();
     const a = a_s.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const out = try dstFor(a, cfg, .movie, .{ .title = "The Matrix", .year = 1999, .ext = "mkv", .tmdb_id = "603", .imdb_id = "tt0133093" });
     try t.expectEqualStrings("/lib/Movies/The Matrix (1999) [tmdbid-603]/The Matrix (1999) [tmdbid-603].mkv", out);
 }
@@ -137,7 +174,7 @@ test "dstFor tv with series year + id on series folder" {
     var a_s = std.heap.ArenaAllocator.init(t.allocator);
     defer a_s.deinit();
     const a = a_s.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const out = try dstFor(a, cfg, .tv, .{ .series = "Severance", .season = 1, .episode = 1, .title = "Good News About Hell", .ext = "mkv", .series_year = 2022, .tmdb_id = "95396" });
     try t.expectEqualStrings("/lib/Shows/Severance (2022) [tmdbid-95396]/Season 01/Severance S01E01 - Good News About Hell.mkv", out);
 }
@@ -146,7 +183,7 @@ test "dstFor movie with edition and part labels" {
     var a_s = std.heap.ArenaAllocator.init(t.allocator);
     defer a_s.deinit();
     const a = a_s.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK };
     const ed = try dstFor(a, cfg, .movie, .{ .title = "Film", .year = 1999, .ext = "mkv", .edition = "1080p" });
     try t.expectEqualStrings("/lib/Movies/Film (1999)/Film (1999) - 1080p.mkv", ed);
     const pt = try dstFor(a, cfg, .movie, .{ .title = "Film", .year = 1999, .ext = "mkv", .part = 2 });
@@ -157,7 +194,7 @@ test "dstFor id_suffix off drops the id" {
     var a_s = std.heap.ArenaAllocator.init(t.allocator);
     defer a_s.deinit();
     const a = a_s.allocator();
-    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .id_suffix = false };
+    const cfg = config.Config{ .library_root = "/lib", .tv_template = config.DEFAULT_TV, .movie_template = config.DEFAULT_MOVIE, .music_template = config.DEFAULT_MUSIC, .audiobook_template = config.DEFAULT_AUDIOBOOK, .id_suffix = false };
     const out = try dstFor(a, cfg, .movie, .{ .title = "The Matrix", .year = 1999, .ext = "mkv", .tmdb_id = "603" });
     try t.expectEqualStrings("/lib/Movies/The Matrix (1999)/The Matrix (1999).mkv", out);
 }
