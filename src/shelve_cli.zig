@@ -7,6 +7,7 @@ const cli = @import("cli.zig");
 const organize_cmd = @import("commands/organize.zig");
 const undo_cmd = @import("commands/undo.zig");
 const review_cmd = @import("commands/review.zig");
+const makem4b_cmd = @import("commands/makem4b.zig");
 
 pub fn run(ctx: cli.Context) !u8 {
     if (ctx.args.len < 2) {
@@ -27,6 +28,7 @@ pub fn run(ctx: cli.Context) !u8 {
     }
     if (eq(cmd, "organize")) return organize_cmd.run(ctx, rest);
     if (eq(cmd, "review")) return review_cmd.run(ctx, rest);
+    if (eq(cmd, "makem4b")) return makem4b_cmd.run(ctx, rest);
     if (eq(cmd, "undo")) return undo_cmd.run(ctx, rest);
 
     try ctx.stderr.print("unknown command: {s}\n", .{cmd});
@@ -53,6 +55,10 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\    --plan FILE            Also write the plan as JSON
         \\    --from FILE            Use a plan JSON instead of scanning DIR
         \\  review DIR [flags]     Review & edit the plan in a browser, then apply
+        \\  makem4b DIR [flags]    Merge a folder of chapter files into one .m4b
+        \\    --to LIB               Override the library root
+        \\    --out FILE.m4b         Write to an explicit path instead
+        \\    --bitrate B            AAC bitrate (default 128k)
         \\  undo                   Reverse the most recent organize
         \\  help                   Show this help
         \\  version                Print version

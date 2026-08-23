@@ -224,6 +224,16 @@ tag-smoke: build
 nfo-smoke: build
     ./scripts/nfo-smoke.sh
 
+# makem4b smoke: merge chapter mp3s → one chaptered .m4b; undo removes it.
+m4b-smoke: build
+    ./scripts/m4b-smoke.sh
+
+# Merge a folder of chapter files into one chaptered .m4b audiobook.
+# e.g. `just makem4b ~/Downloads/Orwell/1984 --to ~/Media`
+makem4b DIR="" *FLAGS="": build
+    @if [ -z "{{DIR}}" ]; then echo "usage: just makem4b DIR [--to LIB] [--out FILE.m4b] [--bitrate 128k]"; exit 1; fi
+    ./zig-out/bin/shelve makem4b "{{DIR}}" {{FLAGS}}
+
 # Print where shelve keeps organizer state (config + undo journals).
 shelve-info:
     @echo "config:  ${XDG_CONFIG_HOME:-$HOME/.config}/stacks/config.toml"; \
