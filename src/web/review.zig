@@ -133,7 +133,7 @@ fn handle(io: std.Io, session: *Session, env: *std.process.Environ.Map, request:
 }
 
 /// Poster frame via ffmpeg. `src` must be a path present in the plan.
-fn handleThumb(io: std.Io, session: *Session, request: *std.http.Server.Request, target: []const u8) !void {
+pub fn handleThumb(io: std.Io, session: *Session, request: *std.http.Server.Request, target: []const u8) !void {
     const q = std.mem.indexOfScalar(u8, target, '?') orelse return request.respond("", .{ .status = .not_found });
     const query = target[q + 1 ..];
     const src_enc = valueOf(query, "src") orelse return request.respond("", .{ .status = .not_found });

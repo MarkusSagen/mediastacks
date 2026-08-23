@@ -192,6 +192,14 @@ review DIR="" *FLAGS="": build
     @if [ -z "{{DIR}}" ]; then echo "usage: just review DIR [--to LIB] [--port N] [--no-probe] [--offline]"; exit 1; fi
     ./zig-out/bin/shelve review "{{DIR}}" {{FLAGS}}
 
+# Start the shelve organizer web app (Library / Organize / Undo / Settings).
+shelve-serve PORT="8799" *FLAGS="": build
+    ./zig-out/bin/shelve serve --port {{PORT}} {{FLAGS}}
+
+# Headless smoke for the web app (serve → organize → apply over HTTP).
+app-smoke: build
+    ./scripts/app-smoke.sh
+
 # Reverse the most recent `just organize` (from its undo journal).
 undo: build
     ./zig-out/bin/shelve undo

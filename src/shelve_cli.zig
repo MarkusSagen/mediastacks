@@ -8,6 +8,7 @@ const organize_cmd = @import("commands/organize.zig");
 const undo_cmd = @import("commands/undo.zig");
 const review_cmd = @import("commands/review.zig");
 const makem4b_cmd = @import("commands/makem4b.zig");
+const webapp_cmd = @import("commands/webapp.zig");
 
 pub fn run(ctx: cli.Context) !u8 {
     if (ctx.args.len < 2) {
@@ -28,6 +29,7 @@ pub fn run(ctx: cli.Context) !u8 {
     }
     if (eq(cmd, "organize")) return organize_cmd.run(ctx, rest);
     if (eq(cmd, "review")) return review_cmd.run(ctx, rest);
+    if (eq(cmd, "serve")) return webapp_cmd.run(ctx, rest);
     if (eq(cmd, "makem4b")) return makem4b_cmd.run(ctx, rest);
     if (eq(cmd, "undo")) return undo_cmd.run(ctx, rest);
 
@@ -54,6 +56,7 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\    --on-conflict WHICH    skip (default) | suffix | overwrite
         \\    --plan FILE            Also write the plan as JSON
         \\    --from FILE            Use a plan JSON instead of scanning DIR
+        \\  serve [--port N]       Start the organizer web app (Library / Organize / Undo / Settings)
         \\  review DIR [flags]     Review & edit the plan in a browser, then apply
         \\  makem4b DIR [flags]    Merge a folder of chapter files into one .m4b
         \\    --to LIB               Override the library root

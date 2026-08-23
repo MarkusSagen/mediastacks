@@ -46,7 +46,20 @@
       (`.tagwrite`) so `shelve undo` restores the pre-embed archive. cbr/cb7
       skipped (can't rewrite without external tools). `comicinfo-smoke.sh`.
 
-## Next (user-sequenced): UI → language/subtitle policy + remux
+## Web UI — shelve app (biblio-styled, separate app)
+
+- [x] **Slice 1 — shell + Organize** (done 2026-08-23). `shelve serve` →
+      `web/app.zig` server + `web/assets/shelve.{html,js,css}` (biblio design
+      tokens: warm-paper default + graphite toggle, Inter/JetBrains-Mono, tabs,
+      cards, kind badges). Organize view: enter a folder → `/api/organize` builds
+      the Plan → grouped-by-kind cards w/ covers/thumbs + keep/skip/trash +
+      inline retitle (reuses `/api/edit`,`/api/apply`,`/api/thumb`) → Apply with
+      write-tags/nfo toggles. `scripts/app-smoke.sh` (7 checks, headless HTTP).
+- [ ] Slice 2 — Library browse by kind (scan library_root).
+- [ ] Slice 3 — Undo history (list + revert).
+- [ ] Slice 4 — Settings (config editor); + online-enrichment toggle in Organize.
+
+## Next: UI slices 2–4 → language/subtitle policy + remux
 
 ## Guiding principle: one shared interface, kind-specific only where it must be
 

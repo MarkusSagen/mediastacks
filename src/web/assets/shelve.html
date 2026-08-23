@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>shelve</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/shelve.css">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+</head>
+<body>
+  <header>
+    <div class="brand">shelve</div>
+    <nav class="tabs">
+      <button class="tab active" data-view="organize">Organize</button>
+      <button class="tab" data-view="library">Library</button>
+      <button class="tab" data-view="undo">Undo</button>
+      <button class="tab" data-view="settings">Settings</button>
+    </nav>
+    <div class="header-spacer"></div>
+    <div class="stats" id="stats"></div>
+    <button id="theme-toggle" class="ghost" type="button" title="Toggle theme">◐</button>
+  </header>
+
+  <div id="toast" hidden></div>
+
+  <main id="main">
+    <!-- ORGANIZE -->
+    <section class="view active" data-view="organize">
+      <div class="organize-bar">
+        <input id="dir" type="text" placeholder="Folder to organize —  e.g. ~/Downloads/Witch Hat Atelier" autocomplete="off" spellcheck="false">
+        <input id="to" type="text" class="to" placeholder="Library root (optional, overrides config)" autocomplete="off" spellcheck="false">
+        <label class="opt"><input type="checkbox" id="opt-no-probe"> no probe</label>
+        <button id="preview-btn" class="primary" type="button">Preview</button>
+      </div>
+      <div id="organize-empty" class="empty">
+        Enter a folder and press <b>Preview</b> to see the plan.
+        <div class="hint">Nothing is moved until you click Apply.</div>
+      </div>
+      <div id="plan" class="plan"></div>
+    </section>
+
+    <!-- LIBRARY (slice 2) -->
+    <section class="view" data-view="library">
+      <div class="empty">Library browser — coming next.</div>
+    </section>
+
+    <!-- UNDO (slice 3) -->
+    <section class="view" data-view="undo">
+      <div class="empty">Undo history — coming next.</div>
+    </section>
+
+    <!-- SETTINGS (slice 4) -->
+    <section class="view" data-view="settings">
+      <div id="settings" class="settings"></div>
+    </section>
+  </main>
+
+  <!-- Apply bar (organize) -->
+  <div id="apply-bar" hidden>
+    <span id="apply-summary" class="apply-summary"></span>
+    <label class="opt"><input type="checkbox" id="opt-write-tags"> write tags + cover</label>
+    <label class="opt"><input type="checkbox" id="opt-write-nfo" checked> write NFO</label>
+    <button id="apply-btn" class="primary" type="button">Apply</button>
+  </div>
+
+  <script src="/shelve.js"></script>
+</body>
+</html>
