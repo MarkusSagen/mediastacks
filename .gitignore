@@ -23,3 +23,6 @@ tests/fixtures/output/
 # OS
 .DS_Store
 .completions/
+
+# Design/process docs (specs, plans, brainstorming) — local only, never committed.
+docs/superpowers/
