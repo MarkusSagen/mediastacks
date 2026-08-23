@@ -11,6 +11,7 @@ const music_tags = @import("../kinds/music_tags.zig");
 const nfo = @import("nfo.zig");
 const mkind = @import("kind.zig");
 const music = @import("../kinds/music.zig");
+const comic = @import("../kinds/comic.zig");
 
 pub const OnConflict = enum { skip, suffix, overwrite };
 
@@ -118,11 +119,12 @@ pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConf
                     try entries.append(alloc, .{ .action = .move, .from = try alloc.dupe(u8, item.src), .to = final });
                     moved += 1;
 
-                    if (tag_opts.write and g.kind == .music and item.role == .primary) {
+                    if (tag_opts.write and (g.kind == .music or g.kind == .audiobook) and item.role == .primary) {
                         try maybeWriteTags(alloc, &entries, tag_opts.backup_dir, final, item, created);
                     }
                     if (write_nfo and item.role == .primary) {
                         try writeNfos(alloc, &entries, &nfo_seen, on_conflict, g.kind, item, final);
+                        if (g.kind == .comic) try maybeWriteComicInfo(alloc, &entries, tag_opts.backup_dir, final, item, created);
                     }
                 },
                 .trash => {
@@ -229,8 +231,8 @@ fn touchEmpty(path: []const u8) bool {
 /// Apply `p` and persist the journal under the env's XDG data dir.
 pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, env: *std.process.Environ.Map, tag_opts: TagOpts, emit_ignore: bool, write_nfo: bool) !Result {
     var opts = tag_opts;
-    if (opts.write and opts.backup_dir == null) {
-        // Backups live beside the undo journals.
+    if ((opts.write or write_nfo) and opts.backup_dir == null) {
+        // Backups (tag write-back + ComicInfo embed) live beside the journals.
         const d = try journal.dir(alloc, env); // $XDG_DATA_HOME/stacks/undo
         defer alloc.free(d);
         const parent = std.fs.path.dirname(d) orelse d; // $XDG_DATA_HOME/stacks
@@ -255,6 +257,31 @@ fn tagSetFromFields(f: plan.Fields) music_tags.TagSet {
     };
 }
 
+/// Copy `target` into the backup dir; returns the backup path (owned) or null
+/// on any failure — callers must not mutate the file without a backup.
+fn backupCopy(alloc: std.mem.Allocator, backup_dir: ?[]const u8, target: []const u8, created: i64) ?[]const u8 {
+    const bdir = backup_dir orelse return null;
+    const base = std.fs.path.basename(target);
+    const backup = std.fmt.allocPrint(alloc, "{s}/{d}/{s}", .{ bdir, created, base }) catch return null;
+    if (std.fs.path.dirname(backup)) |bp| standardize.mkdirParents(bp) catch return null;
+    var fz: [4096]u8 = undefined;
+    var bz: [4096]u8 = undefined;
+    if (target.len >= fz.len or backup.len >= bz.len) return null;
+    const fzp = std.fmt.bufPrintZ(&fz, "{s}", .{target}) catch return null;
+    const bzp = std.fmt.bufPrintZ(&bz, "{s}", .{backup}) catch return null;
+    standardize.copyAcrossDevices(fzp, bzp) catch return null;
+    return backup;
+}
+
+/// Embed a fresh ComicInfo.xml into a .cbz (backup + journaled `.tagwrite`).
+fn maybeWriteComicInfo(alloc: std.mem.Allocator, entries: *std.ArrayList(journal.Entry), backup_dir: ?[]const u8, target: []const u8, item: plan.Item, created: i64) !void {
+    const f = item.fields orelse return;
+    if (!std.ascii.eqlIgnoreCase(std.fs.path.extension(target), ".cbz")) return; // cbz only
+    const backup = backupCopy(alloc, backup_dir, target, created) orelse return;
+    comic.writeComicInfo(alloc, target, f.series orelse "", f.issue, f.volume, f.year) catch return;
+    try entries.append(alloc, .{ .action = .tagwrite, .from = try alloc.dupe(u8, target), .to = backup });
+}
+
 /// Back up `target` then write tags into it, journaling a `.tagwrite` entry
 /// (from=target, to=backup). Skips silently (no mutation) on any
 /// unsupported/failed step — never writes without a restorable backup.
@@ -270,17 +297,7 @@ fn maybeWriteTags(
     const ext = std.fs.path.extension(target);
     if (!std.ascii.eqlIgnoreCase(ext, ".flac") and !std.ascii.eqlIgnoreCase(ext, ".mp3")) return;
 
-    const bdir = backup_dir orelse return;
-    const base = std.fs.path.basename(target);
-    const backup = try std.fmt.allocPrint(alloc, "{s}/{d}/{s}", .{ bdir, created, base });
-    if (std.fs.path.dirname(backup)) |bp| standardize.mkdirParents(bp) catch return;
-
-    var fz: [4096]u8 = undefined;
-    var bz: [4096]u8 = undefined;
-    if (target.len >= fz.len or backup.len >= bz.len) return;
-    const fzp = std.fmt.bufPrintZ(&fz, "{s}", .{target}) catch return;
-    const bzp = std.fmt.bufPrintZ(&bz, "{s}", .{backup}) catch return;
-    standardize.copyAcrossDevices(fzp, bzp) catch return; // no backup → no write
+    const backup = backupCopy(alloc, backup_dir, target, created) orelse return;
 
     var ts = tagSetFromFields(fields);
     // Embed the album cover so file-based players (Apple Music, Sonos, …) show

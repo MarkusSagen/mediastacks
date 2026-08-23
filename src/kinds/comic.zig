@@ -5,6 +5,7 @@
 const std = @import("std");
 const kind = @import("../core/kind.zig");
 const textnorm = @import("../core/textnorm.zig");
+const zip = @import("../ffi/miniz.zig");
 
 pub const Comic = struct {
     series: []const u8,
@@ -123,7 +124,101 @@ fn joinTokens(alloc: std.mem.Allocator, toks: []const []const u8) ![]u8 {
     return out.toOwnedSlice(alloc);
 }
 
+// ---- ComicInfo.xml (ComicRack standard; read by Komga/Kavita/Jellyfin) ----
+
+fn xmlEsc(alloc: std.mem.Allocator, s: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (s) |c| switch (c) {
+        '&' => try out.appendSlice(alloc, "&amp;"),
+        '<' => try out.appendSlice(alloc, "&lt;"),
+        '>' => try out.appendSlice(alloc, "&gt;"),
+        '"' => try out.appendSlice(alloc, "&quot;"),
+        else => try out.append(alloc, c),
+    };
+    return out.toOwnedSlice(alloc);
+}
+
+/// Build a ComicInfo.xml document. Owned by `alloc`.
+pub fn buildComicInfo(alloc: std.mem.Allocator, series: []const u8, issue: ?f32, volume: ?u32, year: ?u32) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(alloc, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ComicInfo>\n");
+    if (series.len > 0) {
+        const e = try xmlEsc(alloc, series);
+        try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "  <Series>{s}</Series>\n", .{e}));
+    }
+    if (issue) |iss| {
+        if (@floor(iss) == iss) {
+            try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "  <Number>{d}</Number>\n", .{@as(u32, @intFromFloat(iss))}));
+        } else {
+            try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "  <Number>{d}</Number>\n", .{iss}));
+        }
+    }
+    if (volume) |v| try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "  <Volume>{d}</Volume>\n", .{v}));
+    if (year) |y| try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "  <Year>{d}</Year>\n", .{y}));
+    try out.appendSlice(alloc, "</ComicInfo>\n");
+    return out.toOwnedSlice(alloc);
+}
+
+const NameList = struct { alloc: std.mem.Allocator, names: *std.ArrayList([]const u8) };
+fn collectName(ctx: NameList, idx: u32, name: []const u8, size: u64) anyerror!void {
+    _ = idx;
+    _ = size;
+    if (std.mem.endsWith(u8, name, "/")) return; // skip directory entries
+    try ctx.names.append(ctx.alloc, try ctx.alloc.dupe(u8, name));
+}
+
+pub const WriteError = error{ OpenFailed, WriteFailed, OutOfMemory };
+
+/// Repack the cbz at `path` with a fresh `ComicInfo.xml` (replacing any
+/// existing one). Writes a temp archive then atomically renames. cbz only.
+pub fn writeComicInfo(alloc: std.mem.Allocator, path: []const u8, series: []const u8, issue: ?f32, volume: ?u32, year: ?u32) WriteError!void {
+    const xml = buildComicInfo(alloc, series, issue, volume, year) catch return WriteError.OutOfMemory;
+
+    var reader: zip.ZipReader = .{};
+    reader.open(path) catch return WriteError.OpenFailed;
+    defer reader.close();
+
+    var names: std.ArrayList([]const u8) = .empty;
+    reader.forEachMember(NameList{ .alloc = alloc, .names = &names }, collectName) catch return WriteError.OpenFailed;
+
+    const tmp = std.fmt.allocPrint(alloc, "{s}.tmp", .{path}) catch return WriteError.OutOfMemory;
+    var writer: zip.ZipWriter = .{};
+    writer.create(tmp) catch return WriteError.WriteFailed;
+    var ok = false;
+    defer if (!ok) writer.abort();
+
+    for (names.items) |nm| {
+        if (std.ascii.eqlIgnoreCase(nm, "ComicInfo.xml")) continue; // replace
+        const bytes = reader.readMember(alloc, nm) catch continue;
+        writer.addBytes(nm, bytes, .best) catch return WriteError.WriteFailed;
+    }
+    writer.addBytes("ComicInfo.xml", xml, .best) catch return WriteError.WriteFailed;
+    writer.finalizeAndClose() catch return WriteError.WriteFailed;
+    ok = true;
+
+    var tz: [4096]u8 = undefined;
+    var pz: [4096]u8 = undefined;
+    if (tmp.len >= tz.len or path.len >= pz.len) return WriteError.WriteFailed;
+    const tzp = std.fmt.bufPrintZ(&tz, "{s}", .{tmp}) catch return WriteError.WriteFailed;
+    const pzp = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch return WriteError.WriteFailed;
+    if (std.c.rename(tzp.ptr, pzp.ptr) != 0) {
+        _ = std.c.unlink(tzp.ptr);
+        return WriteError.WriteFailed;
+    }
+}
+
 const t = std.testing;
+
+test "buildComicInfo emits series/number/volume/year, escapes" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const s = try buildComicInfo(a, "Saga & Co", 12, 2, 2018);
+    try t.expect(std.mem.indexOf(u8, s, "<Series>Saga &amp; Co</Series>") != null);
+    try t.expect(std.mem.indexOf(u8, s, "<Number>12</Number>") != null);
+    try t.expect(std.mem.indexOf(u8, s, "<Volume>2</Volume>") != null);
+    try t.expect(std.mem.indexOf(u8, s, "<Year>2018</Year>") != null);
+}
 
 fn expectComic(basename: []const u8, series: []const u8, issue: ?f32, volume: ?u32, year: ?u32) !void {
     var arena = std.heap.ArenaAllocator.init(t.allocator);

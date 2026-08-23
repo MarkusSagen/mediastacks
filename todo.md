@@ -34,7 +34,19 @@
       new file is journaled (`.create`) so `shelve undo` removes it.
       `scripts/m4b-smoke.sh` (7 checks, real ffmpeg).
 
-## Next (user-sequenced): comics → language/subtitle policy + remux
+## Comics (done 2026-08-23)
+
+- [x] **Comic kind** — `kinds/comic.zig` parses series/issue/volume/year
+      (Komga/Jellyfin style: "Saga #12 (2018)", "Batman v2 001", "v01"…) →
+      `Comics/{series}/{series} #NNN (year).{ext}` (configurable `comic_template`;
+      `{number}` = `#012`/`Vol.01`). Grouped by series; cbz/cbr/cb7/cbt.
+- [x] **ComicInfo.xml embed** — on organize (default, gated by `write_nfo`),
+      **cbz** archives are repacked (miniz ZipReader→ZipWriter) with a fresh
+      `ComicInfo.xml` (Series/Number/Volume/Year); backed up + journaled
+      (`.tagwrite`) so `shelve undo` restores the pre-embed archive. cbr/cb7
+      skipped (can't rewrite without external tools). `comicinfo-smoke.sh`.
+
+## Next (user-sequenced): UI → language/subtitle policy + remux
 
 ## Guiding principle: one shared interface, kind-specific only where it must be
 

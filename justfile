@@ -228,6 +228,10 @@ nfo-smoke: build
 m4b-smoke: build
     ./scripts/m4b-smoke.sh
 
+# Comic smoke: organize a .cbz + embed ComicInfo.xml; undo restores it.
+comicinfo-smoke: build
+    ./scripts/comicinfo-smoke.sh
+
 # Merge a folder of chapter files into one chaptered .m4b audiobook.
 # e.g. `just makem4b ~/Downloads/Orwell/1984 --to ~/Media`
 makem4b DIR="" *FLAGS="": build
