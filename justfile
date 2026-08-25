@@ -240,6 +240,10 @@ m4b-smoke: build
 comicinfo-smoke: build
     ./scripts/comicinfo-smoke.sh
 
+# End-to-end catalog smoke: index a synthetic library, assert rows, re-index after a delete.
+index-smoke: build
+    ./scripts/index-smoke.sh
+
 # Merge a folder of chapter files into one chaptered .m4b audiobook.
 # e.g. `just makem4b ~/Downloads/Orwell/1984 --to ~/Media`
 makem4b DIR="" *FLAGS="": build
