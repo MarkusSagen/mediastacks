@@ -84,7 +84,7 @@ pub fn mediaExtForKind(kind: []const u8, ext: []const u8) bool {
     return extIn(&VIDEO_EXT, ext); // movie, tv
 }
 
-/// Extension without the leading dot, lowercased into `buf` (max 15 chars).
+/// Extension without the leading dot, lowercased into `buf` (up to buf.len bytes).
 pub fn containerOf(buf: []u8, ext: []const u8) []const u8 {
     const e = if (ext.len > 0 and ext[0] == '.') ext[1..] else ext;
     const n = @min(e.len, buf.len);
@@ -172,6 +172,8 @@ test "scan indexes a synthetic library" {
 
     const st = try scan(a, io, &cat, root, true);
     try t.expectEqual(@as(usize, 3), st.total);
+    try t.expectEqual(@as(usize, 3), st.added);
+    try t.expectEqual(@as(usize, 0), st.updated);
 
     const movie = (try cat.getByPath(a, "Movies/Dune (2021) [tmdbid-438631]")).?;
     try t.expectEqualStrings("Dune", movie.title);
@@ -194,6 +196,8 @@ test "scan indexes a synthetic library" {
     try cwd.deleteTree(io, try std.fs.path.join(a, &.{ root, "Music" }));
     const st2 = try scan(a, io, &cat, root, false);
     try t.expectEqual(@as(usize, 1), st2.removed);
+    try t.expectEqual(@as(usize, 0), st2.added);
+    try t.expectEqual(@as(usize, 2), st2.updated);
     try t.expectEqual(@as(?mc.Item, null), try cat.getByPath(a, "Music/Daft Punk/Discovery (2001)"));
 }
 
@@ -333,6 +337,8 @@ pub fn scan(alloc: std.mem.Allocator, io: std.Io, cat: *mc.Catalog, library_root
         for (paths) |p| alloc.free(p);
         alloc.free(paths);
     }
+    // Counts vanished item paths, not rows: Slice-A item paths are leaves (never
+    // nested under one another), so one delete == one item.
     for (paths) |p| {
         if (!seen.contains(p)) {
             _ = try cat.deleteUnderPath(p);
@@ -385,7 +391,7 @@ fn indexOne(
         .subtitle = parent1, // artist / author for depth-2 kinds
         .provider = parsed.provider,
         .provider_id = parsed.provider_id,
-        .cover_path = if (agg.has_cover) null else null, // cover path filled in Slice C
+        .cover_path = null, // populated in Slice C
         .primary_path = agg.primary_rel,
         .container = agg.container,
         .playable_inline = agg.playable_inline,
