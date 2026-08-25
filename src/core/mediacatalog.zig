@@ -193,7 +193,7 @@ pub const Catalog = struct {
         defer text_buf.deinit(alloc);
         try text_buf.appendSlice(alloc, "SELECT " ++ SELECT_COLS ++ " FROM items WHERE 1=1");
         if (q.kind != null) try text_buf.appendSlice(alloc, " AND kind = ?1");
-        if (q.text != null) try text_buf.appendSlice(alloc, " AND (title LIKE ?2 OR subtitle LIKE ?2)");
+        if (q.text != null) try text_buf.appendSlice(alloc, " AND (title LIKE ?2 ESCAPE '\\' OR subtitle LIKE ?2 ESCAPE '\\')");
         switch (q.status) {
             .all => {},
             .missing_cover => try text_buf.appendSlice(alloc, " AND has_cover = 0"),
@@ -211,9 +211,15 @@ pub const Catalog = struct {
         defer stmt.finalize();
         if (q.kind) |k| try stmt.bindText(1, k);
         if (q.text) |t| {
-            const like = try std.fmt.allocPrint(alloc, "%{s}%", .{t});
-            defer alloc.free(like);
-            try stmt.bindText(2, like);
+            var esc: std.ArrayList(u8) = .empty;
+            defer esc.deinit(alloc);
+            try esc.append(alloc, '%');
+            for (t) |ch| {
+                if (ch == '%' or ch == '_' or ch == '\\') try esc.append(alloc, '\\');
+                try esc.append(alloc, ch);
+            }
+            try esc.append(alloc, '%');
+            try stmt.bindText(2, esc.items);
         }
 
         var out: std.ArrayList(Item) = .empty;
@@ -392,4 +398,45 @@ test "deleteUnderPath, clear, allPaths, defaultPath" {
     const dp = try defaultPath(a, &env);
     defer a.free(dp);
     try std.testing.expectEqualStrings("/data/stacks/media.db", dp);
+}
+
+test "search treats % and _ in query as literal" {
+    const a = std.testing.allocator;
+    var buf: [64]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-like-{d}.db", .{clock.nowSeconds()});
+    var pz: [96]u8 = undefined;
+    const pz2 = try std.fmt.bufPrintZ(&pz, "{s}", .{path});
+    defer _ = std.c.unlink(pz2.ptr);
+    var cat = try Catalog.open(path);
+    defer cat.close();
+    try cat.upsertItem(.{ .kind = "movie", .path = "Movies/50% Off", .title = "50% Off", .sort_title = "50% off" });
+    try cat.upsertItem(.{ .kind = "movie", .path = "Movies/5000 Reasons", .title = "5000 Reasons", .sort_title = "5000 reasons" });
+
+    // "50%" must match "50% Off" literally, NOT "5000 Reasons" (which it would
+    // if % were a wildcard).
+    const hits = try cat.search(a, .{ .text = "50%" });
+    defer { for (hits) |*it| it.deinit(a); a.free(hits); }
+    try std.testing.expectEqual(@as(usize, 1), hits.len);
+    try std.testing.expectEqualStrings("50% Off", hits[0].title);
+}
+
+test "deleteUnderPath escapes LIKE metacharacters in the prefix" {
+    const a = std.testing.allocator;
+    _ = a;
+    var buf: [80]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-delesc-{d}.db", .{clock.nowSeconds()});
+    var pz: [112]u8 = undefined;
+    const pz2 = try std.fmt.bufPrintZ(&pz, "{s}", .{path});
+    defer _ = std.c.unlink(pz2.ptr);
+    var cat = try Catalog.open(path);
+    defer cat.close();
+    // Prefix "Music/AC_DC" — the '_' must be literal, so a sibling "Music/ACxDC"
+    // (which '_' would match as a wildcard) must survive.
+    try cat.upsertItem(.{ .kind = "music", .path = "Music/AC_DC", .title = "t", .sort_title = "t" });
+    try cat.upsertItem(.{ .kind = "music", .path = "Music/AC_DC/Album", .title = "t", .sort_title = "t" });
+    try cat.upsertItem(.{ .kind = "music", .path = "Music/ACxDC", .title = "t", .sort_title = "t" });
+
+    const removed = try cat.deleteUnderPath("Music/AC_DC");
+    try std.testing.expectEqual(@as(usize, 2), removed); // AC_DC + AC_DC/Album
+    try std.testing.expectEqual(@as(i64, 1), try cat.count()); // ACxDC survives
 }
