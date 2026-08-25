@@ -142,6 +142,7 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
     if (std.mem.eql(u8, path, "/api/config")) return handleConfig(app, request);
     if (std.mem.eql(u8, path, "/api/organize")) return handleOrganize(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/library")) return handleLibrary(app, request, target);
+    if (std.mem.eql(u8, path, "/api/reindex")) return handleReindex(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/cover")) return handleCover(app, request, target);
     if (std.mem.eql(u8, path, "/api/undo/list")) return handleUndoList(io, app, request);
     if (std.mem.eql(u8, path, "/api/undo/revert")) return handleUndoRevert(app, request, target);
@@ -359,6 +360,23 @@ fn handleLibrary(app: *App, request: *std.http.Server.Request, target: []const u
     }
     try body.appendSlice(arena, "]}");
     try respondJson(request, body.items);
+}
+
+/// Rebuild/refresh the media catalog from library_root.
+fn handleReindex(io: std.Io, app: *App, request: *std.http.Server.Request, target: []const u8) !void {
+    var arena_state = std.heap.ArenaAllocator.init(app.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    _ = readBody(arena, request, 4096) catch {}; // consume body before respond
+    const rebuild = if (queryValue(target, "rebuild")) |v| std.mem.eql(u8, v, "1") else false;
+
+    const db_path = try mediacatalog.defaultPath(arena, app.env);
+    var cat = mediacatalog.Catalog.open(db_path) catch
+        return request.respond("cannot open catalog\n", .{ .status = .internal_server_error });
+    defer cat.close();
+    const st = indexer.scan(arena, io, &cat, app.base_cfg.library_root, rebuild) catch |err|
+        return request.respond(try std.fmt.allocPrint(arena, "reindex failed: {s}\n", .{@errorName(err)}), .{ .status = .internal_server_error });
+    try respondJson(request, try std.fmt.allocPrint(arena, "{{\"added\":{d},\"updated\":{d},\"removed\":{d},\"total\":{d}}}", .{ st.added, st.updated, st.removed, st.total }));
 }
 
 fn urlEncode(arena: std.mem.Allocator, s: []const u8) ![]u8 {
