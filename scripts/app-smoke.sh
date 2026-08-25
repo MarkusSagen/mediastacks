@@ -10,6 +10,14 @@ command -v curl >/dev/null || { echo "curl absent — skipping app smoke"; exit 
 
 TMP="$(mktemp -d -t stacks-app.XXXXXX)"
 export XDG_DATA_HOME="$TMP/data" XDG_CONFIG_HOME="$TMP/config"
+# Open-externally recorder (slice C): STACKS_OPEN_CMD points the server at this
+# script instead of the real `open`, so /api/open never launches a GUI app —
+# it just appends its argv to OPENLOG for the checks below to inspect.
+OPENLOG="$TMP/opened.txt"
+OPENREC="$TMP/openrec.sh"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >> "%s"\n' "$OPENLOG" > "$OPENREC"
+chmod +x "$OPENREC"
+export STACKS_OPEN_CMD="$OPENREC"
 SRC="$TMP/dl/show"; LIB="$TMP/lib"; mkdir -p "$SRC"
 : > "$SRC/witch.hat.atelier.s01e01.1080p.web.h264-x.mkv"
 : > "$SRC/witch.hat.atelier.s01e02.1080p.web.h264-x.mkv"
@@ -52,6 +60,19 @@ chk "catalog search matches" '[[ -n "$(curl -s "http://127.0.0.1:$PORT/api/libra
 chk "catalog search excludes non-matches" '[[ -z "$(curl -s "http://127.0.0.1:$PORT/api/library?q=zzzznope" | grep -o witch)" ]]'
 # Explicit rescan endpoint works too.
 chk "reindex endpoint returns total" 'curl -s -X POST "http://127.0.0.1:$PORT/api/reindex" | grep -q "\"total\":"'
+
+# Item detail (slice C): pick the show's id from /api/library, fetch its detail.
+ITEMID="$(curl -s "http://127.0.0.1:$PORT/api/library?kind=tv" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)"
+ITEM="$(curl -s "http://127.0.0.1:$PORT/api/item?id=$ITEMID")"
+chk "item detail returns the title" 'grep -qi "witch hat atelier" <<<"$ITEM"'
+chk "item detail lists files" 'grep -q "\"files\":\[{" <<<"$ITEM"'
+chk "item detail 404 on bad id" '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/item?id=99999")" == "404" ]]'
+
+# Open externally (slice C): STACKS_OPEN_CMD recorder — never launches a real app.
+# (The recorder + env are set at server start; see the export near the top.)
+chk "open reveal returns ok" 'curl -s -X POST "http://127.0.0.1:$PORT/api/open?id=$ITEMID&mode=reveal" | grep -q "\"ok\":true"'
+chk "open recorded the -R reveal" 'grep -q -- "-R" "$OPENLOG"'
+chk "open blocks path traversal id" '[[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:$PORT/api/open?id=abc")" == "400" ]]'
 
 # Undo history (slice 3): the apply above wrote a journal → list shows it → revert restores.
 UNDO="$(curl -s "http://127.0.0.1:$PORT/api/undo/list")"
