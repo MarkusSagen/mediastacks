@@ -42,6 +42,18 @@ chk "library found the series item" 'grep -q "witch hat atelier" <<<"$LIBJSON"'
 # Cover endpoint rejects paths outside the library root.
 chk "cover endpoint blocks traversal" '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/cover?path=/etc/hosts")" == "403" ]]'
 
+# Catalog Library (slice B): apply auto-reconciled the catalog, so the Shows item
+# is queryable without an explicit reindex.
+LIB2="$(curl -s "http://127.0.0.1:$PORT/api/library")"
+chk "catalog library lists the show" 'grep -q "witch hat atelier" <<<"$LIB2"'
+chk "catalog library has counts" 'grep -q "\"counts\":{" <<<"$LIB2"'
+chk "catalog kind filter works" '[[ -n "$(curl -s "http://127.0.0.1:$PORT/api/library?kind=tv" | grep -o witch)" ]]'
+chk "catalog kind filter excludes others" '[[ -z "$(curl -s "http://127.0.0.1:$PORT/api/library?kind=movie" | grep -o witch)" ]]'
+chk "catalog search matches" '[[ -n "$(curl -s "http://127.0.0.1:$PORT/api/library?q=witch" | grep -o witch)" ]]'
+chk "catalog search excludes non-matches" '[[ -z "$(curl -s "http://127.0.0.1:$PORT/api/library?q=zzzznope" | grep -o witch)" ]]'
+# Explicit rescan endpoint works too.
+chk "reindex endpoint returns total" 'curl -s -X POST "http://127.0.0.1:$PORT/api/reindex" | grep -q "\"total\":"'
+
 # Undo history (slice 3): the apply above wrote a journal → list shows it → revert restores.
 UNDO="$(curl -s "http://127.0.0.1:$PORT/api/undo/list")"
 chk "undo lists the applied run" 'grep -q "\"moved\":2" <<<"$UNDO"'
