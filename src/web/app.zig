@@ -72,6 +72,46 @@ fn pathOnly(target: []const u8) []const u8 {
     return target;
 }
 
+const RangeSpec = union(enum) {
+    none,
+    unsatisfiable,
+    ok: struct { start: u64, end: u64 },
+};
+
+/// Parse an HTTP `Range` header value against `size`. Only the first range of a
+/// list is honored. Lenient: anything it can't parse becomes `.none` (caller
+/// serves from the start), a valid-but-out-of-bounds range becomes
+/// `.unsatisfiable` (→ 416).
+fn parseRange(header: ?[]const u8, size: u64) RangeSpec {
+    const h = header orelse return .none;
+    if (!std.mem.startsWith(u8, h, "bytes=")) return .none;
+    const spec = std.mem.trim(u8, h[6..], " ");
+    const first = if (std.mem.indexOfScalar(u8, spec, ',')) |c| spec[0..c] else spec;
+    const dash = std.mem.indexOfScalar(u8, first, '-') orelse return .none;
+    const start_s = std.mem.trim(u8, first[0..dash], " ");
+    const end_s = std.mem.trim(u8, first[dash + 1 ..], " ");
+
+    if (size == 0) return .unsatisfiable;
+
+    if (start_s.len == 0) {
+        // suffix range: last N bytes
+        const n = std.fmt.parseInt(u64, end_s, 10) catch return .none;
+        if (n == 0) return .unsatisfiable;
+        const nn = @min(n, size);
+        return .{ .ok = .{ .start = size - nn, .end = size - 1 } };
+    }
+
+    const start = std.fmt.parseInt(u64, start_s, 10) catch return .none;
+    if (start >= size) return .unsatisfiable;
+    var end: u64 = size - 1;
+    if (end_s.len != 0) {
+        const e = std.fmt.parseInt(u64, end_s, 10) catch return .none;
+        if (e < start) return .none;
+        end = @min(e, size - 1);
+    }
+    return .{ .ok = .{ .start = start, .end = end } };
+}
+
 fn respondAsset(request: *std.http.Server.Request, bytes: []const u8, ctype: []const u8) !void {
     try request.respond(bytes, .{ .status = .ok, .extra_headers = &.{
         .{ .name = "content-type", .value = ctype },
@@ -667,4 +707,45 @@ fn handleOrganize(io: std.Io, app: *App, request: *std.http.Server.Request, targ
     app.session.plan = p;
     app.has_plan = true;
     return respondJson(request, try plan.toJson(arena, p));
+}
+
+test "parseRange" {
+    const t = std.testing;
+    // no / unparseable header → none
+    try t.expect(parseRange(null, 100) == .none);
+    try t.expect(parseRange("nonsense", 100) == .none);
+    try t.expect(parseRange("bytes=abc", 100) == .none);
+
+    // open-ended and closed ranges
+    switch (parseRange("bytes=0-", 100)) {
+        .ok => |r| {
+            try t.expectEqual(@as(u64, 0), r.start);
+            try t.expectEqual(@as(u64, 99), r.end);
+        },
+        else => return error.TestUnexpected,
+    }
+    switch (parseRange("bytes=10-19", 100)) {
+        .ok => |r| {
+            try t.expectEqual(@as(u64, 10), r.start);
+            try t.expectEqual(@as(u64, 19), r.end);
+        },
+        else => return error.TestUnexpected,
+    }
+    // clamp end past EOF
+    switch (parseRange("bytes=0-999", 100)) {
+        .ok => |r| try t.expectEqual(@as(u64, 99), r.end),
+        else => return error.TestUnexpected,
+    }
+    // suffix range: last 20 bytes of 100 → [80,99]
+    switch (parseRange("bytes=-20", 100)) {
+        .ok => |r| {
+            try t.expectEqual(@as(u64, 80), r.start);
+            try t.expectEqual(@as(u64, 99), r.end);
+        },
+        else => return error.TestUnexpected,
+    }
+    // start past EOF → unsatisfiable
+    try t.expect(parseRange("bytes=200-", 100) == .unsatisfiable);
+    // any range against a zero-length file → unsatisfiable
+    try t.expect(parseRange("bytes=0-", 0) == .unsatisfiable);
 }

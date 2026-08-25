@@ -74,6 +74,7 @@ pub const shutdown = @import("util/shutdown.zig");
 
 pub const web_api = @import("web/api.zig");
 pub const review = @import("web/review.zig");
+pub const web_app = @import("web/app.zig");
 
 test {
     std.testing.refAllDecls(@This());
