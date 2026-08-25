@@ -142,6 +142,7 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
     if (std.mem.eql(u8, path, "/api/config")) return handleConfig(app, request);
     if (std.mem.eql(u8, path, "/api/organize")) return handleOrganize(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/library")) return handleLibrary(app, request, target);
+    if (std.mem.eql(u8, path, "/api/item")) return handleItem(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/reindex")) return handleReindex(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/cover")) return handleCover(app, request, target);
     if (std.mem.eql(u8, path, "/api/undo/list")) return handleUndoList(io, app, request);
@@ -358,6 +359,88 @@ fn handleLibrary(app: *App, request: *std.http.Server.Request, target: []const u
             try body.appendSlice(arena, "\"");
         }
         try body.appendSlice(arena, "}");
+    }
+    try body.appendSlice(arena, "]}");
+    try respondJson(request, body.items);
+}
+
+fn fileRole(kind: []const u8, base: []const u8) []const u8 {
+    if (indexer.isCoverName(base)) return "cover";
+    if (std.ascii.endsWithIgnoreCase(base, ".nfo")) return "nfo";
+    const ext = std.fs.path.extension(base);
+    if (indexer.mediaExtForKind(kind, ext)) return "media";
+    return "other";
+}
+
+fn statSizeApp(io: std.Io, path: []const u8) u64 {
+    const cwd = std.Io.Dir.cwd();
+    var f = cwd.openFile(io, path, .{}) catch return 0;
+    defer f.close(io);
+    const st = f.stat(io) catch return 0;
+    return st.size;
+}
+
+/// One item's full detail + the files currently on disk under its folder.
+fn handleItem(io: std.Io, app: *App, request: *std.http.Server.Request, target: []const u8) !void {
+    var arena_state = std.heap.ArenaAllocator.init(app.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const lib = app.base_cfg.library_root;
+
+    const id_s = queryValue(target, "id") orelse return request.respond("missing id\n", .{ .status = .bad_request });
+    const id = std.fmt.parseInt(i64, id_s, 10) catch return request.respond("bad id\n", .{ .status = .bad_request });
+
+    const db_path = try mediacatalog.defaultPath(arena, app.env);
+    var cat = mediacatalog.Catalog.open(db_path) catch return request.respond("no catalog\n", .{ .status = .not_found });
+    defer cat.close();
+    const item = (cat.getById(arena, id) catch null) orelse return request.respond("not found\n", .{ .status = .not_found });
+
+    var body: std.ArrayList(u8) = .empty;
+    try body.appendSlice(arena, try std.fmt.allocPrint(arena,
+        "{{\"id\":{d},\"kind\":\"{s}\",\"title\":\"{s}\",\"subtitle\":\"{s}\",\"path\":\"{s}\",\"count\":{d},\"total_bytes\":{d},\"container\":\"{s}\",\"playable\":{s},\"has_cover\":{s},\"has_metadata\":{s}", .{
+        item.id, item.kind,
+        try jsonEsc(arena, item.title),
+        try jsonEsc(arena, item.subtitle orelse ""),
+        try jsonEsc(arena, item.path),
+        item.file_count, item.total_bytes,
+        item.container orelse "",
+        boolStr(item.playable_inline), boolStr(item.has_cover), boolStr(item.has_metadata),
+    }));
+    if (item.year) |y| try body.appendSlice(arena, try std.fmt.allocPrint(arena, ",\"year\":{d}", .{y}));
+    if (item.provider) |p| try body.appendSlice(arena, try std.fmt.allocPrint(arena, ",\"provider\":\"{s}\"", .{p}));
+    if (item.provider_id) |pid| try body.appendSlice(arena, try std.fmt.allocPrint(arena, ",\"provider_id\":\"{s}\"", .{try jsonEsc(arena, pid)}));
+    if (item.cover_path) |cp| {
+        const abs = try std.fs.path.join(arena, &.{ lib, cp });
+        try body.appendSlice(arena, ",\"cover\":\"/api/cover?path=");
+        try body.appendSlice(arena, try urlEncode(arena, abs));
+        try body.appendSlice(arena, "\"");
+    }
+
+    // Live file listing under the item folder. Same walk idiom as
+    // indexer.aggregate(): openDir/walk with catch-to-fallback so any error
+    // still yields valid JSON with an empty files array.
+    try body.appendSlice(arena, ",\"files\":[");
+    const item_abs = try std.fs.path.join(arena, &.{ lib, item.path });
+    const cwd = std.Io.Dir.cwd();
+    var first = true;
+    walk_files: {
+        var dir = cwd.openDir(io, item_abs, .{ .iterate = true }) catch break :walk_files;
+        defer dir.close(io);
+        var walker = dir.walk(arena) catch break :walk_files;
+        defer walker.deinit();
+        while (walker.next(io) catch null) |entry| {
+            if (entry.kind != .file) continue;
+            const base = std.fs.path.basename(entry.path);
+            const abs = try std.fs.path.join(arena, &.{ item_abs, entry.path });
+            if (!first) try body.appendSlice(arena, ",");
+            first = false;
+            try body.appendSlice(arena, try std.fmt.allocPrint(arena, "{{\"name\":\"{s}\",\"rel\":\"{s}\",\"size\":{d},\"role\":\"{s}\"}}", .{
+                try jsonEsc(arena, base),
+                try jsonEsc(arena, entry.path),
+                statSizeApp(io, abs),
+                fileRole(item.kind, base),
+            }));
+        }
     }
     try body.appendSlice(arena, "]}");
     try respondJson(request, body.items);
