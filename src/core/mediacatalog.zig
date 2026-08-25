@@ -49,6 +49,15 @@ const SELECT_COLS =
     "cover_path,primary_path,container,playable_inline,file_count,total_bytes," ++
     "has_metadata,has_cover,is_duplicate,mtime,indexed_at,extra";
 
+pub const Status = enum { all, missing_cover, missing_metadata, duplicates };
+pub const Sort = enum { kind_title, title, year };
+pub const SearchQuery = struct {
+    text: ?[]const u8 = null,
+    kind: ?[]const u8 = null,
+    status: Status = .all,
+    sort: Sort = .kind_title,
+};
+
 pub const Catalog = struct {
     db: *c.sqlite3,
 
@@ -179,6 +188,45 @@ pub const Catalog = struct {
         return try rowToItem(alloc, &stmt);
     }
 
+    pub fn search(self: *Catalog, alloc: std.mem.Allocator, q: SearchQuery) ![]Item {
+        var text_buf: std.ArrayList(u8) = .empty;
+        defer text_buf.deinit(alloc);
+        try text_buf.appendSlice(alloc, "SELECT " ++ SELECT_COLS ++ " FROM items WHERE 1=1");
+        if (q.kind != null) try text_buf.appendSlice(alloc, " AND kind = ?1");
+        if (q.text != null) try text_buf.appendSlice(alloc, " AND (title LIKE ?2 OR subtitle LIKE ?2)");
+        switch (q.status) {
+            .all => {},
+            .missing_cover => try text_buf.appendSlice(alloc, " AND has_cover = 0"),
+            .missing_metadata => try text_buf.appendSlice(alloc, " AND has_metadata = 0"),
+            .duplicates => try text_buf.appendSlice(alloc, " AND is_duplicate = 1"),
+        }
+        const order = switch (q.sort) {
+            .kind_title => " ORDER BY kind, sort_title",
+            .title => " ORDER BY sort_title",
+            .year => " ORDER BY year DESC, sort_title",
+        };
+        try text_buf.appendSlice(alloc, order);
+
+        var stmt = try sql.prepare(self.db, text_buf.items);
+        defer stmt.finalize();
+        if (q.kind) |k| try stmt.bindText(1, k);
+        if (q.text) |t| {
+            const like = try std.fmt.allocPrint(alloc, "%{s}%", .{t});
+            defer alloc.free(like);
+            try stmt.bindText(2, like);
+        }
+
+        var out: std.ArrayList(Item) = .empty;
+        errdefer {
+            for (out.items) |*it| it.deinit(alloc);
+            out.deinit(alloc);
+        }
+        while (try stmt.step()) {
+            try out.append(alloc, try rowToItem(alloc, &stmt));
+        }
+        return out.toOwnedSlice(alloc);
+    }
+
     pub fn count(self: *Catalog) !i64 {
         var stmt = try sql.prepare(self.db, "SELECT COUNT(*) FROM items");
         defer stmt.finalize();
@@ -219,4 +267,47 @@ test "upsertItem inserts then updates by path" {
     try std.testing.expectEqualStrings("Dune: Part One", got2.title);
     try std.testing.expectEqual(@as(i64, 2), got2.file_count);
     try std.testing.expectEqual(@as(i64, 1), try cat.count());
+}
+
+fn freeItems(a: std.mem.Allocator, items: []Item) void {
+    for (items) |*it| it.deinit(a);
+    a.free(items);
+}
+
+test "search filters by kind, text and status" {
+    const a = std.testing.allocator;
+    var buf: [64]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-search-{d}.db", .{clock.nowSeconds()});
+    var path_z_buf: [4096]u8 = undefined;
+    const path_z = try std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path});
+    defer _ = std.c.unlink(path_z.ptr);
+    var cat = try Catalog.open(path);
+    defer cat.close();
+
+    try cat.upsertItem(.{ .kind = "movie", .path = "Movies/Dune (2021)", .title = "Dune",
+        .sort_title = "dune", .has_cover = true, .has_metadata = true });
+    try cat.upsertItem(.{ .kind = "movie", .path = "Movies/Blade Runner (1982)", .title = "Blade Runner",
+        .sort_title = "blade runner", .has_cover = false, .has_metadata = true });
+    try cat.upsertItem(.{ .kind = "tv", .path = "Shows/Severance", .title = "Severance",
+        .sort_title = "severance", .has_cover = true, .has_metadata = false });
+
+    const all = try cat.search(a, .{});
+    defer freeItems(a, all);
+    try std.testing.expectEqual(@as(usize, 3), all.len);
+
+    const movies = try cat.search(a, .{ .kind = "movie" });
+    defer freeItems(a, movies);
+    try std.testing.expectEqual(@as(usize, 2), movies.len);
+    // kind_title sort → "blade runner" before "dune"
+    try std.testing.expectEqualStrings("Blade Runner", movies[0].title);
+
+    const text = try cat.search(a, .{ .text = "sever" });
+    defer freeItems(a, text);
+    try std.testing.expectEqual(@as(usize, 1), text.len);
+    try std.testing.expectEqualStrings("Severance", text[0].title);
+
+    const no_cover = try cat.search(a, .{ .status = .missing_cover });
+    defer freeItems(a, no_cover);
+    try std.testing.expectEqual(@as(usize, 1), no_cover.len);
+    try std.testing.expectEqualStrings("Blade Runner", no_cover[0].title);
 }
