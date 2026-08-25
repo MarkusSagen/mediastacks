@@ -189,6 +189,7 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
     if (std.mem.eql(u8, path, "/api/undo/list")) return handleUndoList(io, app, request);
     if (std.mem.eql(u8, path, "/api/undo/revert")) return handleUndoRevert(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/open")) return handleOpen(io, app, request, target);
+    if (std.mem.eql(u8, path, "/api/stream")) return handleStream(io, app, request, target);
 
     // These operate on the current plan (must exist).
     if (std.mem.eql(u8, path, "/api/plan")) {
@@ -526,6 +527,108 @@ fn handleOpen(io: std.Io, app: *App, request: *std.http.Server.Request, target: 
     if (r.exit_code != 0)
         return request.respond("open exited nonzero\n", .{ .status = .internal_server_error });
     try respondJson(request, "{\"ok\":true}");
+}
+
+fn streamContentType(ext: []const u8) []const u8 {
+    const map = [_]struct { e: []const u8, t: []const u8 }{
+        .{ .e = ".mp4", .t = "video/mp4" },   .{ .e = ".m4v", .t = "video/mp4" },
+        .{ .e = ".webm", .t = "video/webm" }, .{ .e = ".mkv", .t = "video/x-matroska" },
+        .{ .e = ".mov", .t = "video/quicktime" },
+        .{ .e = ".mp3", .t = "audio/mpeg" },  .{ .e = ".flac", .t = "audio/flac" },
+        .{ .e = ".m4a", .t = "audio/mp4" },   .{ .e = ".m4b", .t = "audio/mp4" },
+        .{ .e = ".aac", .t = "audio/aac" },   .{ .e = ".ogg", .t = "audio/ogg" },
+        .{ .e = ".opus", .t = "audio/ogg" },  .{ .e = ".wav", .t = "audio/wav" },
+    };
+    for (map) |m| if (std.ascii.eqlIgnoreCase(ext, m.e)) return m.t;
+    return "application/octet-stream";
+}
+
+fn rangeHeader(request: *std.http.Server.Request) ?[]const u8 {
+    var it = request.iterateHeaders();
+    while (it.next()) |h| if (std.ascii.eqlIgnoreCase(h.name, "range")) return h.value;
+    return null;
+}
+
+const STREAM_MAX_CHUNK: u64 = 8 * 1024 * 1024;
+
+/// Serve the item's primary media file with HTTP Range support so a browser
+/// <audio>/<video> element can play it. Chunks are capped so memory stays flat.
+fn handleStream(io: std.Io, app: *App, request: *std.http.Server.Request, target: []const u8) !void {
+    var arena_state = std.heap.ArenaAllocator.init(app.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const lib = app.base_cfg.library_root;
+
+    const id_s = queryValue(target, "id") orelse return request.respond("missing id\n", .{ .status = .bad_request });
+    const id = std.fmt.parseInt(i64, id_s, 10) catch return request.respond("bad id\n", .{ .status = .bad_request });
+
+    const db_path = try mediacatalog.defaultPath(arena, app.env);
+    var cat = mediacatalog.Catalog.open(db_path) catch return request.respond("no catalog\n", .{ .status = .not_found });
+    defer cat.close();
+    const item = (cat.getById(arena, id) catch null) orelse return request.respond("not found\n", .{ .status = .not_found });
+    const rel = item.primary_path orelse return request.respond("no media\n", .{ .status = .not_found });
+
+    const abs = try std.fs.path.join(arena, &.{ lib, rel });
+    if (!pathUnderRoot(abs, lib) or std.mem.indexOf(u8, abs, "..") != null)
+        return request.respond("forbidden\n", .{ .status = .forbidden });
+
+    const cwd = std.Io.Dir.cwd();
+    var f = cwd.openFile(io, abs, .{}) catch return request.respond("not found\n", .{ .status = .not_found });
+    defer f.close(io);
+    const size: u64 = (f.stat(io) catch return request.respond("stat failed\n", .{ .status = .internal_server_error })).size;
+    const ctype = streamContentType(std.fs.path.extension(abs));
+
+    // Resolve the byte window + status.
+    var start: u64 = 0;
+    var end: u64 = if (size == 0) 0 else size - 1;
+    var partial = false;
+    switch (parseRange(rangeHeader(request), size)) {
+        .unsatisfiable => {
+            const cr = try std.fmt.allocPrint(arena, "bytes */{d}", .{size});
+            return request.respond("", .{ .status = .range_not_satisfiable, .extra_headers = &.{
+                .{ .name = "content-range", .value = cr },
+                .{ .name = "accept-ranges", .value = "bytes" },
+            } });
+        },
+        .ok => |r| {
+            start = r.start;
+            end = r.end;
+            partial = true;
+        },
+        .none => {
+            // No Range: whole file if small, else 206 first chunk (Accept-Ranges
+            // tells the client it may range).
+            if (size > STREAM_MAX_CHUNK) {
+                end = STREAM_MAX_CHUNK - 1;
+                partial = true;
+            }
+        },
+    }
+    // Cap the served window.
+    if (end >= start + STREAM_MAX_CHUNK) {
+        end = start + STREAM_MAX_CHUNK - 1;
+        partial = true;
+    }
+
+    const len: usize = @intCast(if (size == 0) 0 else end - start + 1);
+    const buf = try arena.alloc(u8, len);
+    const n = if (len == 0) 0 else f.readPositionalAll(io, buf, start) catch
+        return request.respond("read failed\n", .{ .status = .internal_server_error });
+
+    if (partial) {
+        const cr = try std.fmt.allocPrint(arena, "bytes {d}-{d}/{d}", .{ start, end, size });
+        return request.respond(buf[0..n], .{ .status = .partial_content, .extra_headers = &.{
+            .{ .name = "content-type", .value = ctype },
+            .{ .name = "content-range", .value = cr },
+            .{ .name = "accept-ranges", .value = "bytes" },
+            .{ .name = "cache-control", .value = "no-cache" },
+        } });
+    }
+    return request.respond(buf[0..n], .{ .status = .ok, .extra_headers = &.{
+        .{ .name = "content-type", .value = ctype },
+        .{ .name = "accept-ranges", .value = "bytes" },
+        .{ .name = "cache-control", .value = "no-cache" },
+    } });
 }
 
 /// Best-effort full re-scan of the catalog after a mutation (the catalog is a
