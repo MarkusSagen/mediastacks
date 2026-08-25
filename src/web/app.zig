@@ -363,8 +363,8 @@ fn handleLibrary(app: *App, request: *std.http.Server.Request, target: []const u
     try respondJson(request, body.items);
 }
 
-/// Best-effort incremental reconcile of the catalog after a mutation. Errors
-/// are swallowed — the catalog is a derived cache and Rescan can always fix it.
+/// Best-effort full re-scan of the catalog after a mutation (the catalog is a
+/// derived cache; errors are swallowed and Rescan can always fix it).
 fn reindexQuietly(io: std.Io, app: *App) void {
     var arena_state = std.heap.ArenaAllocator.init(app.gpa);
     defer arena_state.deinit();

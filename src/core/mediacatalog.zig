@@ -421,8 +421,6 @@ test "search treats % and _ in query as literal" {
 }
 
 test "deleteUnderPath escapes LIKE metacharacters in the prefix" {
-    const a = std.testing.allocator;
-    _ = a;
     var buf: [80]u8 = undefined;
     const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-delesc-{d}.db", .{clock.nowSeconds()});
     var pz: [112]u8 = undefined;

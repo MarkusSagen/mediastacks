@@ -164,6 +164,7 @@ test "scan indexes a synthetic library" {
     try writeFile(io, cwd, a, root, "Shows/Severance/Season 01/Severance - S01E01.mkv", "x");
     try writeFile(io, cwd, a, root, "Shows/Severance/Season 01/Severance - S01E02.mkv", "x");
     try writeFile(io, cwd, a, root, "Music/Daft Punk/Discovery (2001)/01 One More Time.flac", "x");
+    try cwd.createDirPath(io, try std.fs.path.join(a, &.{ root, "Movies", "Empty Placeholder" }));
 
     const db = try std.fmt.allocPrint(a, "/tmp/stacks-idx-{d}.db", .{clock.nowSeconds()});
     defer cwd.deleteFile(io, db) catch {};
@@ -192,6 +193,8 @@ test "scan indexes a synthetic library" {
     try t.expectEqualStrings("Discovery", album.title);
     try t.expectEqualStrings("Daft Punk", album.subtitle.?);
     try t.expect(album.playable_inline);
+
+    try t.expectEqual(@as(?mc.Item, null), try cat.getByPath(a, "Movies/Empty Placeholder"));
 
     // Re-scan after deleting the album folder → it's removed from the catalog.
     try cwd.deleteTree(io, try std.fs.path.join(a, &.{ root, "Music" }));
@@ -381,6 +384,11 @@ fn indexOne(
         if (parsed.provider_id) |v| alloc.free(v);
     }
     const agg = try aggregate(alloc, io, library_root, item_rel, kind);
+
+    // A directory with no media file, no cover, and no NFO isn't a library item
+    // (e.g. an empty folder left behind after an undo). Skip it AND leave it out
+    // of `seen`, so scan's removal pass prunes any pre-existing ghost row for it.
+    if (agg.file_count == 0 and !agg.has_cover and !agg.has_nfo) return;
 
     const existed = (try cat.getByPath(alloc, item_rel)) != null;
     if (existed) st.updated += 1 else st.added += 1;

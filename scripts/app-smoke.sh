@@ -44,9 +44,8 @@ chk "cover endpoint blocks traversal" '[[ "$(curl -s -o /dev/null -w "%{http_cod
 
 # Catalog Library (slice B): apply auto-reconciled the catalog, so the Shows item
 # is queryable without an explicit reindex.
-LIB2="$(curl -s "http://127.0.0.1:$PORT/api/library")"
-chk "catalog library lists the show" 'grep -q "witch hat atelier" <<<"$LIB2"'
-chk "catalog library has counts" 'grep -q "\"counts\":{" <<<"$LIB2"'
+chk "catalog library lists the show" 'grep -q "witch hat atelier" <<<"$LIBJSON"'
+chk "catalog library has counts" 'grep -q "\"counts\":{" <<<"$LIBJSON"'
 chk "catalog kind filter works" '[[ -n "$(curl -s "http://127.0.0.1:$PORT/api/library?kind=tv" | grep -o witch)" ]]'
 chk "catalog kind filter excludes others" '[[ -z "$(curl -s "http://127.0.0.1:$PORT/api/library?kind=movie" | grep -o witch)" ]]'
 chk "catalog search matches" '[[ -n "$(curl -s "http://127.0.0.1:$PORT/api/library?q=witch" | grep -o witch)" ]]'
@@ -61,6 +60,7 @@ RUNID="$(grep -o "\"id\":\"[^\"]*\"" <<<"$UNDO" | head -1 | sed "s/.*:\"//;s/\"/
 curl -s -X POST "http://127.0.0.1:$PORT/api/undo/revert?id=$RUNID" >/dev/null
 chk "revert emptied the library" '[[ "$(find "$LIB" -name "*.mkv" | wc -l | tr -d " ")" == 0 ]]'
 chk "revert restored the source" '[[ -f "$SRC/witch.hat.atelier.s01e01.1080p.web.h264-x.mkv" ]]'
+chk "catalog drops the reverted item" '[[ -z "$(curl -s "http://127.0.0.1:$PORT/api/library" | grep -o witch)" ]]'
 
 # Settings editor (slice 4): POST merges into config.toml + reloads.
 curl -s -X POST "http://127.0.0.1:$PORT/api/config" -d '{"write_tags":true,"musicbrainz":true,"tmdb_key":"KEY123"}' >/dev/null
