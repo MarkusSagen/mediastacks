@@ -169,6 +169,11 @@ function renderLibrary(d) {
        <div class="lib-grid">${groups[k].map(cardHtml).join("")}</div></section>`).join("");
   }
   wireCovers();
+  wireLibraryClicks();
+}
+function wireLibraryClicks() {
+  $$("#library .lib-card, #library .lib-row").forEach((el) =>
+    el.addEventListener("click", () => openDetail(el.dataset.id)));
 }
 function wireCovers() {
   $$("#library img.lib-cover[data-src]").forEach((img) => {
@@ -200,6 +205,61 @@ function listRowHtml(it) {
     <div class="lib-row-body"><div class="lib-row-title">${esc(it.title)}</div>
       <div class="lib-row-sub"><span class="kind-badge ${kindClass(it.kind)}">${esc(it.kind)}</span>${sub}${yr} · ${it.count} file${it.count === 1 ? "" : "s"}</div></div>
     ${badges(it)}</div>`;
+}
+
+// ── detail modal ───────────────────────────────────────────────────
+const ROLE_LABEL = { media: "", cover: "cover", nfo: "nfo", other: "" };
+function fmtSize(n) {
+  if (!n) return "";
+  const u = ["B","KB","MB","GB"]; let i = 0; let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
+}
+async function openDetail(id) {
+  if (!id) return;
+  const host = $("#detail-body");
+  host.innerHTML = `<div class="empty">Loading…</div>`;
+  showDetail(true);
+  try {
+    const d = await (await fetch("/api/item?id=" + encodeURIComponent(id))).json();
+    host.innerHTML = detailHtml(d);
+    $("#detail .modal-close").addEventListener("click", () => showDetail(false));
+    $$("#detail [data-open]").forEach((b) => b.addEventListener("click", () => openExternal(id, b.dataset.open)));
+  } catch { host.innerHTML = `<div class="empty">Could not load item.</div>`; }
+}
+function detailHtml(d) {
+  const cover = d.cover ? `<img class="detail-cover" src="${esc(d.cover)}" alt="">` : `<div class="detail-cover ph"></div>`;
+  const meta = [];
+  if (d.year) meta.push(esc(d.year));
+  if (d.subtitle) meta.push(esc(d.subtitle));
+  if (d.provider && d.provider_id) meta.push(`${esc(d.provider)}: ${esc(d.provider_id)}`);
+  meta.push(`${d.count} file${d.count === 1 ? "" : "s"}`);
+  if (d.total_bytes) meta.push(fmtSize(d.total_bytes));
+  const files = (d.files || []).map((f) =>
+    `<div class="detail-file"><span class="df-name">${esc(f.name)}</span>${f.role !== "media" && ROLE_LABEL[f.role] ? `<span class="mini">${esc(ROLE_LABEL[f.role])}</span>` : ""}<span class="df-size">${fmtSize(f.size)}</span></div>`).join("");
+  return `<button class="modal-close ghost" type="button" title="Close">✕</button>
+    <div class="detail-head">${cover}
+      <div class="detail-info">
+        <div class="detail-title"><span class="kind-badge ${kindClass(d.kind)}">${esc(d.kind)}</span> ${esc(d.title)}</div>
+        <div class="detail-meta">${meta.join(" · ")}</div>
+        <div class="detail-path">${esc(d.path)}</div>
+        <div class="detail-actions">
+          ${d.playable ? `<button class="primary" data-open="launch" type="button">▶ Open</button>` : `<button class="ghost" data-open="launch" type="button">Open in default app</button>`}
+          <button class="ghost" data-open="reveal" type="button">Reveal in Finder</button>
+        </div>
+      </div></div>
+    <div class="detail-files"><h4>Files</h4>${files || `<div class="hint">No files found on disk.</div>`}</div>`;
+}
+async function openExternal(id, mode) {
+  try {
+    const res = await fetch(`/api/open?id=${encodeURIComponent(id)}&mode=${mode}`, { method: "POST" });
+    toast(res.ok ? (mode === "reveal" ? "Revealed in Finder" : "Opened") : "Open failed");
+  } catch { toast("Open failed"); }
+}
+function showDetail(on) {
+  const m = $("#detail");
+  m.hidden = !on;
+  if (on) { $(".modal-backdrop", m).onclick = () => showDetail(false); }
 }
 
 // ── undo ───────────────────────────────────────────────────────────
