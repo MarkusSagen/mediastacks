@@ -233,7 +233,51 @@ pub const Catalog = struct {
         _ = try stmt.step();
         return stmt.columnInt64(0);
     }
+
+    pub fn clear(self: *Catalog) !void {
+        try sql.exec(self.db, "DELETE FROM items;");
+    }
+
+    pub fn deleteUnderPath(self: *Catalog, prefix: []const u8) !usize {
+        var stmt = try sql.prepare(self.db, "DELETE FROM items WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\'");
+        defer stmt.finalize();
+        // ?2 matches children: prefix ++ "/%", with LIKE metacharacters in prefix escaped.
+        var esc: std.ArrayList(u8) = .empty;
+        defer esc.deinit(std.heap.page_allocator);
+        for (prefix) |ch| {
+            if (ch == '%' or ch == '_' or ch == '\\') try esc.append(std.heap.page_allocator, '\\');
+            try esc.append(std.heap.page_allocator, ch);
+        }
+        try esc.appendSlice(std.heap.page_allocator, "/%");
+        try stmt.bindText(1, prefix);
+        try stmt.bindText(2, esc.items);
+        _ = try stmt.step();
+        const n = sql.changes(self.db);
+        return if (n < 0) 0 else @intCast(n);
+    }
+
+    pub fn allPaths(self: *Catalog, alloc: std.mem.Allocator) ![][]const u8 {
+        var stmt = try sql.prepare(self.db, "SELECT path FROM items ORDER BY path");
+        defer stmt.finalize();
+        var out: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (out.items) |p| alloc.free(p);
+            out.deinit(alloc);
+        }
+        while (try stmt.step()) {
+            try out.append(alloc, try alloc.dupe(u8, stmt.columnText(0) orelse ""));
+        }
+        return out.toOwnedSlice(alloc);
+    }
 };
+
+pub fn defaultPath(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
+    if (env.get("XDG_DATA_HOME")) |xdg| {
+        return std.fs.path.join(alloc, &.{ xdg, "stacks", "media.db" });
+    }
+    const home = env.get("HOME") orelse return error.NoHome;
+    return std.fs.path.join(alloc, &.{ home, ".local", "share", "stacks", "media.db" });
+}
 
 test "upsertItem inserts then updates by path" {
     const a = std.testing.allocator;
@@ -310,4 +354,42 @@ test "search filters by kind, text and status" {
     defer freeItems(a, no_cover);
     try std.testing.expectEqual(@as(usize, 1), no_cover.len);
     try std.testing.expectEqualStrings("Blade Runner", no_cover[0].title);
+}
+
+test "deleteUnderPath, clear, allPaths, defaultPath" {
+    const a = std.testing.allocator;
+    var buf: [64]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-del-{d}.db", .{clock.nowSeconds()});
+    var path_z_buf: [4096]u8 = undefined;
+    const path_z = try std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path});
+    defer _ = std.c.unlink(path_z.ptr);
+    var cat = try Catalog.open(path);
+    defer cat.close();
+
+    try cat.upsertItem(.{ .kind = "tv", .path = "Shows/Severance", .title = "S", .sort_title = "s" });
+    try cat.upsertItem(.{ .kind = "tv", .path = "Shows/Severance Special", .title = "SS", .sort_title = "ss" });
+    try cat.upsertItem(.{ .kind = "movie", .path = "Movies/Dune (2021)", .title = "D", .sort_title = "d" });
+
+    // Only the exact folder + its children go — the sibling "Severance Special" stays.
+    const removed = try cat.deleteUnderPath("Shows/Severance");
+    try std.testing.expectEqual(@as(usize, 1), removed);
+    try std.testing.expectEqual(@as(i64, 2), try cat.count());
+
+    const paths = try cat.allPaths(a);
+    defer {
+        for (paths) |p| a.free(p);
+        a.free(paths);
+    }
+    try std.testing.expectEqual(@as(usize, 2), paths.len);
+
+    try cat.clear();
+    try std.testing.expectEqual(@as(i64, 0), try cat.count());
+
+    // defaultPath honours XDG_DATA_HOME.
+    var env = std.process.Environ.Map.init(a);
+    defer env.deinit();
+    try env.put("XDG_DATA_HOME", "/data");
+    const dp = try defaultPath(a, &env);
+    defer a.free(dp);
+    try std.testing.expectEqualStrings("/data/stacks/media.db", dp);
 }
