@@ -145,7 +145,7 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
     if (std.mem.eql(u8, path, "/api/reindex")) return handleReindex(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/cover")) return handleCover(app, request, target);
     if (std.mem.eql(u8, path, "/api/undo/list")) return handleUndoList(io, app, request);
-    if (std.mem.eql(u8, path, "/api/undo/revert")) return handleUndoRevert(app, request, target);
+    if (std.mem.eql(u8, path, "/api/undo/revert")) return handleUndoRevert(io, app, request, target);
 
     // These operate on the current plan (must exist).
     if (std.mem.eql(u8, path, "/api/plan")) {
@@ -166,6 +166,7 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
             return request.respond(try std.fmt.allocPrint(app.session.arena, "apply failed: {s}\n", .{@errorName(err)}), .{ .status = .internal_server_error });
         };
         app.has_plan = false; // consumed
+        reindexQuietly(io, app); // catalog reflects the newly organized items
         return respondJson(request, try std.fmt.allocPrint(app.session.arena, "{{\"moved\":{d},\"trashed\":{d},\"skipped\":{d},\"journal\":\"{s}\"}}", .{ res.moved, res.trashed, res.skipped, res.journal_path }));
     }
     if (std.mem.eql(u8, path, "/api/thumb")) {
@@ -362,6 +363,18 @@ fn handleLibrary(app: *App, request: *std.http.Server.Request, target: []const u
     try respondJson(request, body.items);
 }
 
+/// Best-effort incremental reconcile of the catalog after a mutation. Errors
+/// are swallowed — the catalog is a derived cache and Rescan can always fix it.
+fn reindexQuietly(io: std.Io, app: *App) void {
+    var arena_state = std.heap.ArenaAllocator.init(app.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const db_path = mediacatalog.defaultPath(arena, app.env) catch return;
+    var cat = mediacatalog.Catalog.open(db_path) catch return;
+    defer cat.close();
+    _ = indexer.scan(arena, io, &cat, app.base_cfg.library_root, false) catch {};
+}
+
 /// Rebuild/refresh the media catalog from library_root.
 fn handleReindex(io: std.Io, app: *App, request: *std.http.Server.Request, target: []const u8) !void {
     var arena_state = std.heap.ArenaAllocator.init(app.gpa);
@@ -444,7 +457,7 @@ fn cmpUndoDesc(_: void, a: UndoRow, b: UndoRow) bool {
 }
 
 /// Revert one journal by id, then rename it `.undone` so it can't be re-run.
-fn handleUndoRevert(app: *App, request: *std.http.Server.Request, target: []const u8) !void {
+fn handleUndoRevert(io: std.Io, app: *App, request: *std.http.Server.Request, target: []const u8) !void {
     var arena_state = std.heap.ArenaAllocator.init(app.gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -466,6 +479,7 @@ fn handleUndoRevert(app: *App, request: *std.http.Server.Request, target: []cons
         const tzp = try std.fmt.bufPrintZ(&tz, "{s}", .{done});
         _ = std.c.rename(fzp.ptr, tzp.ptr);
     }
+    reindexQuietly(io, app); // catalog reflects the reverted items
     return respondJson(request, "{\"ok\":true}");
 }
 
