@@ -239,6 +239,10 @@ function detailHtml(d) {
   if (d.total_bytes) meta.push(fmtSize(d.total_bytes));
   const files = (d.files || []).map((f) =>
     `<div class="detail-file"><span class="df-name">${esc(f.name)}</span>${f.role !== "media" && ROLE_LABEL[f.role] ? `<span class="mini">${esc(ROLE_LABEL[f.role])}</span>` : ""}<span class="df-size">${fmtSize(f.size)}</span></div>`).join("");
+  const playerTag = (d.kind === "music" || d.kind === "audiobook") ? "audio" : "video";
+  const player = d.playable
+    ? `<${playerTag} class="detail-player" controls preload="metadata" src="/api/stream?id=${encodeURIComponent(d.id)}"></${playerTag}>`
+    : "";
   return `<button class="modal-close ghost" type="button" title="Close">✕</button>
     <div class="detail-head">${cover}
       <div class="detail-info">
@@ -250,6 +254,7 @@ function detailHtml(d) {
           <button class="ghost" data-open="reveal" type="button">Reveal in Finder</button>
         </div>
       </div></div>
+    ${player}
     <div class="detail-files"><h4>Files</h4>${files || `<div class="hint">No files found on disk.</div>`}</div>`;
 }
 async function openExternal(id, mode) {
