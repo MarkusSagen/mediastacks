@@ -89,6 +89,8 @@ async function saveSettings() {
 let libLoaded = false;
 let libState = { q: "", kind: "", status: "all", view: "gallery" };
 try { const v = localStorage.getItem("shelve-lib-view"); if (v) libState.view = v; } catch {}
+$("#lib-gallery").classList.toggle("active", libState.view === "gallery");
+$("#lib-list").classList.toggle("active", libState.view === "list");
 
 let libSearchTimer = null;
 $("#lib-search").addEventListener("input", (e) => {
@@ -186,14 +188,14 @@ function badges(it) {
 }
 function cardHtml(it) {
   const sub = it.subtitle ? `<div class="lib-sub">${esc(it.subtitle)}</div>` : "";
-  const yr = it.year ? ` · ${it.year}` : "";
+  const yr = it.year ? ` · ${esc(it.year)}` : "";
   return `<div class="lib-card" data-id="${it.id}">${coverImg(it, "lib-cover")}
     <div class="lib-title" title="${esc(it.title)}">${esc(it.title)}</div>${sub}
     <div class="lib-meta">${it.count} file${it.count === 1 ? "" : "s"}${yr} ${badges(it)}</div></div>`;
 }
 function listRowHtml(it) {
   const sub = it.subtitle ? ` · ${esc(it.subtitle)}` : "";
-  const yr = it.year ? ` · ${it.year}` : "";
+  const yr = it.year ? ` · ${esc(it.year)}` : "";
   return `<div class="lib-row" data-id="${it.id}">${coverImg(it, "lib-thumb")}
     <div class="lib-row-body"><div class="lib-row-title">${esc(it.title)}</div>
       <div class="lib-row-sub"><span class="kind-badge ${kindClass(it.kind)}">${esc(it.kind)}</span>${sub}${yr} · ${it.count} file${it.count === 1 ? "" : "s"}</div></div>
