@@ -75,6 +75,19 @@ chk "open reveal returns ok" 'curl -s -X POST "http://127.0.0.1:$PORT/api/open?i
 chk "open recorded the -R reveal" 'grep -q -- "-R" "$OPENLOG"'
 chk "open rejects non-numeric id" '[[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:$PORT/api/open?id=abc")" == "400" ]]'
 
+# Inline streaming (slice D): known-bytes fixture → Range request returns 206 + slice.
+mkdir -p "$LIB/Movies/Stream Test (2020)"
+printf 'ABCDEFGHIJ' > "$LIB/Movies/Stream Test (2020)/Stream Test (2020).mp4"
+curl -s -X POST "http://127.0.0.1:$PORT/api/reindex" >/dev/null
+SID="$(curl -s "http://127.0.0.1:$PORT/api/library?kind=movie" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)"
+SHDR="$(curl -s -D - -o /dev/null -H "Range: bytes=2-4" "http://127.0.0.1:$PORT/api/stream?id=$SID")"
+chk "stream returns 206 for a range"    'grep -qi "206" <<<"$SHDR"'
+chk "stream sets content-range"         'grep -qi "content-range: bytes 2-4/10" <<<"$SHDR"'
+chk "stream advertises accept-ranges"   'grep -qi "accept-ranges: bytes" <<<"$SHDR"'
+chk "stream range body is the slice"    '[[ "$(curl -s -H "Range: bytes=2-4" "http://127.0.0.1:$PORT/api/stream?id=$SID")" == "CDE" ]]'
+chk "stream no-range is 200"            '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/stream?id=$SID")" == "200" ]]'
+chk "stream 404 on bad id"              '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/stream?id=99999")" == "404" ]]'
+
 # Undo history (slice 3): the apply above wrote a journal → list shows it → revert restores.
 UNDO="$(curl -s "http://127.0.0.1:$PORT/api/undo/list")"
 chk "undo lists the applied run" 'grep -q "\"moved\":2" <<<"$UNDO"'
