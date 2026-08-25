@@ -188,6 +188,14 @@ pub const Catalog = struct {
         return try rowToItem(alloc, &stmt);
     }
 
+    pub fn getById(self: *Catalog, alloc: std.mem.Allocator, id: i64) !?Item {
+        var stmt = try sql.prepare(self.db, "SELECT " ++ SELECT_COLS ++ " FROM items WHERE id = ?");
+        defer stmt.finalize();
+        try stmt.bindInt64(1, id);
+        if (!try stmt.step()) return null;
+        return try rowToItem(alloc, &stmt);
+    }
+
     pub fn search(self: *Catalog, alloc: std.mem.Allocator, q: SearchQuery) ![]Item {
         var text_buf: std.ArrayList(u8) = .empty;
         defer text_buf.deinit(alloc);
@@ -418,6 +426,31 @@ test "search treats % and _ in query as literal" {
     defer { for (hits) |*it| it.deinit(a); a.free(hits); }
     try std.testing.expectEqual(@as(usize, 1), hits.len);
     try std.testing.expectEqualStrings("50% Off", hits[0].title);
+}
+
+test "getById returns the row or null" {
+    const a = std.testing.allocator;
+    var buf: [64]u8 = undefined;
+    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-byid-{d}.db", .{clock.nowSeconds()});
+    var pz: [96]u8 = undefined;
+    const pathz = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch unreachable;
+    defer _ = std.c.unlink(pathz.ptr);
+
+    var cat = try Catalog.open(path);
+    defer cat.close();
+    try cat.upsertItem(.{ .kind = "movie", .path = "Movies/Dune (2021)", .title = "Dune", .sort_title = "dune", .year = 2021 });
+
+    // Look up the row's id via getByPath, then fetch it by id.
+    var byPath = (try cat.getByPath(a, "Movies/Dune (2021)")).?;
+    const id = byPath.id;
+    byPath.deinit(a);
+
+    var got = (try cat.getById(a, id)).?;
+    defer got.deinit(a);
+    try std.testing.expectEqualStrings("Dune", got.title);
+    try std.testing.expectEqual(id, got.id);
+
+    try std.testing.expectEqual(@as(?Item, null), try cat.getById(a, 99999));
 }
 
 test "deleteUnderPath escapes LIKE metacharacters in the prefix" {
