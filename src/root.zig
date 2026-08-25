@@ -31,6 +31,7 @@ pub const journal = @import("core/journal.zig");
 pub const apply = @import("core/apply.zig");
 pub const organize_cmd = @import("commands/organize.zig");
 pub const undo_cmd = @import("commands/undo.zig");
+pub const index_cmd = @import("commands/index.zig");
 pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
 pub const mediacatalog = @import("core/mediacatalog.zig");

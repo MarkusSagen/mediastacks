@@ -9,6 +9,7 @@ const undo_cmd = @import("commands/undo.zig");
 const review_cmd = @import("commands/review.zig");
 const makem4b_cmd = @import("commands/makem4b.zig");
 const webapp_cmd = @import("commands/webapp.zig");
+const index_cmd = @import("commands/index.zig");
 
 pub fn run(ctx: cli.Context) !u8 {
     if (ctx.args.len < 2) {
@@ -32,6 +33,7 @@ pub fn run(ctx: cli.Context) !u8 {
     if (eq(cmd, "serve")) return webapp_cmd.run(ctx, rest);
     if (eq(cmd, "makem4b")) return makem4b_cmd.run(ctx, rest);
     if (eq(cmd, "undo")) return undo_cmd.run(ctx, rest);
+    if (eq(cmd, "index")) return index_cmd.run(ctx, rest);
 
     try ctx.stderr.print("unknown command: {s}\n", .{cmd});
     try printUsage(ctx.stderr);
@@ -63,6 +65,7 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\    --out FILE.m4b         Write to an explicit path instead
         \\    --bitrate B            AAC bitrate (default 128k)
         \\  undo                   Reverse the most recent organize
+        \\  index [--rebuild] [--to LIB]   scan the library into the media catalog
         \\  help                   Show this help
         \\  version                Print version
         \\
