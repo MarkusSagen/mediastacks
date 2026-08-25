@@ -225,6 +225,8 @@ async function openDetail(id) {
     host.innerHTML = detailHtml(d);
     $("#detail .modal-close").addEventListener("click", () => showDetail(false));
     $$("#detail [data-open]").forEach((b) => b.addEventListener("click", () => openExternal(id, b.dataset.open)));
+    const cimg = $("#detail-body img.detail-cover");
+    if (cimg) cimg.addEventListener("error", () => { const ph = document.createElement("div"); ph.className = "detail-cover ph"; cimg.replaceWith(ph); });
   } catch { host.innerHTML = `<div class="empty">Could not load item.</div>`; }
 }
 function detailHtml(d) {
@@ -261,6 +263,7 @@ function showDetail(on) {
   m.hidden = !on;
   if (on) { $(".modal-backdrop", m).onclick = () => showDetail(false); }
 }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#detail").hidden) showDetail(false); });
 
 // ── undo ───────────────────────────────────────────────────────────
 async function loadUndo() {

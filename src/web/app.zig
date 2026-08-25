@@ -264,7 +264,12 @@ fn jsonEsc(arena: std.mem.Allocator, s: []const u8) ![]u8 {
         '\n' => try out.appendSlice(arena, "\\n"),
         '\r' => {},
         '\t' => try out.appendSlice(arena, "\\t"),
-        else => try out.append(arena, c),
+        else => if (c < 0x20) {
+            const hex = "0123456789abcdef";
+            try out.appendSlice(arena, "\\u00");
+            try out.append(arena, hex[(c >> 4) & 0xf]);
+            try out.append(arena, hex[c & 0xf]);
+        } else try out.append(arena, c),
     };
     return out.toOwnedSlice(arena);
 }
@@ -470,7 +475,7 @@ fn handleOpen(io: std.Io, app: *App, request: *std.http.Server.Request, target: 
     // Launch → primary file if known; reveal (or no primary) → the item folder.
     const rel = if (!reveal and item.primary_path != null) item.primary_path.? else item.path;
     const abs = try std.fs.path.join(arena, &.{ lib, rel });
-    if (!std.mem.startsWith(u8, abs, lib) or std.mem.indexOf(u8, abs, "..") != null)
+    if (!pathUnderRoot(abs, lib) or std.mem.indexOf(u8, abs, "..") != null)
         return request.respond("forbidden\n", .{ .status = .forbidden });
 
     const cmd = app.env.get("STACKS_OPEN_CMD") orelse "open";
@@ -603,12 +608,22 @@ fn handleUndoRevert(io: std.Io, app: *App, request: *std.http.Server.Request, ta
     return respondJson(request, "{\"ok\":true}");
 }
 
+/// True iff `abs` is `root` itself or lies under `root/`. Lexical only — a
+/// trailing slash on `root` is tolerated; callers MUST still reject ".."
+/// separately (this does not canonicalize).
+fn pathUnderRoot(abs: []const u8, root: []const u8) bool {
+    const r = std.mem.trimEnd(u8, root, "/");
+    if (r.len == 0) return false; // refuse an empty / "/"-only root rather than match everything
+    if (std.mem.eql(u8, abs, r)) return true;
+    return abs.len > r.len and std.mem.startsWith(u8, abs, r) and abs[r.len] == '/';
+}
+
 /// Serve a cover image, but only from within the library root (path allowlist).
 fn handleCover(app: *App, request: *std.http.Server.Request, target: []const u8) !void {
     const enc = queryValue(target, "path") orelse return request.respond("", .{ .status = .not_found });
     const p = try urlDecode(app.gpa, enc);
     defer app.gpa.free(p);
-    if (!std.mem.startsWith(u8, p, app.base_cfg.library_root)) return request.respond("", .{ .status = .forbidden });
+    if (!pathUnderRoot(p, app.base_cfg.library_root)) return request.respond("", .{ .status = .forbidden });
     if (std.mem.indexOf(u8, p, "..") != null) return request.respond("", .{ .status = .forbidden });
 
     var pz: [4096]u8 = undefined;

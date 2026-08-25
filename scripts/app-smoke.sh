@@ -21,9 +21,9 @@ export STACKS_OPEN_CMD="$OPENREC"
 SRC="$TMP/dl/show"; LIB="$TMP/lib"; mkdir -p "$SRC"
 : > "$SRC/witch.hat.atelier.s01e01.1080p.web.h264-x.mkv"
 : > "$SRC/witch.hat.atelier.s01e02.1080p.web.h264-x.mkv"
-PORT=8817
+PORT=$(( (RANDOM % 20000) + 20000 ))
 SRV=""
-cleanup(){ [[ -n "$SRV" ]] && kill "$SRV" 2>/dev/null || true; rm -rf "$TMP"; }
+cleanup(){ [[ -n "$SRV" ]] && kill -9 "$SRV" 2>/dev/null || true; rm -rf "$TMP"; }
 trap cleanup EXIT
 
 "$SHELVE" serve --port "$PORT" --to "$LIB" >"$TMP/serve.log" 2>&1 &
@@ -49,6 +49,7 @@ chk "library lists the Shows kind" 'grep -q "\"kind\":\"tv\"" <<<"$LIBJSON"'
 chk "library found the series item" 'grep -q "witch hat atelier" <<<"$LIBJSON"'
 # Cover endpoint rejects paths outside the library root.
 chk "cover endpoint blocks traversal" '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/cover?path=/etc/hosts")" == "403" ]]'
+chk "cover rejects sibling-prefix path" '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/cover?path=$LIB-evil/x.jpg")" == "403" ]]'
 
 # Catalog Library (slice B): apply auto-reconciled the catalog, so the Shows item
 # is queryable without an explicit reindex.
@@ -72,7 +73,7 @@ chk "item detail 404 on bad id" '[[ "$(curl -s -o /dev/null -w "%{http_code}" "h
 # (The recorder + env are set at server start; see the export near the top.)
 chk "open reveal returns ok" 'curl -s -X POST "http://127.0.0.1:$PORT/api/open?id=$ITEMID&mode=reveal" | grep -q "\"ok\":true"'
 chk "open recorded the -R reveal" 'grep -q -- "-R" "$OPENLOG"'
-chk "open blocks path traversal id" '[[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:$PORT/api/open?id=abc")" == "400" ]]'
+chk "open rejects non-numeric id" '[[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:$PORT/api/open?id=abc")" == "400" ]]'
 
 # Undo history (slice 3): the apply above wrote a journal → list shows it → revert restores.
 UNDO="$(curl -s "http://127.0.0.1:$PORT/api/undo/list")"
