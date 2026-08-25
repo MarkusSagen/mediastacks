@@ -8,9 +8,10 @@ const std = @import("std");
 const plan = @import("../core/plan.zig");
 const config = @import("../core/config.zig");
 const group = @import("../core/group.zig");
-const classify_mod = @import("../core/classify.zig");
 const apply_mod = @import("../core/apply.zig");
 const journal = @import("../core/journal.zig");
+const mediacatalog = @import("../core/mediacatalog.zig");
+const indexer = @import("../core/indexer.zig");
 const review = @import("review.zig");
 const static = @import("static.zig");
 const shutdown = @import("../util/shutdown.zig");
@@ -140,7 +141,7 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
 
     if (std.mem.eql(u8, path, "/api/config")) return handleConfig(app, request);
     if (std.mem.eql(u8, path, "/api/organize")) return handleOrganize(io, app, request, target);
-    if (std.mem.eql(u8, path, "/api/library")) return handleLibrary(io, app, request);
+    if (std.mem.eql(u8, path, "/api/library")) return handleLibrary(app, request, target);
     if (std.mem.eql(u8, path, "/api/cover")) return handleCover(app, request, target);
     if (std.mem.eql(u8, path, "/api/undo/list")) return handleUndoList(io, app, request);
     if (std.mem.eql(u8, path, "/api/undo/revert")) return handleUndoRevert(app, request, target);
@@ -250,23 +251,6 @@ fn boolStr(b: bool) []const u8 {
 
 // ── library browse ─────────────────────────────────────────────────
 
-const KindScan = struct { root: []const u8, kind: []const u8, label: []const u8, depth: u8 };
-const kind_scans = [_]KindScan{
-    .{ .root = "Movies", .kind = "movie", .label = "Movies", .depth = 1 },
-    .{ .root = "Shows", .kind = "tv", .label = "Shows", .depth = 1 },
-    .{ .root = "Music", .kind = "music", .label = "Music", .depth = 2 },
-    .{ .root = "Audiobooks", .kind = "audiobook", .label = "Audiobooks", .depth = 2 },
-    .{ .root = "Comics", .kind = "comic", .label = "Comics", .depth = 1 },
-};
-
-const Item = struct { count: u32 = 0, cover: ?[]const u8 = null };
-
-fn isCoverName(base: []const u8) bool {
-    const names = [_][]const u8{ "cover.jpg", "cover.jpeg", "cover.png", "poster.jpg", "poster.png", "folder.jpg", "folder.png" };
-    for (names) |n| if (std.ascii.eqlIgnoreCase(base, n)) return true;
-    return false;
-}
-
 fn jsonEsc(arena: std.mem.Allocator, s: []const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     for (s) |c| switch (c) {
@@ -280,86 +264,98 @@ fn jsonEsc(arena: std.mem.Allocator, s: []const u8) ![]u8 {
     return out.toOwnedSlice(arena);
 }
 
-/// Scan `library_root` and report items per kind (depth-1 folders for
-/// Movies/Shows/Comics; depth-2 Artist/Album | Author/Book for Music/Audiobooks).
-/// One walk per kind aggregates media counts + a cover per item.
-fn handleLibrary(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
+fn kindLabel(kind: []const u8) []const u8 {
+    if (std.mem.eql(u8, kind, "movie")) return "Movies";
+    if (std.mem.eql(u8, kind, "tv")) return "Shows";
+    if (std.mem.eql(u8, kind, "music")) return "Music";
+    if (std.mem.eql(u8, kind, "audiobook")) return "Audiobooks";
+    if (std.mem.eql(u8, kind, "comic")) return "Comics";
+    return kind;
+}
+
+fn parseStatus(s: ?[]const u8) mediacatalog.Status {
+    const v = s orelse return .all;
+    if (std.mem.eql(u8, v, "missing_cover")) return .missing_cover;
+    if (std.mem.eql(u8, v, "missing_metadata")) return .missing_metadata;
+    if (std.mem.eql(u8, v, "duplicates")) return .duplicates;
+    return .all;
+}
+
+fn parseSort(s: ?[]const u8) mediacatalog.Sort {
+    const v = s orelse return .kind_title;
+    if (std.mem.eql(u8, v, "title")) return .title;
+    if (std.mem.eql(u8, v, "year")) return .year;
+    return .kind_title;
+}
+
+/// Catalog-backed library listing. Opens the media catalog per request.
+fn handleLibrary(app: *App, request: *std.http.Server.Request, target: []const u8) !void {
     var arena_state = std.heap.ArenaAllocator.init(app.gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     const lib = app.base_cfg.library_root;
 
+    // Optional, URL-decoded query params.
+    const q_text = if (queryValue(target, "q")) |v| try urlDecode(arena, v) else null;
+    const q_kind = if (queryValue(target, "kind")) |v| try urlDecode(arena, v) else null;
+    const query: mediacatalog.SearchQuery = .{
+        .text = if (q_text) |t| (if (t.len > 0) t else null) else null,
+        .kind = if (q_kind) |k| (if (k.len > 0) k else null) else null,
+        .status = parseStatus(queryValue(target, "status")),
+        .sort = parseSort(queryValue(target, "sort")),
+    };
+
+    const db_path = try mediacatalog.defaultPath(arena, app.env);
+    var cat = mediacatalog.Catalog.open(db_path) catch {
+        // No catalog yet → empty library; the UI shows a Rescan prompt.
+        return respondJson(request, try std.fmt.allocPrint(arena, "{{\"library_root\":\"{s}\",\"total\":0,\"counts\":{{}},\"items\":[]}}", .{try jsonEsc(arena, lib)}));
+    };
+    defer cat.close();
+
+    // Per-kind counts are always the UNFILTERED totals (for the chips); the item
+    // list honors the active filters.
+    const all = try cat.search(arena, .{});
+    var counts = std.StringHashMap(u32).init(arena);
+    for (all) |it| {
+        const gop = try counts.getOrPut(it.kind);
+        gop.value_ptr.* = (if (gop.found_existing) gop.value_ptr.* else 0) + 1;
+    }
+
+    const items = try cat.search(arena, query);
+
     var body: std.ArrayList(u8) = .empty;
-    try body.appendSlice(arena, "{\"library_root\":\"");
-    try body.appendSlice(arena, try jsonEsc(arena, lib));
-    try body.appendSlice(arena, "\",\"kinds\":[");
-
-    const cwd = std.Io.Dir.cwd();
-    var first_kind = true;
-    for (kind_scans) |ks| {
-        const kroot = try std.fs.path.join(arena, &.{ lib, ks.root });
-        var map = std.StringHashMap(Item).init(arena);
-        var dir = cwd.openDir(io, kroot, .{ .iterate = true }) catch {
-            continue; // kind root doesn't exist yet
-        };
-        defer dir.close(io);
-        var walker = dir.walk(arena) catch continue;
-        defer walker.deinit();
-        while (walker.next(io) catch null) |entry| {
-            if (entry.kind != .file) continue;
-            const p = entry.path;
-            // item key = first `depth` path components.
-            var comps: usize = 0;
-            var key_end: usize = 0;
-            for (p, 0..) |ch, idx| {
-                if (ch == '/') {
-                    comps += 1;
-                    if (comps == ks.depth) {
-                        key_end = idx;
-                        break;
-                    }
-                }
-            }
-            if (key_end == 0) continue; // shallower than an item
-            const key = p[0..key_end];
-            const base = std.fs.path.basename(p);
-            const gop = try map.getOrPut(try arena.dupe(u8, key));
-            if (!gop.found_existing) gop.value_ptr.* = .{};
-            if (isCoverName(base)) {
-                if (gop.value_ptr.cover == null) gop.value_ptr.cover = try std.fs.path.join(arena, &.{ kroot, p });
-            } else if (classify_mod.classify(base, false) != .unknown) {
-                gop.value_ptr.count += 1;
-            }
+    try body.appendSlice(arena, try std.fmt.allocPrint(arena, "{{\"library_root\":\"{s}\",\"total\":{d},\"counts\":{{", .{ try jsonEsc(arena, lib), all.len }));
+    var first_c = true;
+    var cit = counts.iterator();
+    while (cit.next()) |e| {
+        if (!first_c) try body.appendSlice(arena, ",");
+        first_c = false;
+        try body.appendSlice(arena, try std.fmt.allocPrint(arena, "\"{s}\":{d}", .{ e.key_ptr.*, e.value_ptr.* }));
+    }
+    try body.appendSlice(arena, "},\"items\":[");
+    for (items, 0..) |it, i| {
+        if (i > 0) try body.appendSlice(arena, ",");
+        try body.appendSlice(arena, try std.fmt.allocPrint(arena, "{{\"id\":{d},\"kind\":\"{s}\",\"label\":\"{s}\",\"title\":\"{s}\",\"subtitle\":\"{s}\",\"count\":{d},\"container\":\"{s}\",\"playable\":{s},\"has_cover\":{s},\"has_metadata\":{s}", .{
+            it.id,
+            it.kind,
+            kindLabel(it.kind),
+            try jsonEsc(arena, it.title),
+            try jsonEsc(arena, it.subtitle orelse ""),
+            it.file_count,
+            it.container orelse "",
+            boolStr(it.playable_inline),
+            boolStr(it.has_cover),
+            boolStr(it.has_metadata),
+        }));
+        if (it.year) |y| try body.appendSlice(arena, try std.fmt.allocPrint(arena, ",\"year\":{d}", .{y}));
+        if (it.cover_path) |cp| {
+            // /api/cover wants an absolute path under library_root.
+            const abs = try std.fs.path.join(arena, &.{ lib, cp });
+            try body.appendSlice(arena, ",\"cover\":\"/api/cover?path=");
+            try body.appendSlice(arena, try urlEncode(arena, abs));
+            try body.appendSlice(arena, "\"");
         }
-
-        if (!first_kind) try body.appendSlice(arena, ",");
-        first_kind = false;
-        try body.appendSlice(arena, try std.fmt.allocPrint(arena, "{{\"kind\":\"{s}\",\"label\":\"{s}\",\"items\":[", .{ ks.kind, ks.label }));
-        var first_item = true;
-        var it = map.iterator();
-        while (it.next()) |e| {
-            const key = e.key_ptr.*;
-            const item = e.value_ptr.*;
-            // title/subtitle from the key components
-            var title = key;
-            var subtitle: []const u8 = "";
-            if (ks.depth == 2) {
-                if (std.mem.lastIndexOfScalar(u8, key, '/')) |s| {
-                    subtitle = key[0..s];
-                    title = key[s + 1 ..];
-                }
-            }
-            if (!first_item) try body.appendSlice(arena, ",");
-            first_item = false;
-            try body.appendSlice(arena, try std.fmt.allocPrint(arena, "{{\"title\":\"{s}\",\"subtitle\":\"{s}\",\"count\":{d}", .{ try jsonEsc(arena, title), try jsonEsc(arena, subtitle), item.count }));
-            if (item.cover) |cov| {
-                try body.appendSlice(arena, ",\"cover\":\"/api/cover?path=");
-                try body.appendSlice(arena, try urlEncode(arena, cov));
-                try body.appendSlice(arena, "\"");
-            }
-            try body.appendSlice(arena, "}");
-        }
-        try body.appendSlice(arena, "]}");
+        try body.appendSlice(arena, "}");
     }
     try body.appendSlice(arena, "]}");
     try respondJson(request, body.items);
