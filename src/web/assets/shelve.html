@@ -45,8 +45,20 @@
     <!-- LIBRARY -->
     <section class="view" data-view="library">
       <div class="library-bar">
-        <button id="lib-refresh" class="ghost" type="button">Rescan library</button>
+        <input id="lib-search" class="lib-search" type="text" placeholder="Search title / artist…" autocomplete="off" spellcheck="false">
+        <select id="lib-status" class="lib-select">
+          <option value="all">All</option>
+          <option value="missing_cover">No cover</option>
+          <option value="missing_metadata">No metadata</option>
+          <option value="duplicates">Duplicates</option>
+        </select>
+        <div class="lib-toggle">
+          <button id="lib-gallery" class="seg active" type="button" title="Gallery">▦</button>
+          <button id="lib-list" class="seg" type="button" title="List">▤</button>
+        </div>
+        <button id="lib-refresh" class="ghost" type="button">Rescan</button>
       </div>
+      <div id="lib-chips" class="lib-chips"></div>
       <div id="library"></div>
     </section>
 

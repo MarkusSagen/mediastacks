@@ -85,35 +85,119 @@ async function saveSettings() {
   finally { btn.disabled = false; btn.textContent = "Save settings"; }
 }
 
-// ── library ────────────────────────────────────────────────────────
+// ── library (catalog-backed) ───────────────────────────────────────
 let libLoaded = false;
-$("#lib-refresh").addEventListener("click", () => { libLoaded = false; loadLibrary(); });
+let libState = { q: "", kind: "", status: "all", view: "gallery" };
+try { const v = localStorage.getItem("shelve-lib-view"); if (v) libState.view = v; } catch {}
 
+let libSearchTimer = null;
+$("#lib-search").addEventListener("input", (e) => {
+  libState.q = e.target.value.trim();
+  clearTimeout(libSearchTimer);
+  libSearchTimer = setTimeout(loadLibrary, 200);
+});
+$("#lib-status").addEventListener("change", (e) => { libState.status = e.target.value; loadLibrary(); });
+$("#lib-refresh").addEventListener("click", rescanLibrary);
+$("#lib-gallery").addEventListener("click", () => setLibView("gallery"));
+$("#lib-list").addEventListener("click", () => setLibView("list"));
+
+function setLibView(v) {
+  libState.view = v;
+  try { localStorage.setItem("shelve-lib-view", v); } catch {}
+  $("#lib-gallery").classList.toggle("active", v === "gallery");
+  $("#lib-list").classList.toggle("active", v === "list");
+  renderLibrary(lastLib);
+}
+
+async function rescanLibrary() {
+  const btn = $("#lib-refresh"); btn.disabled = true; btn.textContent = "Scanning…";
+  try {
+    const r = await (await fetch("/api/reindex", { method: "POST" })).json();
+    toast(`Indexed ${r.total} item(s)`);
+    await loadLibrary();
+  } catch { toast("Rescan failed"); }
+  finally { btn.disabled = false; btn.textContent = "Rescan"; }
+}
+
+let lastLib = null;
 async function loadLibrary() {
   const host = $("#library");
-  host.innerHTML = `<div class="empty">Scanning library…</div>`;
+  if (!lastLib) host.innerHTML = `<div class="empty">Loading…</div>`;
+  const qs = new URLSearchParams();
+  if (libState.q) qs.set("q", libState.q);
+  if (libState.kind) qs.set("kind", libState.kind);
+  if (libState.status !== "all") qs.set("status", libState.status);
   try {
-    const d = await (await fetch("/api/library")).json();
-    const sections = (d.kinds || []).filter((k) => k.items.length).map((k) => {
-      const items = k.items.slice().sort((a, b) => (a.subtitle + " " + a.title).localeCompare(b.subtitle + " " + b.title));
-      return `<section class="lib-section"><h3>${esc(k.label)} <span class="lib-count">${items.length}</span></h3>
-        <div class="lib-grid">${items.map(cardHtml).join("")}</div></section>`;
-    }).join("");
-    host.innerHTML = sections || `<div class="empty">Library is empty at <code>${esc(d.library_root || "")}</code>.<div class="hint">Organize a folder to populate it.</div></div>`;
-    $$("#library img.lib-cover[data-src]").forEach((img) => {
-      img.src = img.dataset.src;
-      img.addEventListener("error", () => { const ph = document.createElement("div"); ph.className = "lib-cover ph"; img.replaceWith(ph); });
-    });
+    lastLib = await (await fetch("/api/library?" + qs.toString())).json();
     libLoaded = true;
+    renderChips(lastLib);
+    renderLibrary(lastLib);
   } catch { host.innerHTML = `<div class="empty">Could not read the library.</div>`; }
 }
 
+const LIB_KINDS = [["movie","Movies"],["tv","Shows"],["music","Music"],["audiobook","Audiobooks"],["comic","Comics"]];
+function renderChips(d) {
+  const counts = d.counts || {};
+  const chips = [`<button class="chip${libState.kind===""?" active":""}" data-kind="">All ${d.total||0}</button>`];
+  for (const [k, label] of LIB_KINDS) {
+    if (!counts[k]) continue;
+    chips.push(`<button class="chip${libState.kind===k?" active":""}" data-kind="${k}">${esc(label)} ${counts[k]}</button>`);
+  }
+  $("#lib-chips").innerHTML = chips.join("");
+  $$("#lib-chips .chip").forEach((c) => c.addEventListener("click", () => { libState.kind = c.dataset.kind; loadLibrary(); }));
+}
+
+function renderLibrary(d) {
+  const host = $("#library");
+  if (!d || !d.items || !d.items.length) {
+    host.innerHTML = d && d.total === 0 && !libState.q && libState.status === "all" && !libState.kind
+      ? `<div class="empty">Library is empty.<div class="hint">Click <b>Rescan</b> to index <code>${esc((d && d.library_root) || "")}</code>.</div></div>`
+      : `<div class="empty">Nothing matches.</div>`;
+    return;
+  }
+  const items = d.items;
+  if (libState.view === "list") {
+    host.innerHTML = `<div class="lib-listing">${items.map(listRowHtml).join("")}</div>`;
+  } else {
+    // group by kind for the gallery
+    const groups = {};
+    for (const it of items) (groups[it.kind] ||= []).push(it);
+    host.innerHTML = LIB_KINDS.filter(([k]) => groups[k]).map(([k, label]) =>
+      `<section class="lib-section"><h3>${esc(label)} <span class="lib-count">${groups[k].length}</span></h3>
+       <div class="lib-grid">${groups[k].map(cardHtml).join("")}</div></section>`).join("");
+  }
+  wireCovers();
+}
+function wireCovers() {
+  $$("#library img.lib-cover[data-src]").forEach((img) => {
+    img.src = img.dataset.src;
+    img.addEventListener("error", () => { const ph = document.createElement("div"); ph.className = img.className + " ph"; img.replaceWith(ph); });
+  });
+}
+function coverImg(it, cls) {
+  return it.cover ? `<img class="${cls}" data-src="${esc(it.cover)}" alt="">` : `<div class="${cls} ph"></div>`;
+}
+function badges(it) {
+  const b = [];
+  if (!it.has_cover) b.push(`<span class="mini warn">no cover</span>`);
+  if (!it.has_metadata) b.push(`<span class="mini warn">no meta</span>`);
+  if (it.playable) b.push(`<span class="mini">▶</span>`);
+  return b.join("");
+}
 function cardHtml(it) {
-  const cover = it.cover ? `<img class="lib-cover" data-src="${esc(it.cover)}" alt="">` : `<div class="lib-cover ph"></div>`;
   const sub = it.subtitle ? `<div class="lib-sub">${esc(it.subtitle)}</div>` : "";
-  return `<div class="lib-card">${cover}
+  const yr = it.year ? ` · ${it.year}` : "";
+  return `<div class="lib-card" data-id="${it.id}">${coverImg(it, "lib-cover")}
     <div class="lib-title" title="${esc(it.title)}">${esc(it.title)}</div>${sub}
-    <div class="lib-meta">${it.count} file${it.count === 1 ? "" : "s"}</div></div>`;
+    <div class="lib-meta">${it.count} file${it.count === 1 ? "" : "s"}${yr} ${badges(it)}</div></div>`;
+}
+function listRowHtml(it) {
+  const sub = it.subtitle ? ` · ${esc(it.subtitle)}` : "";
+  const yr = it.year ? ` · ${it.year}` : "";
+  return `<div class="lib-row" data-id="${it.id}">${coverImg(it, "lib-thumb")}
+    <div class="lib-row-body"><div class="lib-row-title">${esc(it.title)}</div>
+      <div class="lib-row-sub"><span class="kind-badge ${kindClass(it.kind)}">${esc(it.kind)}</span>${sub}${yr} · ${it.count} file${it.count === 1 ? "" : "s"}</div></div>
+    ${badges(it)}</div>`;
 }
 
 // ── undo ───────────────────────────────────────────────────────────
