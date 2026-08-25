@@ -183,6 +183,7 @@ test "scan indexes a synthetic library" {
     try t.expect(movie.has_metadata); // provider id present
     try t.expectEqualStrings("mkv", movie.container.?);
     try t.expect(!movie.playable_inline);
+    try t.expectEqualStrings("Movies/Dune (2021) [tmdbid-438631]/poster.jpg", movie.cover_path.?);
 
     const show = (try cat.getByPath(a, "Shows/Severance")).?;
     try t.expectEqual(@as(i64, 2), show.file_count);
@@ -241,6 +242,7 @@ const Agg = struct {
     primary_rel: ?[]const u8 = null, // relative to library_root
     container: ?[]const u8 = null,
     playable_inline: bool = false,
+    cover_rel: ?[]const u8 = null,
 };
 
 fn aggregate(alloc: std.mem.Allocator, io: std.Io, library_root: []const u8, item_rel: []const u8, kind: []const u8) !Agg {
@@ -256,7 +258,11 @@ fn aggregate(alloc: std.mem.Allocator, io: std.Io, library_root: []const u8, ite
     while (walker.next(io) catch null) |entry| {
         if (entry.kind != .file) continue;
         const base = std.fs.path.basename(entry.path);
-        if (isCoverName(base)) agg.has_cover = true;
+        if (isCoverName(base)) {
+            agg.has_cover = true;
+            if (agg.cover_rel == null)
+                agg.cover_rel = try std.fs.path.join(alloc, &.{ item_rel, entry.path });
+        }
         if (std.ascii.endsWithIgnoreCase(base, ".nfo")) agg.has_nfo = true;
         const ext = std.fs.path.extension(base);
         if (!mediaExtForKind(kind, ext)) continue;
@@ -391,7 +397,7 @@ fn indexOne(
         .subtitle = parent1, // artist / author for depth-2 kinds
         .provider = parsed.provider,
         .provider_id = parsed.provider_id,
-        .cover_path = null, // populated in Slice C
+        .cover_path = agg.cover_rel,
         .primary_path = agg.primary_rel,
         .container = agg.container,
         .playable_inline = agg.playable_inline,
