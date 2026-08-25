@@ -15,6 +15,7 @@ const indexer = @import("../core/indexer.zig");
 const review = @import("review.zig");
 const static = @import("static.zig");
 const shutdown = @import("../util/shutdown.zig");
+const exec = @import("../util/exec.zig");
 
 pub const Options = struct { bind: []const u8 = "127.0.0.1", port: u16 = 8799 };
 
@@ -147,6 +148,7 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
     if (std.mem.eql(u8, path, "/api/cover")) return handleCover(app, request, target);
     if (std.mem.eql(u8, path, "/api/undo/list")) return handleUndoList(io, app, request);
     if (std.mem.eql(u8, path, "/api/undo/revert")) return handleUndoRevert(io, app, request, target);
+    if (std.mem.eql(u8, path, "/api/open")) return handleOpen(io, app, request, target);
 
     // These operate on the current plan (must exist).
     if (std.mem.eql(u8, path, "/api/plan")) {
@@ -444,6 +446,41 @@ fn handleItem(io: std.Io, app: *App, request: *std.http.Server.Request, target: 
     }
     try body.appendSlice(arena, "]}");
     try respondJson(request, body.items);
+}
+
+/// Open an item in the OS: mode=reveal → `open -R <target>` (Finder),
+/// mode=launch → `open <target>` (default app). Target is the item's primary
+/// file when present, else its folder. Allowlisted to library_root.
+fn handleOpen(io: std.Io, app: *App, request: *std.http.Server.Request, target: []const u8) !void {
+    var arena_state = std.heap.ArenaAllocator.init(app.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    _ = readBody(arena, request, 4096) catch {}; // consume body before respond
+    const lib = app.base_cfg.library_root;
+
+    const id_s = queryValue(target, "id") orelse return request.respond("missing id\n", .{ .status = .bad_request });
+    const id = std.fmt.parseInt(i64, id_s, 10) catch return request.respond("bad id\n", .{ .status = .bad_request });
+    const reveal = if (queryValue(target, "mode")) |m| std.mem.eql(u8, m, "reveal") else true;
+
+    const db_path = try mediacatalog.defaultPath(arena, app.env);
+    var cat = mediacatalog.Catalog.open(db_path) catch return request.respond("no catalog\n", .{ .status = .not_found });
+    defer cat.close();
+    const item = (cat.getById(arena, id) catch null) orelse return request.respond("not found\n", .{ .status = .not_found });
+
+    // Launch → primary file if known; reveal (or no primary) → the item folder.
+    const rel = if (!reveal and item.primary_path != null) item.primary_path.? else item.path;
+    const abs = try std.fs.path.join(arena, &.{ lib, rel });
+    if (!std.mem.startsWith(u8, abs, lib) or std.mem.indexOf(u8, abs, "..") != null)
+        return request.respond("forbidden\n", .{ .status = .forbidden });
+
+    const cmd = app.env.get("STACKS_OPEN_CMD") orelse "open";
+    const argv: []const []const u8 = if (reveal) &.{ cmd, "-R", abs } else &.{ cmd, abs };
+    const r = exec.runCaptureStdout(arena, io, argv, 4096) catch
+        return request.respond("open failed\n", .{ .status = .internal_server_error });
+    arena.free(r.stdout);
+    if (r.exit_code != 0)
+        return request.respond("open exited nonzero\n", .{ .status = .internal_server_error });
+    try respondJson(request, "{\"ok\":true}");
 }
 
 /// Best-effort full re-scan of the catalog after a mutation (the catalog is a
