@@ -33,6 +33,7 @@ pub const organize_cmd = @import("commands/organize.zig");
 pub const undo_cmd = @import("commands/undo.zig");
 pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
+pub const mediacatalog = @import("core/mediacatalog.zig");
 pub const dedup = @import("core/dedup.zig");
 pub const quality = @import("core/quality.zig");
 pub const glob = @import("core/glob.zig");
