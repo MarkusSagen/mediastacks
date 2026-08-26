@@ -230,15 +230,26 @@ pub fn spawn(
     job.cancel_requested.store(false, .monotonic);
     job.current_title_len.store(0, .release);
 
+    const cat_path_d = try allocator.dupe(u8, cat_path);
+    errdefer allocator.free(cat_path_d);
+    const lib_d = try allocator.dupe(u8, library_root);
+    errdefer allocator.free(lib_d);
+    const cache_d = try allocator.dupe(u8, cache_dir);
+    errdefer allocator.free(cache_d);
+    const key_d: ?[]u8 = if (cfg.tmdb_key) |k| try allocator.dupe(u8, k) else null;
+    errdefer if (key_d) |k| allocator.free(k);
+    const contact_d: ?[]u8 = if (cfg.musicbrainz_contact) |c| try allocator.dupe(u8, c) else null;
+    errdefer if (contact_d) |c| allocator.free(c);
+
     const ctx = try allocator.create(WorkerCtx);
     errdefer allocator.destroy(ctx);
     ctx.* = .{
         .job = job,
-        .cat_path = try allocator.dupe(u8, cat_path),
-        .library_root = try allocator.dupe(u8, library_root),
-        .cache_dir = try allocator.dupe(u8, cache_dir),
-        .tmdb_key = if (cfg.tmdb_key) |k| try allocator.dupe(u8, k) else null,
-        .mb_contact = if (cfg.musicbrainz_contact) |c| try allocator.dupe(u8, c) else null,
+        .cat_path = cat_path_d,
+        .library_root = lib_d,
+        .cache_dir = cache_d,
+        .tmdb_key = key_d,
+        .mb_contact = contact_d,
         .mb_enabled = cfg.musicbrainz_enabled,
         .only_id = only_id,
         .allocator = allocator,
