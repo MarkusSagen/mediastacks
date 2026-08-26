@@ -88,6 +88,19 @@ chk "stream range body is the slice"    '[[ "$(curl -s -H "Range: bytes=2-4" "ht
 chk "stream no-range is 200"            '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/stream?id=$SID")" == "200" ]]'
 chk "stream 404 on bad id"              '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/stream?id=99999")" == "404" ]]'
 
+# Enrichment job (slice E): no tmdb_key configured → job runs, finds no match,
+# but the thread + status endpoint work end-to-end (no network hit).
+ENID="$(curl -s "http://127.0.0.1:$PORT/api/library?kind=movie" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)"
+chk "enrich start accepted" 'curl -s -X POST "http://127.0.0.1:$PORT/api/enrich?id=$ENID" | grep -q "\"started\":true"'
+# poll up to ~5s for the job to finish
+EOK=0; for _ in $(seq 1 25); do
+  ST="$(curl -s "http://127.0.0.1:$PORT/api/enrich/status")"
+  grep -q '"state":"finished"' <<<"$ST" && { EOK=1; break; }
+  sleep 0.2
+done
+chk "enrich job reaches finished" '[[ "$EOK" == "1" ]]'
+chk "enrich status reports totals" 'grep -q "\"processed\":1" <<<"$ST"'
+
 # Undo history (slice 3): the apply above wrote a journal → list shows it → revert restores.
 UNDO="$(curl -s "http://127.0.0.1:$PORT/api/undo/list")"
 chk "undo lists the applied run" 'grep -q "\"moved\":2" <<<"$UNDO"'
