@@ -217,6 +217,8 @@ function fmtSize(n) {
 }
 async function openDetail(id) {
   if (!id) return;
+  clearInterval(enrichPoll);
+  detailId = id;
   const host = $("#detail-body");
   host.innerHTML = `<div class="empty">Loading…</div>`;
   showDetail(true);
@@ -269,12 +271,13 @@ async function openExternal(id, mode) {
   } catch { toast("Open failed"); }
 }
 let enrichPoll = null;
+let detailId = null;
 async function startEnrich(id) {
   const eb = $("#detail [data-enrich]");
   try {
     const res = await fetch("/api/enrich?id=" + encodeURIComponent(id), { method: "POST" });
-    if (res.status === 409) { toast("Enrichment already running"); return; }
-    if (!res.ok) { toast("Enrich failed"); return; }
+    if (!res.ok && res.status !== 409) { toast("Enrich failed"); return; }
+    if (res.status === 409) toast("Enrichment already running");
     if (eb) { eb.disabled = true; eb.textContent = "Enriching…"; }
     clearInterval(enrichPoll);
     enrichPoll = setInterval(async () => {
@@ -285,7 +288,7 @@ async function startEnrich(id) {
         const msg = s.ok ? "Enriched" : (s.no_match ? "No match found" : "Enrich finished");
         toast(msg);
         libLoaded = false;      // library metadata changed
-        openDetail(id);         // refresh the modal from the updated catalog
+        if (detailId === id) openDetail(id); // only refresh if still viewing this item
       }
     }, 700);
   } catch { toast("Enrich failed"); }
@@ -294,6 +297,7 @@ function showDetail(on) {
   const m = $("#detail");
   m.hidden = !on;
   if (on) { $(".modal-backdrop", m).onclick = () => showDetail(false); }
+  else { clearInterval(enrichPoll); }
 }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#detail").hidden) showDetail(false); });
 
