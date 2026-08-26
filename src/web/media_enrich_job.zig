@@ -220,6 +220,7 @@ pub fn spawn(
     {
         return error.JobBusy;
     }
+    errdefer job.state.store(.finished, .monotonic);
     job.started_at.store(clock.nowSeconds(), .monotonic);
     job.finished_at.store(0, .monotonic);
     job.processed.store(0, .monotonic);

@@ -16,6 +16,13 @@ const clock = @import("../util/clock.zig");
 
 pub const Outcome = enum { ok, no_match, err };
 
+fn pathUnderRoot(abs: []const u8, root: []const u8) bool {
+    const r = std.mem.trimEnd(u8, root, "/");
+    if (r.len == 0) return false;
+    if (std.mem.eql(u8, abs, r)) return true;
+    return abs.len > r.len and std.mem.startsWith(u8, abs, r) and abs[r.len] == '/';
+}
+
 fn yearU32(y: ?i64) ?u32 {
     return if (y) |v| (if (v > 0) @intCast(v) else null) else null;
 }
@@ -44,6 +51,7 @@ fn upsertEnriched(cat: *mc.Catalog, item: mc.Item, provider: []const u8, provide
 /// Enrich one organized item in place (non-destructive: NFO + catalog only).
 pub fn enrichOne(arena: std.mem.Allocator, cat: *mc.Catalog, item: mc.Item, online: group.Online, library_root: []const u8) Outcome {
     const dir_abs = std.fs.path.join(arena, &.{ library_root, item.path }) catch return .err;
+    if (!pathUnderRoot(dir_abs, library_root) or std.mem.indexOf(u8, dir_abs, "..") != null) return .err;
 
     if (std.mem.eql(u8, item.kind, "movie")) {
         const video = online.video orelse return .no_match;
@@ -66,6 +74,7 @@ pub fn enrichOne(arena: std.mem.Allocator, cat: *mc.Catalog, item: mc.Item, onli
     if (std.mem.eql(u8, item.kind, "music")) {
         const music = online.music orelse return .no_match;
         const artist = item.subtitle orelse "";
+        if (item.file_count <= 0) return .no_match;
         const rel = (music.lookupAlbum(arena, item.title, artist, @intCast(item.file_count), yearU32(item.year)) catch return .err) orelse return .no_match;
         const fields = plan.Fields{ .album = rel.title, .album_artist = rel.album_artist, .year = rel.year, .release_mbid = rel.mbid };
         const bytes = nfo.albumNfo(arena, fields) catch return .err;
