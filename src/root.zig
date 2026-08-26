@@ -76,6 +76,7 @@ pub const web_api = @import("web/api.zig");
 pub const review = @import("web/review.zig");
 pub const web_app = @import("web/app.zig");
 pub const media_enrich = @import("web/media_enrich.zig");
+pub const media_enrich_job = @import("web/media_enrich_job.zig");
 
 test {
     std.testing.refAllDecls(@This());
