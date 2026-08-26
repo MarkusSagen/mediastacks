@@ -12,10 +12,12 @@ const apply_mod = @import("../core/apply.zig");
 const journal = @import("../core/journal.zig");
 const mediacatalog = @import("../core/mediacatalog.zig");
 const indexer = @import("../core/indexer.zig");
+const standardize = @import("../core/standardize.zig");
 const review = @import("review.zig");
 const static = @import("static.zig");
 const shutdown = @import("../util/shutdown.zig");
 const exec = @import("../util/exec.zig");
+const media_enrich_job = @import("media_enrich_job.zig");
 
 pub const Options = struct { bind: []const u8 = "127.0.0.1", port: u16 = 8799 };
 
@@ -26,6 +28,7 @@ const App = struct {
     plan_arena: std.heap.ArenaAllocator,
     session: review.Session, // .arena/.cfg/.plan; plan null until first organize
     has_plan: bool = false,
+    enrich_job: media_enrich_job.Job,
 };
 
 pub fn serve(io: std.Io, gpa: std.mem.Allocator, cfg: config.Config, env: *std.process.Environ.Map, opts: Options, log: *std.Io.Writer) !void {
@@ -35,6 +38,7 @@ pub fn serve(io: std.Io, gpa: std.mem.Allocator, cfg: config.Config, env: *std.p
         .base_cfg = cfg,
         .plan_arena = std.heap.ArenaAllocator.init(gpa),
         .session = .{ .arena = undefined, .cfg = cfg, .plan = .{ .library_root = cfg.library_root, .source = "", .groups = &.{} } },
+        .enrich_job = media_enrich_job.Job.init(gpa),
     };
     defer app.plan_arena.deinit();
 
@@ -190,6 +194,8 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
     if (std.mem.eql(u8, path, "/api/undo/revert")) return handleUndoRevert(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/open")) return handleOpen(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/stream")) return handleStream(io, app, request, target);
+    if (std.mem.eql(u8, path, "/api/enrich")) return handleEnrich(io, app, request, target);
+    if (std.mem.eql(u8, path, "/api/enrich/status")) return handleEnrichStatus(app, request);
 
     // These operate on the current plan (must exist).
     if (std.mem.eql(u8, path, "/api/plan")) {
@@ -658,6 +664,54 @@ fn handleReindex(io: std.Io, app: *App, request: *std.http.Server.Request, targe
     const st = indexer.scan(arena, io, &cat, app.base_cfg.library_root, rebuild) catch |err|
         return request.respond(try std.fmt.allocPrint(arena, "reindex failed: {s}\n", .{@errorName(err)}), .{ .status = .internal_server_error });
     try respondJson(request, try std.fmt.allocPrint(arena, "{{\"added\":{d},\"updated\":{d},\"removed\":{d},\"total\":{d}}}", .{ st.added, st.updated, st.removed, st.total }));
+}
+
+/// Cache dir for provider HTTP responses: `$XDG_CACHE_HOME/stacks/mb` else
+/// `$HOME/.cache/stacks/mb`. Mirrors `commands/organize.zig`'s `mbCacheDir`.
+fn enrichCacheDir(arena: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
+    const base = if (env.get("XDG_CACHE_HOME")) |x|
+        try std.fs.path.join(arena, &.{ x, "stacks", "mb" })
+    else
+        try std.fs.path.join(arena, &.{ env.get("HOME") orelse "/tmp", ".cache", "stacks", "mb" });
+    standardize.mkdirParents(base) catch {};
+    return base;
+}
+
+/// Start (or reject if already running) a background enrichment batch:
+/// `?id=N` enriches one item, otherwise all items missing metadata.
+fn handleEnrich(io: std.Io, app: *App, request: *std.http.Server.Request, target: []const u8) !void {
+    var arena_state = std.heap.ArenaAllocator.init(app.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    _ = readBody(arena, request, 4096) catch {}; // consume body before respond
+
+    const only_id: ?i64 = if (queryValue(target, "id")) |v| (std.fmt.parseInt(i64, v, 10) catch null) else null;
+    const cat_path = try mediacatalog.defaultPath(arena, app.env);
+    const cache_dir = try enrichCacheDir(arena, app.env);
+
+    media_enrich_job.spawn(app.gpa, io, app.base_cfg, cache_dir, cat_path, app.base_cfg.library_root, only_id, &app.enrich_job) catch |err| {
+        if (err == error.JobBusy) return request.respond("{\"error\":\"busy\"}", .{ .status = .conflict, .extra_headers = &.{.{ .name = "content-type", .value = "application/json" }} });
+        return request.respond("enrich failed\n", .{ .status = .internal_server_error });
+    };
+    try respondJson(request, "{\"started\":true}");
+}
+
+/// Progress snapshot for the in-flight (or last completed) enrichment batch.
+fn handleEnrichStatus(app: *App, request: *std.http.Server.Request) !void {
+    var arena_state = std.heap.ArenaAllocator.init(app.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const s = try app.enrich_job.snapshot(arena);
+    const state = switch (s.state) {
+        .idle => "idle",
+        .running => "running",
+        .finished => "finished",
+        .canceled => "canceled",
+    };
+    const body = try std.fmt.allocPrint(arena,
+        "{{\"state\":\"{s}\",\"total\":{d},\"processed\":{d},\"ok\":{d},\"no_match\":{d},\"errored\":{d},\"current_id\":{d},\"current_title\":\"{s}\"}}",
+        .{ state, s.total, s.processed, s.ok, s.no_match, s.errored, s.current_id, try jsonEsc(arena, s.current_title) });
+    try respondJson(request, body);
 }
 
 fn urlEncode(arena: std.mem.Allocator, s: []const u8) ![]u8 {
