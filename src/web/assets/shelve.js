@@ -225,12 +225,16 @@ async function openDetail(id) {
     host.innerHTML = detailHtml(d);
     $("#detail .modal-close").addEventListener("click", () => showDetail(false));
     $$("#detail [data-open]").forEach((b) => b.addEventListener("click", () => openExternal(id, b.dataset.open)));
+    const eb = $("#detail [data-enrich]");
+    if (eb) eb.addEventListener("click", () => startEnrich(id));
     const cimg = $("#detail-body img.detail-cover");
     if (cimg) cimg.addEventListener("error", () => { const ph = document.createElement("div"); ph.className = "detail-cover ph"; cimg.replaceWith(ph); });
   } catch { host.innerHTML = `<div class="empty">Could not load item.</div>`; }
 }
 function detailHtml(d) {
   const cover = d.cover ? `<img class="detail-cover" src="${esc(d.cover)}" alt="">` : `<div class="detail-cover ph"></div>`;
+  const canEnrich = (d.kind === "movie" || d.kind === "tv" || d.kind === "music");
+  const enrichBtn = canEnrich ? `<button class="ghost" data-enrich="1" type="button">Enrich metadata</button>` : "";
   const meta = [];
   if (d.year) meta.push(esc(d.year));
   if (d.subtitle) meta.push(esc(d.subtitle));
@@ -252,6 +256,7 @@ function detailHtml(d) {
         <div class="detail-actions">
           ${d.playable ? `<button class="primary" data-open="launch" type="button">▶ Open</button>` : `<button class="ghost" data-open="launch" type="button">Open in default app</button>`}
           <button class="ghost" data-open="reveal" type="button">Reveal in Finder</button>
+          ${enrichBtn}
         </div>
       </div></div>
     ${player}
@@ -262,6 +267,28 @@ async function openExternal(id, mode) {
     const res = await fetch(`/api/open?id=${encodeURIComponent(id)}&mode=${mode}`, { method: "POST" });
     toast(res.ok ? (mode === "reveal" ? "Revealed in Finder" : "Opened") : "Open failed");
   } catch { toast("Open failed"); }
+}
+let enrichPoll = null;
+async function startEnrich(id) {
+  const eb = $("#detail [data-enrich]");
+  try {
+    const res = await fetch("/api/enrich?id=" + encodeURIComponent(id), { method: "POST" });
+    if (res.status === 409) { toast("Enrichment already running"); return; }
+    if (!res.ok) { toast("Enrich failed"); return; }
+    if (eb) { eb.disabled = true; eb.textContent = "Enriching…"; }
+    clearInterval(enrichPoll);
+    enrichPoll = setInterval(async () => {
+      let s;
+      try { s = await (await fetch("/api/enrich/status")).json(); } catch { return; }
+      if (s.state !== "running") {
+        clearInterval(enrichPoll);
+        const msg = s.ok ? "Enriched" : (s.no_match ? "No match found" : "Enrich finished");
+        toast(msg);
+        libLoaded = false;      // library metadata changed
+        openDetail(id);         // refresh the modal from the updated catalog
+      }
+    }, 700);
+  } catch { toast("Enrich failed"); }
 }
 function showDetail(on) {
   const m = $("#detail");
