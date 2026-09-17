@@ -100,6 +100,7 @@ $("#lib-search").addEventListener("input", (e) => {
 });
 $("#lib-status").addEventListener("change", (e) => { libState.status = e.target.value; loadLibrary(); });
 $("#lib-refresh").addEventListener("click", rescanLibrary);
+$("#lib-enrich").addEventListener("click", bulkEnrich);
 $("#lib-gallery").addEventListener("click", () => setLibView("gallery"));
 $("#lib-list").addEventListener("click", () => setLibView("list"));
 
@@ -119,6 +120,37 @@ async function rescanLibrary() {
     await loadLibrary();
   } catch { toast("Rescan failed"); }
   finally { btn.disabled = false; btn.textContent = "Rescan"; }
+}
+
+// Bulk-enrich all missing-metadata items via the background job. Uses its own
+// poll interval (separate from the detail modal's) so navigating the modal
+// doesn't interfere.
+let bulkPoll = null;
+async function bulkEnrich() {
+  const btn = $("#lib-enrich"), prog = $("#lib-progress");
+  const reset = () => { btn.disabled = false; btn.textContent = "Enrich missing"; prog.hidden = true; prog.textContent = ""; };
+  try {
+    const res = await fetch("/api/enrich", { method: "POST" }); // no id → all missing-metadata
+    if (!res.ok && res.status !== 409) { toast("Enrich failed"); return; }
+    if (res.status === 409) toast("Enrichment already running");
+    btn.disabled = true; btn.textContent = "Enriching…";
+    prog.hidden = false; prog.textContent = "Starting…";
+    clearInterval(bulkPoll);
+    bulkPoll = setInterval(async () => {
+      let s;
+      try { s = await (await fetch("/api/enrich/status")).json(); } catch { return; }
+      if (s.state === "running") {
+        prog.textContent = `Enriching ${s.processed}/${s.total}${s.current_title ? " · " + s.current_title : ""}`;
+        return;
+      }
+      clearInterval(bulkPoll);
+      reset();
+      toast(s.total === 0 ? "Nothing to enrich"
+        : `Enriched ${s.ok} · ${s.no_match} no match${s.errored ? " · " + s.errored + " error(s)" : ""}`);
+      libLoaded = false;
+      loadLibrary();
+    }, 700);
+  } catch { toast("Enrich failed"); reset(); }
 }
 
 let lastLib = null;

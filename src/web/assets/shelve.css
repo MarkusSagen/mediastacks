@@ -126,6 +126,8 @@ main { padding: 16px; max-width: 1100px; margin: 0 auto; }
 .seg { border: 0; background: var(--surface); color: var(--ink-mute); padding: 6px 10px; cursor: pointer; font-size: 14px; }
 .seg.active { background: var(--accent-tint); color: var(--ink); }
 .lib-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.lib-progress { color: var(--ink-mute); font-size: 12px; margin: -2px 0 12px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-progress[hidden] { display: none; }
 .chip { border: 1px solid var(--border); background: var(--surface); color: var(--ink-mute); border-radius: 999px; padding: 4px 11px; font: inherit; font-size: 12px; cursor: pointer; font-variant-numeric: tabular-nums; }
 .chip:hover { background: var(--bg-hover); color: var(--ink); }
 .chip.active { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
