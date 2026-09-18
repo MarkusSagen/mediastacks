@@ -183,6 +183,17 @@ fn configPath(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
     return std.fs.path.join(alloc, &.{ home, ".config", "stacks", "config.toml" });
 }
 
+/// True iff a `config.toml` already exists (i.e. the user has configured shelve).
+/// Used by the web app to detect a first run.
+pub fn exists(alloc: std.mem.Allocator, env: *std.process.Environ.Map) bool {
+    const p = configPath(alloc, env) catch return false;
+    defer alloc.free(p);
+    var pz: [4096]u8 = undefined;
+    if (p.len >= pz.len) return false;
+    const pzp = std.fmt.bufPrintZ(&pz, "{s}", .{p}) catch return false;
+    return std.c.access(pzp.ptr, 0) == 0;
+}
+
 fn expandTilde(alloc: std.mem.Allocator, env: *std.process.Environ.Map, path: []const u8) ![]u8 {
     if (path.len == 0 or path[0] != '~') return alloc.dupe(u8, path);
     const home = env.get("HOME") orelse return alloc.dupe(u8, path);

@@ -36,6 +36,8 @@ chk(){ if eval "$2"; then echo "  ok: $1"; PASS=$((PASS+1)); else echo "  FAIL: 
 chk "shell served"        'curl -s "http://127.0.0.1:$PORT/" | grep -q "<title>shelve</title>"'
 chk "shelve.js served"    'curl -s "http://127.0.0.1:$PORT/shelve.js" | grep -q "Organize"'
 chk "config endpoint"     'curl -s "http://127.0.0.1:$PORT/api/config" | grep -q library_root'
+# Onboarding (slice: welcome + demo): empty server (no config.toml, empty catalog) is a first run.
+chk "first-run flag on empty server" 'curl -s "http://127.0.0.1:$PORT/api/config" | grep -q "\"first_run\":true"'
 ORG="$(curl -s "http://127.0.0.1:$PORT/api/organize?dir=$SRC&no_probe=1")"
 chk "organize grouped a Show" 'grep -q "/Shows/" <<<"$ORG"'
 chk "organize found 2 episodes" '[[ "$(grep -o S01E0 <<<"$ORG" | wc -l | tr -d " ")" == 2 ]]'
@@ -114,5 +116,14 @@ chk "catalog drops the reverted item" '[[ -z "$(curl -s "http://127.0.0.1:$PORT/
 curl -s -X POST "http://127.0.0.1:$PORT/api/config" -d '{"write_tags":true,"musicbrainz":true,"tmdb_key":"KEY123"}' >/dev/null
 chk "settings persisted to config.toml" 'grep -q "write_tags = on" "$XDG_CONFIG_HOME/stacks/config.toml"'
 chk "settings reload reflects POST" 'curl -s "http://127.0.0.1:$PORT/api/config" | grep -q "\"tmdb_key\":\"KEY123\""'
+
+# Onboarding demo sandbox: enter (seeds throwaway media + points env at it), then
+# leave (restores the real env). Runs last so the XDG switch can't affect earlier checks.
+DEMO="$(curl -s -X POST "http://127.0.0.1:$PORT/api/demo")"
+chk "demo starts" 'grep -q "\"demo\":true" <<<"$DEMO"'
+chk "demo library populated" '[[ -n "$(curl -s "http://127.0.0.1:$PORT/api/library" | grep -o "Blade Runner")" ]]'
+chk "demo_active flag set" 'curl -s "http://127.0.0.1:$PORT/api/config" | grep -q "\"demo_active\":true"'
+chk "leave demo restores" 'curl -s -X POST "http://127.0.0.1:$PORT/api/demo?exit=1" | grep -q "\"demo\":false"'
+chk "demo_active cleared" 'curl -s "http://127.0.0.1:$PORT/api/config" | grep -q "\"demo_active\":false"'
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; [[ "$FAIL" -eq 0 ]]

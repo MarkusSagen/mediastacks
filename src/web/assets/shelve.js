@@ -38,12 +38,55 @@ function toast(msg) {
 }
 
 // ── config → header + settings (editable) ─────────────────────────
+let booted = false;
 async function loadConfig() {
   try {
     const c = await (await fetch("/api/config")).json();
     $("#stats").textContent = "library: " + c.library_root;
     renderSettings(c);
+    $("#demo-banner").hidden = !c.demo_active;
+    if (!booted && c.first_run) activateView("welcome"); // first-run splash, once
+    booted = true;
   } catch {}
+}
+
+// Switch to a view. Real tabs reuse the tab handler (lazy loads, apply-bar);
+// tab-less views (welcome) are toggled directly.
+function activateView(v) {
+  const tab = document.querySelector(`.tab[data-view="${v}"]`);
+  if (tab) { tab.click(); return; }
+  $$(".tab").forEach((t) => t.classList.remove("active"));
+  $$(".view").forEach((s) => s.classList.toggle("active", s.dataset.view === v));
+}
+
+// ── onboarding + demo sandbox ───────────────────────────────────────
+$("#welcome-demo").addEventListener("click", tryDemo);
+$("#welcome-setup").addEventListener("click", () => {
+  activateView("settings");
+  setTimeout(() => { const el = $('.set-input[data-key="library_root"]'); if (el) el.focus(); }, 60);
+});
+$("#demo-leave").addEventListener("click", leaveDemo);
+
+async function tryDemo() {
+  const btn = $("#welcome-demo");
+  if (btn) { btn.disabled = true; btn.textContent = "Loading demo…"; }
+  try {
+    const r = await (await fetch("/api/demo", { method: "POST" })).json();
+    if (!r.ok) { toast("Demo failed"); return; }
+    if (r.downloads) $("#dir").value = r.downloads; // pre-fill Organize with the demo downloads
+    const np = $("#opt-no-probe"); if (np) np.checked = true; // demo stubs aren't real media — skip ffprobe for a clean preview
+    toast("Demo loaded — browse the Library, or try Organize on the demo downloads");
+    await loadConfig();        // refresh banner + clear first_run
+    libLoaded = false;
+    activateView("library");   // drop into the now-populated Library
+    loadLibrary();
+  } catch { toast("Demo failed"); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = "▶ Try the demo"; } }
+}
+
+async function leaveDemo() {
+  try { await fetch("/api/demo?exit=1", { method: "POST" }); } catch {}
+  location.reload(); // cleanest reset back to the real environment
 }
 
 function textRow(key, label, val, ph) {

@@ -18,6 +18,7 @@ const static = @import("static.zig");
 const shutdown = @import("../util/shutdown.zig");
 const exec = @import("../util/exec.zig");
 const media_enrich_job = @import("media_enrich_job.zig");
+const demo = @import("../core/demo.zig");
 
 pub const Options = struct { bind: []const u8 = "127.0.0.1", port: u16 = 8799 };
 
@@ -29,6 +30,14 @@ const App = struct {
     session: review.Session, // .arena/.cfg/.plan; plan null until first organize
     has_plan: bool = false,
     enrich_job: media_enrich_job.Job,
+    // Demo sandbox state (see /api/demo): when active, XDG_* + library_root are
+    // pointed at a throwaway seeded dir; the saved_* strings restore the real
+    // environment on "leave demo".
+    demo_active: bool = false,
+    saved_data: ?[]const u8 = null,
+    saved_config: ?[]const u8 = null,
+    saved_cache: ?[]const u8 = null,
+    saved_lib: ?[]const u8 = null,
 };
 
 pub fn serve(io: std.Io, gpa: std.mem.Allocator, cfg: config.Config, env: *std.process.Environ.Map, opts: Options, log: *std.Io.Writer) !void {
@@ -196,6 +205,7 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
     if (std.mem.eql(u8, path, "/api/stream")) return handleStream(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/enrich")) return handleEnrich(io, app, request, target);
     if (std.mem.eql(u8, path, "/api/enrich/status")) return handleEnrichStatus(app, request);
+    if (std.mem.eql(u8, path, "/api/demo")) return handleDemo(io, app, request, target);
 
     // These operate on the current plan (must exist).
     if (std.mem.eql(u8, path, "/api/plan")) {
@@ -241,8 +251,10 @@ fn handleConfig(app: *App, request: *std.http.Server.Request) !void {
     var arena_state = std.heap.ArenaAllocator.init(app.gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
+    // First run = never configured (no config.toml) AND an empty/absent catalog.
+    const first_run = !app.demo_active and !config.exists(arena, app.env) and catalogEmpty(arena, app);
     const body = try std.fmt.allocPrint(arena,
-        \\{{"library_root":"{s}","write_tags":{s},"write_nfo":{s},"id_suffix":{s},"emit_ignore":{s},"musicbrainz":{s},"musicbrainz_contact":"{s}","tmdb_key":"{s}"}}
+        \\{{"library_root":"{s}","write_tags":{s},"write_nfo":{s},"id_suffix":{s},"emit_ignore":{s},"musicbrainz":{s},"musicbrainz_contact":"{s}","tmdb_key":"{s}","first_run":{s},"demo_active":{s}}}
     , .{
         try jsonEsc(arena, c.library_root),
         boolStr(c.write_tags),
@@ -252,6 +264,8 @@ fn handleConfig(app: *App, request: *std.http.Server.Request) !void {
         boolStr(c.musicbrainz_enabled),
         try jsonEsc(arena, c.musicbrainz_contact orelse ""),
         try jsonEsc(arena, c.tmdb_key orelse ""),
+        boolStr(first_run),
+        boolStr(app.demo_active),
     });
     try respondJson(request, body);
 }
@@ -647,6 +661,57 @@ fn reindexQuietly(io: std.Io, app: *App) void {
     var cat = mediacatalog.Catalog.open(db_path) catch return;
     defer cat.close();
     _ = indexer.scan(arena, io, &cat, app.base_cfg.library_root, false) catch {};
+}
+
+/// True when the media catalog has no rows (or doesn't exist yet).
+fn catalogEmpty(arena: std.mem.Allocator, app: *App) bool {
+    const db_path = mediacatalog.defaultPath(arena, app.env) catch return true;
+    var cat = mediacatalog.Catalog.open(db_path) catch return true;
+    defer cat.close();
+    return (cat.count() catch 0) == 0;
+}
+
+/// Dup an env value into `gpa` (owned), or null. Used to save the real XDG_*
+/// before the demo overrides them, so "leave demo" can restore.
+fn saveEnv(app: *App, key: []const u8) ?[]const u8 {
+    const v = app.env.get(key) orelse return null;
+    return app.gpa.dupe(u8, v) catch null;
+}
+
+/// POST /api/demo — enter the throwaway demo sandbox (seed + point XDG_*/library
+/// at it + reindex). `?exit=1` restores the real environment. The single-user,
+/// localhost server holds the demo state on `App`.
+fn handleDemo(io: std.Io, app: *App, request: *std.http.Server.Request, target: []const u8) !void {
+    var arena_state = std.heap.ArenaAllocator.init(app.gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    _ = readBody(arena, request, 4096) catch {}; // consume body before respond
+
+    if (queryValue(target, "exit") != null) {
+        if (app.saved_data) |v| app.env.put("XDG_DATA_HOME", v) catch {};
+        if (app.saved_config) |v| app.env.put("XDG_CONFIG_HOME", v) catch {};
+        if (app.saved_cache) |v| app.env.put("XDG_CACHE_HOME", v) catch {};
+        if (app.saved_lib) |v| app.base_cfg.library_root = v;
+        app.demo_active = false;
+        reindexQuietly(io, app);
+        return respondJson(request, "{\"ok\":true,\"demo\":false}");
+    }
+
+    // Save the real environment once, before the first override.
+    if (!app.demo_active) {
+        app.saved_data = saveEnv(app, "XDG_DATA_HOME");
+        app.saved_config = saveEnv(app, "XDG_CONFIG_HOME");
+        app.saved_cache = saveEnv(app, "XDG_CACHE_HOME");
+        app.saved_lib = app.gpa.dupe(u8, app.base_cfg.library_root) catch null;
+    }
+
+    const s = demo.activate(arena, io, app.env) catch
+        return request.respond("demo seed failed\n", .{ .status = .internal_server_error });
+    // library_root must outlive the request (base_cfg is read on every request).
+    app.base_cfg.library_root = app.gpa.dupe(u8, s.library) catch s.library;
+    app.demo_active = true;
+    reindexQuietly(io, app);
+    try respondJson(request, try std.fmt.allocPrint(arena, "{{\"ok\":true,\"demo\":true,\"downloads\":\"{s}\"}}", .{try jsonEsc(arena, s.downloads)}));
 }
 
 /// Rebuild/refresh the media catalog from library_root.

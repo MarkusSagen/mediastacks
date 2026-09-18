@@ -24,9 +24,29 @@
     <button id="theme-toggle" class="ghost" type="button" title="Toggle theme">◐</button>
   </header>
 
+  <div id="demo-banner" hidden>🧪 Demo — you're exploring throwaway sample files; nothing on your disk is touched. <button id="demo-leave" class="ghost" type="button">Leave demo</button></div>
+
   <div id="toast" hidden></div>
 
   <main id="main">
+    <!-- WELCOME (first run) -->
+    <section class="view" data-view="welcome">
+      <div class="welcome">
+        <h1 class="welcome-title">Welcome to <b>shelve</b></h1>
+        <p class="welcome-lede">shelve turns a folder of messy downloads into a clean, Jellyfin-ready library — then lets you browse, play, and enrich it, all locally.</p>
+        <ol class="welcome-steps">
+          <li><span class="ws-n">1</span><div><b>Point</b> shelve at a folder of downloads</div></li>
+          <li><span class="ws-n">2</span><div><b>Preview</b> the plan — nothing moves until you say so</div></li>
+          <li><span class="ws-n">3</span><div><b>Apply</b> — files land tidily in your library</div></li>
+        </ol>
+        <div class="welcome-actions">
+          <button id="welcome-demo" class="primary" type="button">▶ Try the demo</button>
+          <button id="welcome-setup" class="ghost" type="button">Set my library folder</button>
+        </div>
+        <p class="hint">The demo runs the <i>real</i> flow on throwaway sample media in a temp folder — safe to click around. Add a TMDB key in Settings to see enrichment fetch real metadata + covers.</p>
+      </div>
+    </section>
+
     <!-- ORGANIZE -->
     <section class="view active" data-view="organize">
       <div class="organize-bar">
