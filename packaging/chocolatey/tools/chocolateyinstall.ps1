@@ -10,7 +10,7 @@ $packageArgs = @{
   PackageName   = 'mediastacks'
   UnzipLocation = $toolsDir
   Url64bit      = $url64
-  Checksum64    = 'REPLACE_WITH_SHA256'
+  Checksum64    = '51cac60d2b7a7e9a7201c5b30dad40023bc4ca26ce82376581b2b1f666d9fcae'
   ChecksumType64 = 'sha256'
 }
 

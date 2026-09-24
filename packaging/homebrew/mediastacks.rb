@@ -20,17 +20,17 @@ class Mediastacks < Formula
   on_macos do
     on_arm do
       url "https://github.com/markussagen/mediastacks/releases/download/v#{version}/mediastacks-macos-arm64.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      sha256 "a5aa6428351e71d3eaac096c5f0d5576208a2aba674b36793830c62ceb87acb8"
     end
     on_intel do
       url "https://github.com/markussagen/mediastacks/releases/download/v#{version}/mediastacks-macos-x86_64.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      sha256 "735de0349b5717a5a66717cffc618a3986d11d3fbccda8a3bcd805cfcf1aeca3"
     end
   end
 
   on_linux do
     url "https://github.com/markussagen/mediastacks/releases/download/v#{version}/mediastacks-linux-x86_64.tar.gz"
-    sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+    sha256 "cc662cb804b855823c4c81e08ff19c0c924fc389759ba2db1416dafcb1467198"
   end
 
   def install
