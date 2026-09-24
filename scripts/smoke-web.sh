@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Web-layer smoke test for booktool.
+# Web-layer smoke test for mediastacks.
 #
-# Spins up `booktool serve` against an isolated XDG_DATA_HOME and
+# Spins up `mediastacks serve` against an isolated XDG_DATA_HOME and
 # exercises the JSON API + static assets via curl. Doesn't need a
 # browser — the goal is to catch route regressions and JSON-shape
 # drift, not pixel-perfect rendering.
@@ -20,10 +20,10 @@ if [[ ! -d tests/fixtures/epub && ! -d tests/fixtures/mobi ]]; then
 fi
 
 # --- Isolated state -----------------------------------------------------
-TMP_BASE="$(mktemp -d -t booktool-web-smoke.XXXXXX)"
+TMP_BASE="$(mktemp -d -t mediastacks-web-smoke.XXXXXX)"
 export XDG_DATA_HOME="$TMP_BASE/data"
 mkdir -p "$XDG_DATA_HOME"
-PORT=${BOOKTOOL_TEST_PORT:-8898}
+PORT=${MEDIASTACKS_TEST_PORT:-8898}
 
 cleanup() {
     if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -38,13 +38,13 @@ trap cleanup EXIT
 # --- Build + seed catalog ----------------------------------------------
 echo "==> build"
 zig build install >/dev/null 2>&1
-BIN="$ROOT/zig-out/bin/booktool"
+BIN="$ROOT/zig-out/bin/mediastacks"
 
 echo "==> seed catalog from fixtures"
 "$BIN" scan tests/fixtures >/dev/null 2>&1 || true
 
 # --- Start server ------------------------------------------------------
-echo "==> launching booktool serve on :$PORT"
+echo "==> launching mediastacks serve on :$PORT"
 "$BIN" serve --port "$PORT" >"$TMP_BASE/serve.log" 2>&1 &
 SERVER_PID=$!
 
@@ -87,17 +87,17 @@ check() {
     esac
     local resp
     if [[ -n "$body" ]]; then
-        resp=$(curl -s -o /tmp/booktool-web-resp -w '%{http_code}' \
+        resp=$(curl -s -o /tmp/mediastacks-web-resp -w '%{http_code}' \
             -X "$method" -H 'content-type: application/json' -d "$body" "$url")
     else
-        resp=$(curl -s -o /tmp/booktool-web-resp -w '%{http_code}' \
+        resp=$(curl -s -o /tmp/mediastacks-web-resp -w '%{http_code}' \
             -X "$method" "$url")
     fi
     if [[ "$resp" == "$want_status" ]]; then
         record_pass "$label ($resp)"
     else
         record_fail "$label  want=$want_status got=$resp"
-        head -c 200 /tmp/booktool-web-resp
+        head -c 200 /tmp/mediastacks-web-resp
         echo
     fi
 }
@@ -141,7 +141,7 @@ echo
 printf "\033[1m== tags ==\033[0m\n"
 TAG_NAME="smoke-$(date +%s)"
 check "POST /api/tags" 200 "$ROOT_URL/api/tags" "{\"name\":\"$TAG_NAME\"}"
-TAG_ID=$(python3 -c "import json; print(json.load(open('/tmp/booktool-web-resp'))['id'])" 2>/dev/null || echo 0)
+TAG_ID=$(python3 -c "import json; print(json.load(open('/tmp/mediastacks-web-resp'))['id'])" 2>/dev/null || echo 0)
 if [[ "$TAG_ID" -gt 0 ]] && [[ "$BOOK_ID" -gt 0 ]]; then
     record_pass "tag creation returned id ($TAG_ID)"
     check "POST attach tag"   200 "$ROOT_URL/api/books/$BOOK_ID/tags" "{\"tag_id\":$TAG_ID}"
@@ -158,7 +158,7 @@ fi
 echo
 printf "\033[1m== enrich batch ==\033[0m\n"
 check "GET /api/enrich/batch" 200 "$ROOT_URL/api/enrich/batch"
-INITIAL_STATE=$(python3 -c "import json; print(json.load(open('/tmp/booktool-web-resp'))['state'])")
+INITIAL_STATE=$(python3 -c "import json; print(json.load(open('/tmp/mediastacks-web-resp'))['state'])")
 if [[ "$INITIAL_STATE" == "idle" ]]; then
     record_pass "enrich job starts in 'idle' state"
 else

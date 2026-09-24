@@ -17,7 +17,7 @@ pub const OnConflict = enum { skip, suffix, overwrite };
 
 /// Opt-in tag write-back on apply. When `write`, music primaries get their tags
 /// rewritten from `Plan.Fields` after the move — backed up to `backup_dir` and
-/// journaled so `shelve undo` restores the original bytes.
+/// journaled so `medias undo` restores the original bytes.
 pub const TagOpts = struct { write: bool = false, backup_dir: ?[]const u8 = null };
 
 pub const Result = struct {
@@ -86,7 +86,7 @@ fn resolveConflict(alloc: std.mem.Allocator, dst: []const u8, on_conflict: OnCon
 
 fn trashPath(alloc: std.mem.Allocator, root: []const u8, from: []const u8, created: i64) ![]u8 {
     const base = std.fs.path.basename(from);
-    return std.fmt.allocPrint(alloc, "{s}/.stacks-trash/{d}/{s}", .{ root, created, base });
+    return std.fmt.allocPrint(alloc, "{s}/.mediastacks-trash/{d}/{s}", .{ root, created, base });
 }
 
 /// Perform the filesystem work and return the in-memory journal. All
@@ -140,7 +140,7 @@ pub fn applyInMemory(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConf
 
     // Drop a Jellyfin `.ignore` in the trash tree so it's never scanned as media.
     if (emit_ignore and trashed > 0) {
-        const ig_dir = try std.fmt.allocPrint(alloc, "{s}/.stacks-trash", .{p.library_root});
+        const ig_dir = try std.fmt.allocPrint(alloc, "{s}/.mediastacks-trash", .{p.library_root});
         defer alloc.free(ig_dir);
         standardize.mkdirParents(ig_dir) catch {};
         const ig = try std.fmt.allocPrint(alloc, "{s}/.ignore", .{ig_dir});
@@ -233,9 +233,9 @@ pub fn apply(alloc: std.mem.Allocator, p: plan.Plan, on_conflict: OnConflict, en
     var opts = tag_opts;
     if ((opts.write or write_nfo) and opts.backup_dir == null) {
         // Backups (tag write-back + ComicInfo embed) live beside the journals.
-        const d = try journal.dir(alloc, env); // $XDG_DATA_HOME/stacks/undo
+        const d = try journal.dir(alloc, env); // $XDG_DATA_HOME/mediastacks/undo
         defer alloc.free(d);
-        const parent = std.fs.path.dirname(d) orelse d; // $XDG_DATA_HOME/stacks
+        const parent = std.fs.path.dirname(d) orelse d; // $XDG_DATA_HOME/mediastacks
         opts.backup_dir = try std.fs.path.join(alloc, &.{ parent, "backup" });
     }
     const out = try applyInMemory(alloc, p, on_conflict, opts, emit_ignore, write_nfo);
@@ -376,9 +376,9 @@ test "apply writes movie.nfo and undo removes it" {
     const a = arena_state.allocator();
     const pid = std.c.getpid();
     var srcb: [256]u8 = undefined;
-    const src = try std.fmt.bufPrint(&srcb, "/tmp/stacks-nfo-{d}-src.mkv", .{pid});
+    const src = try std.fmt.bufPrint(&srcb, "/tmp/mediastacks-nfo-{d}-src.mkv", .{pid});
     var outb: [256]u8 = undefined;
-    const outdir = try std.fmt.bufPrint(&outb, "/tmp/stacks-nfo-{d}-out", .{pid});
+    const outdir = try std.fmt.bufPrint(&outb, "/tmp/mediastacks-nfo-{d}-out", .{pid});
     var dstb: [360]u8 = undefined;
     const dst = try std.fmt.bufPrint(&dstb, "{s}/The Matrix (1999)/The Matrix (1999).mkv", .{outdir});
     var sz: [256]u8 = undefined;
@@ -408,9 +408,9 @@ test "apply emits .ignore in the trash tree and undo removes it" {
     const a = t.allocator;
     const pid = std.c.getpid();
     var rootb: [256]u8 = undefined;
-    const root = try std.fmt.bufPrint(&rootb, "/tmp/stacks-ign-{d}", .{pid});
+    const root = try std.fmt.bufPrint(&rootb, "/tmp/mediastacks-ign-{d}", .{pid});
     var srcb: [256]u8 = undefined;
-    const src = try std.fmt.bufPrint(&srcb, "/tmp/stacks-ign-{d}-junk.txt", .{pid});
+    const src = try std.fmt.bufPrint(&srcb, "/tmp/mediastacks-ign-{d}-junk.txt", .{pid});
     var sz: [256]u8 = undefined;
     writeFile(try std.fmt.bufPrintZ(&sz, "{s}", .{src}), "junk");
 
@@ -421,7 +421,7 @@ test "apply emits .ignore in the trash tree and undo removes it" {
     const out = try applyInMemory(a, p, .skip, .{}, true, false);
     defer journal.freeOwned(a, out.journal);
     var igb: [320]u8 = undefined;
-    const ig = try std.fmt.bufPrint(&igb, "{s}/.stacks-trash/.ignore", .{root});
+    const ig = try std.fmt.bufPrint(&igb, "{s}/.mediastacks-trash/.ignore", .{root});
     try t.expect(exists(ig));
 
     try undo(a, out.journal);
@@ -440,13 +440,13 @@ test "apply writes tags with backup and undo restores original bytes" {
     const mt = @import("../kinds/music_tags.zig");
 
     var srcb: [256]u8 = undefined;
-    const src = try std.fmt.bufPrint(&srcb, "/tmp/stacks-tw-{d}-src.flac", .{pid});
+    const src = try std.fmt.bufPrint(&srcb, "/tmp/mediastacks-tw-{d}-src.flac", .{pid});
     var outdirb: [256]u8 = undefined;
-    const outdir = try std.fmt.bufPrint(&outdirb, "/tmp/stacks-tw-{d}-out", .{pid});
+    const outdir = try std.fmt.bufPrint(&outdirb, "/tmp/mediastacks-tw-{d}-out", .{pid});
     var dstb: [320]u8 = undefined;
     const dst = try std.fmt.bufPrint(&dstb, "{s}/Album/01 - T.flac", .{outdir});
     var bkb: [256]u8 = undefined;
-    const backup_dir = try std.fmt.bufPrint(&bkb, "/tmp/stacks-tw-{d}-bak", .{pid});
+    const backup_dir = try std.fmt.bufPrint(&bkb, "/tmp/mediastacks-tw-{d}-bak", .{pid});
 
     const orig = try mt.buildFlac(a, try mt.synthFlacForTest(a), .{ .artists = &.{"Solo"}, .album = "Old" });
     defer a.free(orig);
@@ -485,9 +485,9 @@ test "apply moves a primary and undo restores it" {
     const pid = std.c.getpid();
 
     var srcb: [256]u8 = undefined;
-    const src = try std.fmt.bufPrint(&srcb, "/tmp/stacks-apply-{d}-src.mkv", .{pid});
+    const src = try std.fmt.bufPrint(&srcb, "/tmp/mediastacks-apply-{d}-src.mkv", .{pid});
     var outdirb: [256]u8 = undefined;
-    const outdir = try std.fmt.bufPrint(&outdirb, "/tmp/stacks-apply-{d}-out", .{pid});
+    const outdir = try std.fmt.bufPrint(&outdirb, "/tmp/mediastacks-apply-{d}-out", .{pid});
     var dstb: [320]u8 = undefined;
     const dst = try std.fmt.bufPrint(&dstb, "{s}/Show - S01E01.mkv", .{outdir});
 

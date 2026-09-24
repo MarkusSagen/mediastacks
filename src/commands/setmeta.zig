@@ -1,4 +1,4 @@
-//! `booktool set-meta FILE [--title T] [--author A] [--series S] [--series-index N] [--year Y]`
+//! `mediastacks set-meta FILE [--title T] [--author A] [--series S] [--series-index N] [--year Y]`
 //!
 //! Edit the embedded metadata of a book file. The CLI is a thin shell
 //! over `formats.registry.forFormat(fmt).?.writeMetadata(...)` — the
@@ -60,7 +60,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 
 fn printHelp(w: *std.Io.Writer) !void {
     try w.writeAll(
-        \\Usage: booktool set-meta FILE [options]
+        \\Usage: mediastacks set-meta FILE [options]
         \\
         \\Options (any combination):
         \\  --title TEXT

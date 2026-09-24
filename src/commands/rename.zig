@@ -1,4 +1,4 @@
-//! `booktool rename [--apply] [--template TPL] [--preset NAME]` — show or
+//! `mediastacks rename [--apply] [--template TPL] [--preset NAME]` — show or
 //! perform canonical renames.
 //!
 //! Templates: see src/core/template.zig. CLI gives three knobs:
@@ -98,7 +98,7 @@ fn printPresets(w: *std.Io.Writer) !void {
 
 fn printHelp(w: *std.Io.Writer) !void {
     try w.writeAll(
-        \\Usage: booktool rename [options]
+        \\Usage: mediastacks rename [options]
         \\
         \\Options:
         \\  --template "TPL"   Custom rename template (see template fields below)

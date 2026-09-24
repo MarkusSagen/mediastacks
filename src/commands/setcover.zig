@@ -1,10 +1,10 @@
-//! `booktool set-cover FILE IMAGE` — replace the embedded cover.
+//! `mediastacks set-cover FILE IMAGE` — replace the embedded cover.
 //!
 //! EPUB writes the bytes back into the archive (via the handler
 //! vtable's `writeCover`). MOBI/AZW3 — libmobi has no cover-write
 //! API — write a library-side override at
-//! `$XDG_DATA_HOME/booktool/covers/<id>.<ext>` instead, which the
-//! booktool catalog renders everywhere.
+//! `$XDG_DATA_HOME/mediastacks/covers/<id>.<ext>` instead, which the
+//! mediastacks catalog renders everywhere.
 
 const std = @import("std");
 const cli = @import("../cli.zig");
@@ -15,7 +15,7 @@ const registry = @import("../formats/registry.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len < 2) {
-        try ctx.stderr.print("usage: booktool set-cover FILE IMAGE\n", .{});
+        try ctx.stderr.print("usage: mediastacks set-cover FILE IMAGE\n", .{});
         return 1;
     }
     const book_path = args[0];
@@ -68,7 +68,7 @@ fn setOverrideCover(ctx: cli.Context, book_path: []const u8, new_image: []const 
 
     const book = (try cat.getBookByPath(ctx.arena, book_path)) orelse {
         try ctx.stderr.print(
-            "no catalog row for {s}.\n  Run `booktool scan` on its directory first so the cover override\n  can be stored against a stable book id.\n",
+            "no catalog row for {s}.\n  Run `mediastacks scan` on its directory first so the cover override\n  can be stored against a stable book id.\n",
             .{book_path},
         );
         return 2;
@@ -82,8 +82,8 @@ fn setOverrideCover(ctx: cli.Context, book_path: []const u8, new_image: []const 
     try ctx.stdout.print(
         "cover override written to {s}/{d}.{s}\n" ++
             "note: this format doesn't support in-file cover editing.\n" ++
-            "      booktool will show this cover everywhere, but {s} is unchanged.\n" ++
-            "      Run `booktool convert {s} --to epub` to bake it in.\n",
+            "      mediastacks will show this cover everywhere, but {s} is unchanged.\n" ++
+            "      Run `mediastacks convert {s} --to epub` to bake it in.\n",
         .{ override_dir, book.id, cover_store.sniff(new_image).asString(), book_path, book_path },
     );
     return 0;

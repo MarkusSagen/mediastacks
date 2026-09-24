@@ -1,5 +1,5 @@
-//! `shelve index [--rebuild] [--to LIB]` — scan the organized library into the
-//! media catalog ($XDG_DATA_HOME/stacks/media.db). Derived index: safe to
+//! `medias index [--rebuild] [--to LIB]` — scan the organized library into the
+//! media catalog ($XDG_DATA_HOME/mediastacks/media.db). Derived index: safe to
 //! rebuild anytime; the filesystem stays the source of truth.
 
 const std = @import("std");
@@ -46,6 +46,6 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 }
 
 fn usage(ctx: cli.Context) !u8 {
-    try ctx.stderr.print("usage: shelve index [--rebuild] [--to LIB]\n", .{});
+    try ctx.stderr.print("usage: medias index [--rebuild] [--to LIB]\n", .{});
     return 2;
 }

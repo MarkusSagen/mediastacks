@@ -157,7 +157,7 @@ test "scan indexes a synthetic library" {
     // NOTE: this toolchain has NO `std.fs.cwd()` — use the io-based `std.Io.Dir`
     // (createDirPath = recursive mkdir; writeFile; deleteTree; deleteFile).
     const cwd = std.Io.Dir.cwd();
-    const root = try std.fmt.allocPrint(a, "/tmp/stacks-idx-{d}", .{clock.nowSeconds()});
+    const root = try std.fmt.allocPrint(a, "/tmp/mediastacks-idx-{d}", .{clock.nowSeconds()});
     defer cwd.deleteTree(io, root) catch {};
     try writeFile(io, cwd, a, root, "Movies/Dune (2021) [tmdbid-438631]/Dune (2021).mkv", "x");
     try writeFile(io, cwd, a, root, "Movies/Dune (2021) [tmdbid-438631]/poster.jpg", "img");
@@ -166,7 +166,7 @@ test "scan indexes a synthetic library" {
     try writeFile(io, cwd, a, root, "Music/Daft Punk/Discovery (2001)/01 One More Time.flac", "x");
     try cwd.createDirPath(io, try std.fs.path.join(a, &.{ root, "Movies", "Empty Placeholder" }));
 
-    const db = try std.fmt.allocPrint(a, "/tmp/stacks-idx-{d}.db", .{clock.nowSeconds()});
+    const db = try std.fmt.allocPrint(a, "/tmp/mediastacks-idx-{d}.db", .{clock.nowSeconds()});
     defer cwd.deleteFile(io, db) catch {};
     var cat = try mc.Catalog.open(db);
     defer cat.close();

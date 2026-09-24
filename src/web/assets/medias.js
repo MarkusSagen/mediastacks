@@ -1,4 +1,4 @@
-// shelve — organizer web app (slice 1: shell + Organize flow).
+// medias — organizer web app (slice 1: shell + Organize flow).
 "use strict";
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -8,14 +8,14 @@ let currentPlan = null;
 // ── theme ──────────────────────────────────────────────────────────
 (function initTheme() {
   let t = null;
-  try { t = localStorage.getItem("shelve-theme"); } catch {}
+  try { t = localStorage.getItem("medias-theme"); } catch {}
   if (t === "graphite") document.documentElement.setAttribute("data-theme", "graphite");
 })();
 $("#theme-toggle").addEventListener("click", () => {
   const el = document.documentElement;
   const dark = el.getAttribute("data-theme") === "graphite";
   if (dark) el.removeAttribute("data-theme"); else el.setAttribute("data-theme", "graphite");
-  try { localStorage.setItem("shelve-theme", dark ? "paper" : "graphite"); } catch {}
+  try { localStorage.setItem("medias-theme", dark ? "paper" : "graphite"); } catch {}
 });
 
 // ── tabs ───────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ async function saveSettings() {
 // ── library (catalog-backed) ───────────────────────────────────────
 let libLoaded = false;
 let libState = { q: "", kind: "", status: "all", view: "gallery" };
-try { const v = localStorage.getItem("shelve-lib-view"); if (v) libState.view = v; } catch {}
+try { const v = localStorage.getItem("medias-lib-view"); if (v) libState.view = v; } catch {}
 $("#lib-gallery").classList.toggle("active", libState.view === "gallery");
 $("#lib-list").classList.toggle("active", libState.view === "list");
 
@@ -149,7 +149,7 @@ $("#lib-list").addEventListener("click", () => setLibView("list"));
 
 function setLibView(v) {
   libState.view = v;
-  try { localStorage.setItem("shelve-lib-view", v); } catch {}
+  try { localStorage.setItem("medias-lib-view", v); } catch {}
   $("#lib-gallery").classList.toggle("active", v === "gallery");
   $("#lib-list").classList.toggle("active", v === "list");
   renderLibrary(lastLib);
@@ -542,7 +542,7 @@ $("#apply-btn").addEventListener("click", async () => {
   try {
     const res = await fetch(q, { method: "POST" });
     const r = await res.json();
-    toast(`Applied — moved ${r.moved}, trashed ${r.trashed}, skipped ${r.skipped}. Undo: shelve undo`);
+    toast(`Applied — moved ${r.moved}, trashed ${r.trashed}, skipped ${r.skipped}. Undo: medias undo`);
     currentPlan = null;
     $("#plan").innerHTML = "";
     $("#apply-bar").hidden = true;

@@ -1,8 +1,8 @@
 // Aggregated C headers translated by build.zig via b.addTranslateC.
 // Source files import these via the "c" module.
 
-#ifndef BOOKTOOL_C_INCLUDES_H
-#define BOOKTOOL_C_INCLUDES_H
+#ifndef MEDIASTACKS_C_INCLUDES_H
+#define MEDIASTACKS_C_INCLUDES_H
 
 #include <stddef.h>
 #include <stdint.h>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end smoke test for booktool.
+# End-to-end smoke test for mediastacks.
 #
 # Builds the binary, runs every CLI command against tests/fixtures
 # inside an isolated XDG_DATA_HOME, asserts on exit codes and output
@@ -31,7 +31,7 @@ fi
 "$ROOT/scripts/build-fixtures.sh"
 
 # Isolated state so the user's real catalog isn't touched.
-SMOKE_HOME="$(mktemp -d -t booktool-smoke.XXXXXX)"
+SMOKE_HOME="$(mktemp -d -t mediastacks-smoke.XXXXXX)"
 export XDG_DATA_HOME="$SMOKE_HOME"
 trap 'if [[ $KEEP -eq 0 ]]; then rm -rf "$SMOKE_HOME"; fi' EXIT
 
@@ -159,23 +159,23 @@ fi
 section "optimize"
 src_epub=$("$BIBLIO" find tests/fixtures --format epub 2>/dev/null | head -1)
 if [[ -n "$src_epub" ]]; then
-    cp "$src_epub" /tmp/booktool-opt.epub
-    before=$(stat -f%z /tmp/booktool-opt.epub 2>/dev/null || stat -c%s /tmp/booktool-opt.epub)
-    "$BIBLIO" optimize /tmp/booktool-opt.epub >/dev/null
-    after=$(stat -f%z /tmp/booktool-opt.epub 2>/dev/null || stat -c%s /tmp/booktool-opt.epub)
+    cp "$src_epub" /tmp/mediastacks-opt.epub
+    before=$(stat -f%z /tmp/mediastacks-opt.epub 2>/dev/null || stat -c%s /tmp/mediastacks-opt.epub)
+    "$BIBLIO" optimize /tmp/mediastacks-opt.epub >/dev/null
+    after=$(stat -f%z /tmp/mediastacks-opt.epub 2>/dev/null || stat -c%s /tmp/mediastacks-opt.epub)
     assert "optimize did not grow the file" test "$after" -le "$before"
-    rm -f /tmp/booktool-opt.epub
+    rm -f /tmp/mediastacks-opt.epub
 fi
 
 # ---- set-meta ----------------------------------------------------------
 
 section "set-meta"
 if [[ -n "$src_epub" ]]; then
-    cp "$src_epub" /tmp/booktool-meta.epub
-    "$BIBLIO" set-meta /tmp/booktool-meta.epub --series "TestSeries" --series-index "7" >/dev/null
-    series_check=$(unzip -p /tmp/booktool-meta.epub 2>/dev/null | grep -ao "calibre:series\".*\"TestSeries" | head -1 || true)
+    cp "$src_epub" /tmp/mediastacks-meta.epub
+    "$BIBLIO" set-meta /tmp/mediastacks-meta.epub --series "TestSeries" --series-index "7" >/dev/null
+    series_check=$(unzip -p /tmp/mediastacks-meta.epub 2>/dev/null | grep -ao "calibre:series\".*\"TestSeries" | head -1 || true)
     assert "set-meta wrote calibre:series meta" test -n "$series_check"
-    rm -f /tmp/booktool-meta.epub
+    rm -f /tmp/mediastacks-meta.epub
 fi
 
 # ---- enrich (network) --------------------------------------------------

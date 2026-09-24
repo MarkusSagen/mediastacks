@@ -1,21 +1,21 @@
 # Web UI
 
 The web UI is a small single-page app served by a Zig HTTP server
-embedded in `booktool`. It runs against the same SQLite catalog the
+embedded in `mediastacks`. It runs against the same SQLite catalog the
 CLI manages, so a library you've scanned/enriched/renamed shows up
 immediately in the browser.
 
 ## Run it
 
 ```sh
-booktool serve                       # http://127.0.0.1:8787/
-booktool serve --port 9090           # other port
-booktool serve --bind 0.0.0.0        # listen on every interface
+mediastacks serve                       # http://127.0.0.1:8787/
+mediastacks serve --port 9090           # other port
+mediastacks serve --bind 0.0.0.0        # listen on every interface
 ```
 
 The catalog is opened read-write at the standard XDG location
-(`$XDG_DATA_HOME/booktool/catalog.db`, default
-`~/.local/share/booktool/catalog.db`). Run `booktool scan DIR` first if
+(`$XDG_DATA_HOME/mediastacks/catalog.db`, default
+`~/.local/share/mediastacks/catalog.db`). Run `mediastacks scan DIR` first if
 the database is empty — `serve` will start either way and the UI will
 just show a "0 books" stats line.
 
@@ -32,7 +32,7 @@ The default landing view is a **gallery** of covers. Toggle to a
 
 ```
  ┌──────────────────────────────────────────────────────────────────┐
- │  booktool   [search…]   [All][Missing][Duplicates]  [▦][▤]  12 b │
+ │  mediastacks   [search…]   [All][Missing][Duplicates]  [▦][▤]  12 b │
  ├──────────────────────────────────────────────────────────────────┤
  │  ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐                 │
  │  │   │ │   │ │   │ │   │ │   │ │   │ │   │ │   │                 │
@@ -48,7 +48,7 @@ The default landing view is a **gallery** of covers. Toggle to a
 - **Series** — grouped by series, in reading order
 - **Variants** — same work, multiple file formats side-by-side
 - **Missing** — books with one or more missing key fields (title,
-  author, year, ISBN). Same query as `booktool missing`.
+  author, year, ISBN). Same query as `mediastacks missing`.
 - **Unverified** — books still on embedded-only metadata
 - **Duplicates** — exact SHA-256 + fuzzy / cross-format groups, each
   rendered as a labeled mini-list regardless of the active layout
@@ -108,7 +108,7 @@ fields, and per-book actions:
 - **Change cover** — file picker, base64-encodes the image client-side
   and POSTs to `/api/books/:id/cover`. Works for every format: the
   bytes are stored as a library-side override at
-  `$XDG_DATA_HOME/booktool/covers/<id>.<jpg|png>` and served wherever a
+  `$XDG_DATA_HOME/mediastacks/covers/<id>.<jpg|png>` and served wherever a
   `/cover` URL appears (gallery thumb, detail panel, alt-cover
   lightbox). For **EPUB** the cover is *also* written back into the
   book file (so it travels with the file). For **MOBI/AZW3/PDF** the
@@ -125,7 +125,7 @@ fields, and per-book actions:
 - **Convert + apply** *(MOBI/AZW3 with an active override)* — converts
   the source to EPUB and bakes the override cover into the resulting
   file. Available alongside Change cover when the row has a saved
-  override. The original `.mobi` stays in the catalog; `booktool
+  override. The original `.mobi` stays in the catalog; `mediastacks
   dedup` cleans it up later if you want.
 - **Reset to embedded** — discards manual edits and Open Library
   enrichments by re-reading the file's embedded OPF / MOBI metadata
@@ -259,7 +259,7 @@ only kicks in when there's free text.
 Every facet group (Library, Status, Has, Format, Authors, Series,
 Genres, Tags) is a `<details>` element. Default state is closed for
 compactness; per-section open/closed state is remembered in
-`localStorage` (`booktool.facet.<key>`).
+`localStorage` (`mediastacks.facet.<key>`).
 
 The Library section's collapsed summary shows the at-a-glance
 "N folders · M books" so the user stays oriented without expanding.
@@ -281,12 +281,12 @@ enable/disable toggle, and a delete button.
 Specs supported: `@hourly`, `@daily`, `@weekly`, `@monthly`, plus
 `every Nm` / `every Nh`. Job types: `rescan-all`, `enrich-missing`,
 `backfill-paths`, `standardize-dry`. See
-[`COMMANDS.md`](./COMMANDS.md#booktool-schedule-sub) for full
+[`COMMANDS.md`](./COMMANDS.md#mediastacks-schedule-sub) for full
 semantics.
 
-The in-process scheduler runs whenever `booktool serve` is running.
+The in-process scheduler runs whenever `mediastacks serve` is running.
 For always-on scheduling without the HTTP server, run
-`booktool schedule daemon` separately.
+`mediastacks schedule daemon` separately.
 
 ### Comic reader (CBZ/CBR/CB7/CBT)
 
@@ -361,7 +361,7 @@ went wrong.
 | `POST` | `/api/jobs/:id/run` | fire NOW (synchronous, ignores schedule). Returns `{ok, job}` or `{ok: false, reason}` when another job is already running |
 | `GET` | `/api/books/:id/comic-pages` | `{count: N, format: "cbz"\|"cbr"\|"cb7"\|"cbt"}` — page count for the comic reader |
 | `GET` | `/api/books/:id/comic-page/:n` | Image bytes for the Nth page (content-type sniffed). Year-long immutable cache. |
-| `GET` | `/api/export?format=json\|csv` | Download the catalog. Sets `content-disposition: attachment; filename="booktool-library-YYYY-MM-DD.{json\|csv}"` |
+| `GET` | `/api/export?format=json\|csv` | Download the catalog. Sets `content-disposition: attachment; filename="mediastacks-library-YYYY-MM-DD.{json\|csv}"` |
 | `POST` | `/api/import` | `[{path, title?, author?, ...}, ...]` — merge metadata into matching catalog rows by path. Returns `{matched, updated, skipped, errors}` |
 
 #### Query parameters for `/api/books`
@@ -390,7 +390,7 @@ All optional, combinable. Filtering is server-side SQL.
 | `PATCH` | `/api/books/:id` | `{title?, author?, series?, series_index?, year?}` | Rewrites embedded OPF (EPUB) + catalog row. Returns the updated book JSON. |
 | `POST` | `/api/books/:id/enrich` | (empty) | Open Library lookup + merge. Returns `{enriched: bool, book: {...}}`. |
 | `POST` | `/api/books/:id/convert` | `{to: "epub"\|"mobi"\|"azw3"\|"pdf"}` | Returns `{ok: true, path}`. Same engines as the CLI's `convert`. |
-| `POST` | `/api/books/:id/cover` | `{data_base64}` **or** `{url}` | Writes a library-side override at `$XDG_DATA_HOME/booktool/covers/<id>.<ext>` so the cover is rendered everywhere `/cover` is used. For EPUB the OPF-declared cover-image entry is also rewritten in place. For MOBI/AZW3/PDF the source file is left untouched (libmobi has no cover-write API). With `{url}` the server fetches the image (used for Open Library alt covers, avoids browser CORS dance). Response: `{ok: true, override: true, file_updated: bool}`. |
+| `POST` | `/api/books/:id/cover` | `{data_base64}` **or** `{url}` | Writes a library-side override at `$XDG_DATA_HOME/mediastacks/covers/<id>.<ext>` so the cover is rendered everywhere `/cover` is used. For EPUB the OPF-declared cover-image entry is also rewritten in place. For MOBI/AZW3/PDF the source file is left untouched (libmobi has no cover-write API). With `{url}` the server fetches the image (used for Open Library alt covers, avoids browser CORS dance). Response: `{ok: true, override: true, file_updated: bool}`. |
 | `POST` | `/api/books/:id/reset` | (empty) | Re-reads embedded metadata; discards manual edits and enrichments. Returns the refreshed book. |
 | `DELETE` | `/api/books/:id[?file=1]` | (empty) | Removes catalog row. With `?file=1`, also unlinks the file. |
 | `PATCH` | `/api/books/:id/status` | `{status: "unread"\|"reading"\|"finished"}` | Sets reading state; stamps `started_at` / `finished_at`. Returns the updated book. |
@@ -497,7 +497,7 @@ Live-reload isn't wired up. If you want to hack on the JS specifically,
 you can also serve the assets out of a static dir during development —
 just point your browser at the file via `python -m http.server` in
 `src/web/assets/` and configure the `fetch()` calls to hit the running
-booktool server's origin (it's same-origin from `127.0.0.1`).
+mediastacks server's origin (it's same-origin from `127.0.0.1`).
 
 The reader uses **foliate-js** (loaded from esm.sh via the
 johnfactotum/foliate-js GitHub mirror) for EPUB / MOBI / AZW3 / FB2 /
@@ -508,7 +508,7 @@ until then.
 ## Known limitations
 
 - **Reader libraries are CDN-loaded.** foliate-js (via esm.sh) and
-  pdf.js (via cdnjs) are imported on first Read click. The booktool
+  pdf.js (via cdnjs) are imported on first Read click. The mediastacks
   binary embeds no reader code; an offline machine can't open books
   in the browser until the libraries are cached. Mitigation: open at
   least one book of each format while online, after which the browser
@@ -538,7 +538,7 @@ until then.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Page is empty, server logs `GET /api/books` | catalog has no books | `booktool scan DIR` first |
+| Page is empty, server logs `GET /api/books` | catalog has no books | `mediastacks scan DIR` first |
 | Cover image broken | book has no embedded cover, or `mobitool` missing for MOBI/AZW3 | `brew install libmobi` |
 | Reader stuck on "loading…" | non-EPUB book selected, or epub.js failed to fetch | open browser devtools and check the network tab |
 | `listening on …` then immediate exit | port already in use | `--port` to a different one |

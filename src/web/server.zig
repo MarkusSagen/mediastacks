@@ -1,4 +1,4 @@
-//! HTTP server for the booktool web UI.
+//! HTTP server for the mediastacks web UI.
 //!
 //! Concurrency model: one acceptor loop + one detached thread per
 //! request. Each thread owns its own arena allocator, stack buffers,

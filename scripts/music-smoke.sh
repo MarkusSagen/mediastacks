@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # End-to-end music smoke: ffmpeg-generate a tagged mini-album + cover, then
-# `shelve organize --apply` into a temp library and assert the album layout,
-# then `shelve undo`. This is the authoritative tag-driven music test (the
+# `medias organize --apply` into a temp library and assert the album layout,
+# then `medias undo`. This is the authoritative tag-driven music test (the
 # group unit test is deliberately no-probe/deterministic).
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-SHELVE="$ROOT/zig-out/bin/shelve"
-[[ -x "$SHELVE" ]] || { echo "build first: zig build" >&2; exit 2; }
+MEDIAS="$ROOT/zig-out/bin/medias"
+[[ -x "$MEDIAS" ]] || { echo "build first: zig build" >&2; exit 2; }
 if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
     echo "ffmpeg/ffprobe not installed — skipping music smoke"; exit 0
 fi
 
-TMP="$(mktemp -d -t stacks-music.XXXXXX)"
+TMP="$(mktemp -d -t mediastacks-music.XXXXXX)"
 export XDG_DATA_HOME="$TMP/data" XDG_CONFIG_HOME="$TMP/config"
 SRC="$TMP/dl/album"; LIB="$TMP/lib"
 mkdir -p "$SRC"
@@ -44,31 +44,31 @@ PASS=0; FAIL=0
 check() { if eval "$2"; then echo "  ok: $1"; PASS=$((PASS+1)); else echo "  FAIL: $1"; FAIL=$((FAIL+1)); fi; }
 
 echo "== dry-run =="
-OUT="$("$SHELVE" organize "$SRC" --to "$LIB" --dry-run)"
+OUT="$("$MEDIAS" organize "$SRC" --to "$LIB" --dry-run)"
 echo "$OUT" | grep -E "Music/|summary" || true
 check "grouped under album-artist Eric Clapton" 'grep -q "Music/Eric Clapton/Blue (1998)/" <<<"$OUT"'
 
 echo "== apply =="
-"$SHELVE" organize "$SRC" --to "$LIB" >/dev/null
+"$MEDIAS" organize "$SRC" --to "$LIB" >/dev/null
 check "track 01 landed with title" '[[ -f "$LIB/Music/Eric Clapton/Blue (1998)/01 - Layla.mp3" ]]'
 check "track 02 landed with title" '[[ -f "$LIB/Music/Eric Clapton/Blue (1998)/02 - Cocaine.mp3" ]]'
 check "cover landed in album folder" '[[ -f "$LIB/Music/Eric Clapton/Blue (1998)/cover.jpg" ]]'
 
 echo "== undo =="
-"$SHELVE" undo >/dev/null
+"$MEDIAS" undo >/dev/null
 check "library reverted" '[[ ! -d "$LIB/Music" ]] || [[ -z "$(find "$LIB/Music" -type f 2>/dev/null)" ]]'
 check "sources restored" '[[ -f "$SRC/01.mp3" && -f "$SRC/cover.jpg" ]]'
 
 # --- A.1 correctness, verified via dry-run (naming/grouping, no apply needed) ---
 echo "== A.1 dry-run =="
-MDOUT="$("$SHELVE" organize "$MD" --to "$LIB" --dry-run)"
+MDOUT="$("$MEDIAS" organize "$MD" --to "$LIB" --dry-run)"
 check "multi-disc rolls into one album with CD1" 'grep -q "Night of the Kings (1992)/CD1/" <<<"$MDOUT"'
 check "multi-disc CD2 subfolder"                 'grep -q "Night of the Kings (1992)/CD2/" <<<"$MDOUT"'
 
-VAOUT="$("$SHELVE" organize "$VA" --to "$LIB" --dry-run)"
+VAOUT="$("$MEDIAS" organize "$VA" --to "$LIB" --dry-run)"
 check "compilation filed under Various Artists"  'grep -q "Music/Various Artists/Comp/" <<<"$VAOUT"'
 
-NYOUT="$("$SHELVE" organize "$NY" --to "$LIB" --dry-run)"
+NYOUT="$("$MEDIAS" organize "$NY" --to "$LIB" --dry-run)"
 check "no-year album has no () suffix"           'grep -q "Music/Solo/NoYear/" <<<"$NYOUT"'
 check "no-year album shows no empty parens"      '! grep -q "NoYear ()" <<<"$NYOUT"'
 

@@ -1,7 +1,7 @@
 //! Background thumb-cache pre-warmer.
 //!
 //! On serve startup we fan out one worker thread that walks the catalog
-//! once and writes a thumb to `$XDG_DATA_HOME/booktool/thumbs/<id>.<ext>`
+//! once and writes a thumb to `$XDG_DATA_HOME/mediastacks/thumbs/<id>.<ext>`
 //! for every book that doesn't already have one. The gallery's
 //! IntersectionObserver requests covers as the user scrolls, and once
 //! warmed those requests serve from disk in ~0.6ms instead of paying

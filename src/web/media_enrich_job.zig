@@ -1,4 +1,4 @@
-//! Background batch-enrichment job state for the media (shelve) catalog.
+//! Background batch-enrichment job state for the media (medias) catalog.
 //!
 //! One job at a time. Owned by the web context. The worker thread updates
 //! atomic counters as it goes; the HTTP handler reads them for the

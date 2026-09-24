@@ -10,7 +10,7 @@ Zig 0.16's `std.Io`.
 ## Run it
 
 ```sh
-booktool tui
+mediastacks tui
 ```
 
 The TUI takes over the terminal until you quit. Requires a real TTY —
@@ -22,7 +22,7 @@ xterm-compatible emulator. Best experience on a terminal at least
 80×24.
 
 If the catalog is empty, the TUI prints a hint and exits — run
-`booktool scan DIR` first.
+`mediastacks scan DIR` first.
 
 ## Two views
 
@@ -32,7 +32,7 @@ The library, one book per row. Each row shows author (clipped to 24
 cols), title, and a format badge.
 
 ```
- booktool — j/k move · enter open · q quit
+ mediastacks — j/k move · enter open · q quit
 
  ▶ Gaiman, Neil            Don't Panic                       epub
    Hobb, Robin             Assassin's Apprentice             mobi
@@ -80,12 +80,12 @@ height and centered to 76 columns for comfortable line lengths.
 | `space`, `→`, `l`, `PgDn` | next page |
 | `b`, `←`, `h`, `PgUp` | previous page |
 | `q`, `Esc` | back to list view |
-| `Ctrl-C` | quit booktool entirely |
+| `Ctrl-C` | quit mediastacks entirely |
 
 The status bar shows `page n/m`.
 
 Non-EPUB books print a message in the status bar and refuse to open —
-run `booktool convert FILE --to epub` first if you want to read them
+run `mediastacks convert FILE --to epub` first if you want to read them
 in the TUI.
 
 ## How EPUB rendering works

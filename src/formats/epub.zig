@@ -284,7 +284,7 @@ pub fn writeMetadata(arena: std.mem.Allocator, path: []const u8, update: handler
 /// Replace the bytes of the EPUB's declared cover image with
 /// `image_bytes`. The OPF must already designate one (EPUB3
 /// `properties="cover-image"` on a manifest item, or EPUB2
-/// `<meta name="cover">` indirection); booktool refuses to fabricate
+/// `<meta name="cover">` indirection); mediastacks refuses to fabricate
 /// a cover-image entry from scratch (use Sigil/Calibre to add one
 /// initially).
 pub fn writeCover(arena: std.mem.Allocator, book_path: []const u8, image_bytes: []const u8) !void {

@@ -1,6 +1,6 @@
-//! `booktool sources …` — manage watched ebook folders.
+//! `mediastacks sources …` — manage watched ebook folders.
 //!
-//! A "library source" is a folder the user has asked booktool to
+//! A "library source" is a folder the user has asked mediastacks to
 //! track. The catalog stores each source's path + a couple of stats
 //! about the last scan. Rescanning a source walks the folder, ingests
 //! new files (linked to the source), and marks previously-known books
@@ -56,10 +56,10 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 fn printUsage(ctx: cli.Context) !u8 {
     try ctx.stderr.print(
         \\usage:
-        \\  booktool sources add PATH [--name N]
-        \\  booktool sources list
-        \\  booktool sources rescan ID|all
-        \\  booktool sources remove ID
+        \\  mediastacks sources add PATH [--name N]
+        \\  mediastacks sources list
+        \\  mediastacks sources rescan ID|all
+        \\  mediastacks sources remove ID
         \\
     , .{});
     return 1;
@@ -93,7 +93,7 @@ fn runAdd(ctx: cli.Context, cat: *catalog_mod.Catalog, args: []const []const u8)
 fn runList(ctx: cli.Context, cat: *catalog_mod.Catalog) !u8 {
     const sources = try cat.listSources(ctx.arena);
     if (sources.len == 0) {
-        try ctx.stdout.print("no sources registered. use `booktool sources add PATH` to add one.\n", .{});
+        try ctx.stdout.print("no sources registered. use `mediastacks sources add PATH` to add one.\n", .{});
         return 0;
     }
     for (sources) |s| {

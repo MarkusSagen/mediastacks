@@ -1,5 +1,5 @@
 //! Organizer configuration: the library root and per-kind naming
-//! templates. Read from `$XDG_CONFIG_HOME/stacks/config.toml` as simple
+//! templates. Read from `$XDG_CONFIG_HOME/mediastacks/config.toml` as simple
 //! `key = value` lines; a missing file yields all defaults.
 
 const std = @import("std");
@@ -177,13 +177,13 @@ pub fn parseLines(alloc: std.mem.Allocator, text: []const u8) !Config {
 
 fn configPath(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
     if (env.get("XDG_CONFIG_HOME")) |xdg| {
-        return std.fs.path.join(alloc, &.{ xdg, "stacks", "config.toml" });
+        return std.fs.path.join(alloc, &.{ xdg, "mediastacks", "config.toml" });
     }
     const home = env.get("HOME") orelse return error.NoHome;
-    return std.fs.path.join(alloc, &.{ home, ".config", "stacks", "config.toml" });
+    return std.fs.path.join(alloc, &.{ home, ".config", "mediastacks", "config.toml" });
 }
 
-/// True iff a `config.toml` already exists (i.e. the user has configured shelve).
+/// True iff a `config.toml` already exists (i.e. the user has configured medias).
 /// Used by the web app to detect a first run.
 pub fn exists(alloc: std.mem.Allocator, env: *std.process.Environ.Map) bool {
     const p = configPath(alloc, env) catch return false;

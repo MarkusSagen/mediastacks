@@ -10,7 +10,7 @@ zig-pkg/
 tests/fixtures/output/
 
 # Stray catalog DBs from runs where XDG_DATA_HOME wasn't isolated.
-/booktool/
+/mediastacks/
 
 # Playwright MCP snapshots from local UI-test sessions.
 .playwright-mcp/

@@ -6,7 +6,7 @@
 //! out-of-file copy so the catalog can serve the user's chosen cover
 //! without re-extracting from the archive on every request.
 //!
-//! Layout: `$XDG_DATA_HOME/booktool/covers/<id>.<ext>`. Same parent dir
+//! Layout: `$XDG_DATA_HOME/mediastacks/covers/<id>.<ext>`. Same parent dir
 //! as the catalog DB. Extension is sniffed from the image magic bytes
 //! so the file is self-describing on disk.
 
@@ -48,17 +48,17 @@ pub fn sniff(bytes: []const u8) Ext {
     return .jpg;
 }
 
-/// Returns `$XDG_DATA_HOME/booktool/covers/` (with a trailing path
+/// Returns `$XDG_DATA_HOME/mediastacks/covers/` (with a trailing path
 /// separator), creating the directory if it does not exist.
 pub fn dirPath(
     allocator: std.mem.Allocator,
     env: *std.process.Environ.Map,
 ) ![]const u8 {
     const dir = if (env.get("XDG_DATA_HOME")) |xdg|
-        try std.fs.path.join(allocator, &.{ xdg, "stacks", "covers" })
+        try std.fs.path.join(allocator, &.{ xdg, "mediastacks", "covers" })
     else blk: {
         const home = env.get("HOME") orelse return error.NoHome;
-        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "stacks", "covers" });
+        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "mediastacks", "covers" });
     };
     ensureDir(dir);
     return dir;
@@ -73,10 +73,10 @@ pub fn thumbDirPath(
     env: *std.process.Environ.Map,
 ) ![]const u8 {
     const dir = if (env.get("XDG_DATA_HOME")) |xdg|
-        try std.fs.path.join(allocator, &.{ xdg, "stacks", "thumbs" })
+        try std.fs.path.join(allocator, &.{ xdg, "mediastacks", "thumbs" })
     else blk: {
         const home = env.get("HOME") orelse return error.NoHome;
-        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "stacks", "thumbs" });
+        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "share", "mediastacks", "thumbs" });
     };
     ensureDir(dir);
     return dir;
@@ -264,10 +264,10 @@ pub fn unlink(
 
 fn dirPathRaw(env: *std.process.Environ.Map, buf: []u8) ![]const u8 {
     if (env.get("XDG_DATA_HOME")) |xdg| {
-        return try std.fmt.bufPrint(buf, "{s}/booktool/covers", .{xdg});
+        return try std.fmt.bufPrint(buf, "{s}/mediastacks/covers", .{xdg});
     }
     const home = env.get("HOME") orelse return error.NoHome;
-    return try std.fmt.bufPrint(buf, "{s}/.local/share/booktool/covers", .{home});
+    return try std.fmt.bufPrint(buf, "{s}/.local/share/mediastacks/covers", .{home});
 }
 
 fn ensureDir(dir_path: []const u8) void {

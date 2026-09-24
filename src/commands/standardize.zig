@@ -1,4 +1,4 @@
-//! `booktool standardize DIR [options]`
+//! `mediastacks standardize DIR [options]`
 //!
 //! Meta-command that runs the full ingestion pipeline against a directory:
 //!
@@ -52,7 +52,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         }
     }
     const target = dir orelse {
-        try ctx.stderr.print("usage: booktool standardize DIR [options]\n", .{});
+        try ctx.stderr.print("usage: mediastacks standardize DIR [options]\n", .{});
         return 1;
     };
 
@@ -115,7 +115,7 @@ fn section(ctx: cli.Context, name: []const u8) !void {
 
 fn printHelp(w: *std.Io.Writer) !void {
     try w.writeAll(
-        \\Usage: booktool standardize DIR [options]
+        \\Usage: mediastacks standardize DIR [options]
         \\
         \\Run scan → enrich → dedup → rename → optimize against DIR.
         \\Defaults to dry-run; pass --apply to perform mutations.
@@ -129,8 +129,8 @@ fn printHelp(w: *std.Io.Writer) !void {
         \\  --template "TPL"     Pass-through to rename
         \\
         \\Example:
-        \\  booktool standardize ~/Books               # dry-run
-        \\  booktool standardize ~/Books --apply       # do it
+        \\  mediastacks standardize ~/Books               # dry-run
+        \\  mediastacks standardize ~/Books --apply       # do it
         \\
     );
 }

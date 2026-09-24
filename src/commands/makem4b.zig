@@ -1,6 +1,6 @@
-//! `shelve makem4b DIR [--to LIB] [--out FILE] [--bitrate B]` — merge a folder
+//! `medias makem4b DIR [--to LIB] [--out FILE] [--bitrate B]` — merge a folder
 //! of chapter audio files into one chaptered `.m4b` audiobook (ffmpeg). Sources
-//! are kept; the new file is journaled so `shelve undo` removes it.
+//! are kept; the new file is journaled so `medias undo` removes it.
 
 const std = @import("std");
 const cli = @import("../cli.zig");
@@ -146,19 +146,19 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         },
     };
 
-    // Journal the created file so `shelve undo` removes it (sources untouched).
+    // Journal the created file so `medias undo` removes it (sources untouched).
     var entries = [_]journal.Entry{.{ .action = .create, .from = "", .to = out }};
     const j = journal.Journal{ .created = clock.nowSeconds(), .entries = entries[0..] };
     const jpath = journal.write(ctx.arena, ctx.env, j) catch "";
 
     try ctx.stdout.print(
-        "created {s}\n  {d} chapters · {s} · author \"{s}\"\nundo with: shelve undo   (journal: {s})\n",
+        "created {s}\n  {d} chapters · {s} · author \"{s}\"\nundo with: medias undo   (journal: {s})\n",
         .{ out, chapters.items.len, book_title, author, jpath },
     );
     return 0;
 }
 
 fn usage(ctx: cli.Context) !u8 {
-    try ctx.stderr.print("usage: shelve makem4b DIR [--to LIB] [--out FILE.m4b] [--bitrate 128k]\n", .{});
+    try ctx.stderr.print("usage: medias makem4b DIR [--to LIB] [--out FILE.m4b] [--bitrate 128k]\n", .{});
     return 1;
 }

@@ -27,7 +27,7 @@ pub fn extract(allocator: std.mem.Allocator, io: std.Io, path: []const u8, fmt: 
 pub fn writeTmp(allocator: std.mem.Allocator, bytes: []const u8, extension: []const u8) ![]u8 {
     const path = try std.fmt.allocPrint(
         allocator,
-        "/tmp/booktool-cover-{d}.{s}",
+        "/tmp/mediastacks-cover-{d}.{s}",
         .{ std.c.getpid(), extension },
     );
     var path_z_buf: [4096]u8 = undefined;

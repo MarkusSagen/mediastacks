@@ -1,6 +1,6 @@
-//! Undo journal: every apply records its moves and trashes so `shelve
+//! Undo journal: every apply records its moves and trashes so `medias
 //! undo` can reverse them. Stored as JSON under
-//! `$XDG_DATA_HOME/stacks/undo/<timestamp>.json`, with a `latest`
+//! `$XDG_DATA_HOME/mediastacks/undo/<timestamp>.json`, with a `latest`
 //! pointer file naming the most recent journal.
 
 const std = @import("std");
@@ -13,10 +13,10 @@ pub const Journal = struct { created: i64, entries: []Entry };
 /// Resolve the undo directory path. Owned by `alloc`.
 pub fn dir(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
     if (env.get("XDG_DATA_HOME")) |xdg| {
-        return std.fs.path.join(alloc, &.{ xdg, "stacks", "undo" });
+        return std.fs.path.join(alloc, &.{ xdg, "mediastacks", "undo" });
     }
     const home = env.get("HOME") orelse return error.NoHome;
-    return std.fs.path.join(alloc, &.{ home, ".local", "share", "stacks", "undo" });
+    return std.fs.path.join(alloc, &.{ home, ".local", "share", "mediastacks", "undo" });
 }
 
 fn writeFileZ(path: []const u8, bytes: []const u8) !void {
@@ -116,7 +116,7 @@ test "journal round-trips a tagwrite entry" {
     const a = t.allocator;
     const pid = std.c.getpid();
     var db: [256]u8 = undefined;
-    const d = try std.fmt.bufPrint(&db, "/tmp/stacks-jtw-{d}", .{pid});
+    const d = try std.fmt.bufPrint(&db, "/tmp/mediastacks-jtw-{d}", .{pid});
     var entries = [_]Entry{.{ .action = .tagwrite, .from = "/lib/a.flac", .to = "/backup/1/a.flac" }};
     const j = Journal{ .created = 7, .entries = entries[0..] };
     const jpath = try writeTo(a, d, j);
@@ -135,7 +135,7 @@ test "journal writeTo + latestIn + load round-trips" {
     const a = t.allocator;
     const pid = std.c.getpid();
     var db: [256]u8 = undefined;
-    const d = try std.fmt.bufPrint(&db, "/tmp/stacks-journal-{d}", .{pid});
+    const d = try std.fmt.bufPrint(&db, "/tmp/mediastacks-journal-{d}", .{pid});
 
     var entries = [_]Entry{
         .{ .action = .move, .from = "/x/a.mkv", .to = "/lib/a.mkv" },

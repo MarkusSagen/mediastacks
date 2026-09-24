@@ -1,4 +1,4 @@
-//! `shelve review DIR [flags]` — build a Plan and serve the local web
+//! `medias review DIR [flags]` — build a Plan and serve the local web
 //! review UI. Applies on click (with an undo journal), like `organize`.
 
 const std = @import("std");
@@ -15,9 +15,9 @@ const standardize = @import("../core/standardize.zig");
 
 fn mbCacheDir(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
     const base = if (env.get("XDG_CACHE_HOME")) |x|
-        try std.fs.path.join(alloc, &.{ x, "stacks", "mb" })
+        try std.fs.path.join(alloc, &.{ x, "mediastacks", "mb" })
     else
-        try std.fs.path.join(alloc, &.{ env.get("HOME") orelse "/tmp", ".cache", "stacks", "mb" });
+        try std.fs.path.join(alloc, &.{ env.get("HOME") orelse "/tmp", ".cache", "mediastacks", "mb" });
     standardize.mkdirParents(base) catch {};
     return base;
 }
@@ -110,6 +110,6 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 }
 
 fn usage(ctx: cli.Context) !u8 {
-    try ctx.stderr.print("usage: shelve review DIR [--to LIB] [--port N] [--no-probe] [--offline] [--from FILE]\n", .{});
+    try ctx.stderr.print("usage: medias review DIR [--to LIB] [--port N] [--no-probe] [--offline] [--from FILE]\n", .{});
     return 1;
 }

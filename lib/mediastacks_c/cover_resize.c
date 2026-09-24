@@ -65,7 +65,7 @@ static void out_write(void *ctx, void *data, int size) {
 // cache). Returns NULL on any failure and writes 0 to `out_len`.
 //
 // Caller must free the returned buffer with `free()`.
-unsigned char *booktool_cover_resize(
+unsigned char *mediastacks_cover_resize(
     const unsigned char *input,
     size_t input_len,
     int max_width,
@@ -131,6 +131,6 @@ unsigned char *booktool_cover_resize(
     return out.data;
 }
 
-void booktool_cover_resize_free(unsigned char *buf) {
+void mediastacks_cover_resize_free(unsigned char *buf) {
     free(buf);
 }

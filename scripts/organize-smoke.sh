@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end smoke test for `shelve organize` + `shelve undo`.
+# End-to-end smoke test for `medias organize` + `medias undo`.
 #
 # Builds a synthetic messy TV folder (two naming styles, a duplicate
 # episode, a subtitle sidecar, a .DS_Store), plans it, applies it into an
@@ -11,13 +11,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-SHELVE="$ROOT/zig-out/bin/shelve"
-if [[ ! -x "$SHELVE" ]]; then
-    echo "shelve binary missing — run 'zig build' first" >&2
+MEDIAS="$ROOT/zig-out/bin/medias"
+if [[ ! -x "$MEDIAS" ]]; then
+    echo "medias binary missing — run 'zig build' first" >&2
     exit 2
 fi
 
-TMP="$(mktemp -d -t stacks-organize.XXXXXX)"
+TMP="$(mktemp -d -t mediastacks-organize.XXXXXX)"
 export XDG_DATA_HOME="$TMP/data"
 export XDG_CONFIG_HOME="$TMP/config"
 trap 'rm -rf "$TMP"' EXIT
@@ -48,7 +48,7 @@ check() {
 }
 
 echo "== dry-run =="
-OUT="$("$SHELVE" organize "$SRC" --to "$LIB" --dry-run)"
+OUT="$("$MEDIAS" organize "$SRC" --to "$LIB" --dry-run)"
 echo "$OUT"
 check "plan: 3 files organized" 'grep -q "3 file(s) into" <<<"$OUT"'
 check "plan: 1 junk trashed" 'grep -q "1 junk trashed" <<<"$OUT"'
@@ -58,20 +58,20 @@ check "dry-run did not create the library" '[[ ! -d "$LIB" ]]'
 check "dry-run did not move .DS_Store" '[[ -f "$SRC/.DS_Store" ]]'
 
 echo "== apply (default, no flag) =="
-"$SHELVE" organize "$SRC" --to "$LIB" >/dev/null
+"$MEDIAS" organize "$SRC" --to "$LIB" >/dev/null
 check "S01E05 episode landed in library" 'find "$LIB/Shows" -iname "*S01E05*.mkv" | grep -q .'
 check "S01E04 episode landed in library" 'find "$LIB/Shows" -iname "*S01E04*.mkv" | grep -q .'
 check "subtitle sidecar landed alongside" 'find "$LIB/Shows" -iname "*S01E05*.srt" | grep -q .'
 check "Season 01 directory created" 'find "$LIB/Shows" -type d -iname "Season 01" | grep -q .'
 check ".DS_Store moved to trash (gone from source)" '[[ ! -f "$SRC/.DS_Store" ]]'
-check "trash directory populated" 'find "$LIB/.stacks-trash" -name ".DS_Store" | grep -q .'
-check "trash tree carries a Jellyfin .ignore" '[[ -f "$LIB/.stacks-trash/.ignore" ]]'
+check "trash directory populated" 'find "$LIB/.mediastacks-trash" -name ".DS_Store" | grep -q .'
+check "trash tree carries a Jellyfin .ignore" '[[ -f "$LIB/.mediastacks-trash/.ignore" ]]'
 # The larger copy (Kitsune, 8 bytes) wins as primary and moves; the smaller
 # skyanime copy is the duplicate and stays put.
 check "duplicate copy left in place" '[[ -f "$SRC/witch.hat.atelier.s01e04.1080p.web.h264-skyanime.mkv" ]]'
 
 echo "== undo =="
-"$SHELVE" undo >/dev/null
+"$MEDIAS" undo >/dev/null
 check "S01E05 restored to source" '[[ -f "$SRC/witch.hat.atelier.s01e05.1080p.web.h264-skyanime.mkv" ]]'
 check "subtitle restored to source" '[[ -f "$SRC/witch.hat.atelier.s01e05.en.srt" ]]'
 check ".DS_Store restored to source" '[[ -f "$SRC/.DS_Store" ]]'
@@ -86,9 +86,9 @@ if command -v ffprobe >/dev/null 2>&1 && command -v ffmpeg >/dev/null 2>&1; then
     PSRC="$TMP/psrc"
     mkdir -p "$PSRC"
     ffmpeg -v error -f lavfi -i testsrc=d=1:s=1280x720 -y "$PSRC/Test.Show.S01E01.720p.mkv"
-    OUT2="$("$SHELVE" organize "$PSRC" --to "$TMP/plib" --dry-run)"
+    OUT2="$("$MEDIAS" organize "$PSRC" --to "$TMP/plib" --dry-run)"
     check "probe shows media info (720)" 'grep -qE "· .*720" <<<"$OUT2"'
-    check "--no-probe suppresses media info" '! "$SHELVE" organize "$PSRC" --to "$TMP/plib" --dry-run --no-probe | grep -qE "· .*720"'
+    check "--no-probe suppresses media info" '! "$MEDIAS" organize "$PSRC" --to "$TMP/plib" --dry-run --no-probe | grep -qE "· .*720"'
 fi
 
 echo

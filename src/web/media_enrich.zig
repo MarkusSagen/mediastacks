@@ -96,12 +96,12 @@ test "enrichOne enriches a movie via mocked TMDB" {
     defer threaded.deinit();
     const io = threaded.io();
     const cwd = std.Io.Dir.cwd();
-    const root = try std.fmt.allocPrint(a, "/tmp/stacks-enrich-{d}", .{clock.nowSeconds()});
+    const root = try std.fmt.allocPrint(a, "/tmp/mediastacks-enrich-{d}", .{clock.nowSeconds()});
     defer cwd.deleteTree(io, root) catch {};
     try cwd.createDirPath(io, try std.fs.path.join(a, &.{ root, "Movies", "Dune (2021)" }));
 
     // temp catalog with a movie item lacking metadata
-    const db = try std.fmt.allocPrint(a, "/tmp/stacks-enrich-{d}.db", .{clock.nowSeconds()});
+    const db = try std.fmt.allocPrint(a, "/tmp/mediastacks-enrich-{d}.db", .{clock.nowSeconds()});
     var dbz: [96]u8 = undefined;
     const dbzp = std.fmt.bufPrintZ(&dbz, "{s}", .{db}) catch unreachable;
     defer _ = std.c.unlink(dbzp.ptr);

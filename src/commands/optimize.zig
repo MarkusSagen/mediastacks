@@ -1,4 +1,4 @@
-//! `booktool optimize FILE...` — recompress EPUB containers with the
+//! `mediastacks optimize FILE...` — recompress EPUB containers with the
 //! highest-quality deflate level.
 //!
 //! Approach: round-trip every entry through a fresh archive with
@@ -18,7 +18,7 @@ const zip = @import("../ffi/miniz.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len == 0) {
-        try ctx.stderr.print("usage: booktool optimize FILE [FILE ...]\n", .{});
+        try ctx.stderr.print("usage: mediastacks optimize FILE [FILE ...]\n", .{});
         return 1;
     }
     var any_error = false;

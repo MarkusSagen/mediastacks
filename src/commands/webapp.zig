@@ -1,4 +1,4 @@
-//! `shelve serve [--port N] [--to LIB]` — start the organizer web app
+//! `medias serve [--port N] [--to LIB]` — start the organizer web app
 //! (`web/app.zig`). Long-running; Ctrl+C stops it.
 
 const std = @import("std");
@@ -60,6 +60,6 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 }
 
 fn usage(ctx: cli.Context) !u8 {
-    try ctx.stderr.print("usage: shelve serve [--port N] [--to LIB] [--demo]\n", .{});
+    try ctx.stderr.print("usage: medias serve [--port N] [--to LIB] [--demo]\n", .{});
     return 1;
 }

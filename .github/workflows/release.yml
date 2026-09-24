@@ -55,22 +55,23 @@ jobs:
         run: |
           zig build install -Doptimize=ReleaseFast
 
-      # Quick sanity: binary exists and runs --help.
-      - name: Verify binary
+      # Quick sanity: both binaries exist and run --help.
+      - name: Verify binaries
         run: |
-          ls -lh zig-out/bin/booktool
-          ./zig-out/bin/booktool --help | head -20
+          ls -lh zig-out/bin/biblio zig-out/bin/medias
+          ./zig-out/bin/biblio --help | head -20
+          ./zig-out/bin/medias --help | head -20
 
       - name: Package
         run: |
           mkdir -p dist
-          tar -czf dist/booktool-${{ matrix.target }}.tar.gz -C zig-out/bin booktool
-          shasum -a 256 dist/booktool-${{ matrix.target }}.tar.gz \
-            > dist/booktool-${{ matrix.target }}.tar.gz.sha256
+          tar -czf dist/mediastacks-${{ matrix.target }}.tar.gz -C zig-out/bin biblio medias
+          shasum -a 256 dist/mediastacks-${{ matrix.target }}.tar.gz \
+            > dist/mediastacks-${{ matrix.target }}.tar.gz.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: booktool-${{ matrix.target }}
+          name: mediastacks-${{ matrix.target }}
           path: dist/*
 
   release:

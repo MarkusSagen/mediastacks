@@ -7,7 +7,7 @@
 const std = @import("std");
 const c = @import("c");
 
-extern "c" fn booktool_bind_text(
+extern "c" fn mediastacks_bind_text(
     stmt: ?*c.sqlite3_stmt,
     idx: c_int,
     text: [*]const u8,
@@ -62,7 +62,7 @@ pub const Stmt = struct {
 
     /// 1-based parameter index (matches SQLite convention).
     pub fn bindText(self: *Stmt, idx: c_int, value: []const u8) !void {
-        const rc = booktool_bind_text(self.ptr, idx, value.ptr, @intCast(value.len));
+        const rc = mediastacks_bind_text(self.ptr, idx, value.ptr, @intCast(value.len));
         if (rc != c.SQLITE_OK) return Error.BindFailed;
     }
 

@@ -13,11 +13,11 @@ if [[ -f "$OUT" ]]; then
     exit 0
 fi
 
-WORK="$(mktemp -d -t booktool-fixtures.XXXXXX)"
+WORK="$(mktemp -d -t mediastacks-fixtures.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
 # Three tiny "pages" with valid JFIF magic so format sniffing accepts them.
-# Booktool's ComicArchive reader only needs the bytes to exist, not to decode.
+# Mediastacks's ComicArchive reader only needs the bytes to exist, not to decode.
 JPEG_HEADER='\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9'
 for n in 001 002 003; do
     printf "$JPEG_HEADER" > "$WORK/page-$n.jpg"

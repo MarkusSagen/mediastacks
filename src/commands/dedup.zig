@@ -1,4 +1,4 @@
-//! `booktool dedup [--apply] [--exact-only] [--fuzzy-only]`
+//! `mediastacks dedup [--apply] [--exact-only] [--fuzzy-only]`
 //!
 //! Two-tier duplicate detection:
 //!   exact  identical SHA-256 → certain duplicate
@@ -51,7 +51,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 
 fn printHelp(w: *std.Io.Writer) !void {
     try w.writeAll(
-        \\Usage: booktool dedup [options]
+        \\Usage: mediastacks dedup [options]
         \\
         \\Options:
         \\  --apply         Actually delete duplicates (default is dry-run)

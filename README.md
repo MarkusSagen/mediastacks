@@ -1,4 +1,4 @@
-# stacks
+# mediastacks
 
 A kind-aware media organizer. One shared Zig core library, two binaries:
 
@@ -10,10 +10,10 @@ A kind-aware media organizer. One shared Zig core library, two binaries:
     comic archive formats (CBZ / CBR / CB7 / CBT).
   - **TUI** (`biblio tui`) — same library, plaintext reader, full
     keyboard control.
-- **`shelve`** — the general media organizer. Point it at a messy
+- **`medias`** — the general media organizer. Point it at a messy
   download folder and it groups, dedups, and relabels TV & movies into
-  a clean, templated library: `shelve organize DIR` (applies by default;
-  add `--dry-run` to preview), `shelve undo`. Offline-first; deletes go
+  a clean, templated library: `medias organize DIR` (applies by default;
+  add `--dry-run` to preview), `medias undo`. Offline-first; deletes go
   to a trash dir; every run is reversible via an undo journal.
 
 Written in Zig 0.16. Small, deliberately. Book state lives in one
@@ -42,7 +42,7 @@ SQLite file; the organizer works directly on the filesystem.
 
 ```sh
 mise install            # installs Zig 0.16 + zls
-zig build               # produces ./zig-out/bin/booktool (also re-links on rebuild)
+zig build               # produces ./zig-out/bin/mediastacks (also re-links on rebuild)
 zig build -Doptimize=ReleaseFast   # optimized build
 zig build run -- info SOMEFILE.epub
 zig build test          # runs the unit-test suite (109 tests)
@@ -72,49 +72,49 @@ what you reach for day-to-day:
 ### Getting a library into shape
 
 ```sh
-booktool scan ~/Books              # walk + hash + ingest into the catalog
-booktool enrich --missing          # fill gaps from Open Library
-booktool dedup                     # show duplicates (cross-format aware)
-booktool dedup --apply             # delete the lower-quality copies
-booktool rename                    # preview canonical names
-booktool rename --apply            # actually move files
-booktool standardize ~/Books --apply  # all of the above in one pipeline
+mediastacks scan ~/Books              # walk + hash + ingest into the catalog
+mediastacks enrich --missing          # fill gaps from Open Library
+mediastacks dedup                     # show duplicates (cross-format aware)
+mediastacks dedup --apply             # delete the lower-quality copies
+mediastacks rename                    # preview canonical names
+mediastacks rename --apply            # actually move files
+mediastacks standardize ~/Books --apply  # all of the above in one pipeline
 ```
 
 ### Asking the catalog questions
 
 ```sh
-booktool find ~/Books --glob "**/Hobb*"     # list files, no catalog write
-booktool find ~/Books --format mobi         # filter by format
-booktool missing                            # books with incomplete metadata
-booktool missing --glob "**/scifi/**"       # restrict by path
-booktool info path/to/book.epub             # embedded metadata for one file
+mediastacks find ~/Books --glob "**/Hobb*"     # list files, no catalog write
+mediastacks find ~/Books --format mobi         # filter by format
+mediastacks missing                            # books with incomplete metadata
+mediastacks missing --glob "**/scifi/**"       # restrict by path
+mediastacks info path/to/book.epub             # embedded metadata for one file
 ```
 
 ### Editing a single book
 
 ```sh
-booktool set-meta book.epub --title "Better Title" --series "Stormlight" --series-index 1
-booktool set-cover book.epub ~/Pictures/new-cover.jpg
-booktool convert book.mobi --to epub        # via libmobi (MOBI/AZW3→EPUB) or Calibre
-booktool optimize book.epub                 # recompress, save a few percent
+mediastacks set-meta book.epub --title "Better Title" --series "Stormlight" --series-index 1
+mediastacks set-cover book.epub ~/Pictures/new-cover.jpg
+mediastacks convert book.mobi --to epub        # via libmobi (MOBI/AZW3→EPUB) or Calibre
+mediastacks optimize book.epub                 # recompress, save a few percent
 ```
 
 ### Reading and browsing
 
 ```sh
-booktool tui                                # in-terminal list + reader
-booktool serve                              # web UI on http://127.0.0.1:8787
-booktool cover book.epub                    # render cover via chafa (Kitty/Sixel/Unicode)
+mediastacks tui                                # in-terminal list + reader
+mediastacks serve                              # web UI on http://127.0.0.1:8787
+mediastacks cover book.epub                    # render cover via chafa (Kitty/Sixel/Unicode)
 ```
 
 ### Renaming with custom templates
 
 ```sh
-booktool rename --list-presets              # default | flat | series-dir
-booktool rename --preset series-dir         # nest into Author/Series/01 - Title.epub
-booktool rename --template "{year} - {author_sort} - {title}.{ext}"
-booktool rename --template "{author}/{title} [{isbn}].{ext}"
+mediastacks rename --list-presets              # default | flat | series-dir
+mediastacks rename --preset series-dir         # nest into Author/Series/01 - Title.epub
+mediastacks rename --template "{year} - {author_sort} - {title}.{ext}"
+mediastacks rename --template "{author}/{title} [{isbn}].{ext}"
 ```
 
 Template fields: `{author_sort}`, `{author}`, `{title}`, `{series}`,
@@ -126,18 +126,18 @@ may contain `/` to nest into subdirectories.
 A typical "I just downloaded a pile of ebooks" workflow:
 
 ```sh
-booktool scan ~/Downloads/books            # tell booktool about them
-booktool enrich --missing                  # pull missing series / year / cover URLs
-booktool dedup                             # eyeball duplicates
-booktool rename                            # dry-run, sanity-check the names
-booktool rename --apply                    # commit
-booktool optimize ~/Downloads/books/*.epub # shave a percent or two
+mediastacks scan ~/Downloads/books            # tell mediastacks about them
+mediastacks enrich --missing                  # pull missing series / year / cover URLs
+mediastacks dedup                             # eyeball duplicates
+mediastacks rename                            # dry-run, sanity-check the names
+mediastacks rename --apply                    # commit
+mediastacks optimize ~/Downloads/books/*.epub # shave a percent or two
 ```
 
 …or do all of the above in one command:
 
 ```sh
-booktool standardize ~/Downloads/books --apply
+mediastacks standardize ~/Downloads/books --apply
 ```
 
 ### Hands-off maintenance
@@ -146,15 +146,15 @@ Once a library is set up, schedule the recurring chores instead of
 running them manually:
 
 ```sh
-booktool schedule add nightly-rescan @daily rescan-all
-booktool schedule add catch-new-meta "every 6h" enrich-missing
-booktool schedule list                     # show what's configured
-booktool schedule run 1                    # fire job 1 now
-booktool schedule daemon                   # run the scheduler without the web UI
+mediastacks schedule add nightly-rescan @daily rescan-all
+mediastacks schedule add catch-new-meta "every 6h" enrich-missing
+mediastacks schedule list                     # show what's configured
+mediastacks schedule run 1                    # fire job 1 now
+mediastacks schedule daemon                   # run the scheduler without the web UI
 ```
 
-The same schedule definitions are picked up by `booktool serve` (an
-in-process thread checks every minute) or by `booktool schedule
+The same schedule definitions are picked up by `mediastacks serve` (an
+in-process thread checks every minute) or by `mediastacks schedule
 daemon` when you don't want the HTTP server running. Definitions
 live in the catalog DB, so both modes share the same list.
 

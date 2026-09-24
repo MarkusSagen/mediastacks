@@ -76,11 +76,11 @@ pub fn seed(alloc: std.mem.Allocator, io: std.Io, root: []const u8) !Seeded {
     return .{ .root = root, .library = library, .downloads = downloads };
 }
 
-/// The sandbox root: `$XDG_CACHE_HOME/stacks/demo` else `~/.cache/stacks/demo`.
+/// The sandbox root: `$XDG_CACHE_HOME/mediastacks/demo` else `~/.cache/mediastacks/demo`.
 pub fn rootPath(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
-    if (env.get("XDG_CACHE_HOME")) |xdg| return std.fs.path.join(alloc, &.{ xdg, "stacks", "demo" });
+    if (env.get("XDG_CACHE_HOME")) |xdg| return std.fs.path.join(alloc, &.{ xdg, "mediastacks", "demo" });
     const home = env.get("HOME") orelse return error.NoHome;
-    return std.fs.path.join(alloc, &.{ home, ".cache", "stacks", "demo" });
+    return std.fs.path.join(alloc, &.{ home, ".cache", "mediastacks", "demo" });
 }
 
 /// Seed the sandbox AND point XDG_{DATA,CONFIG,CACHE}_HOME at it, so the
@@ -106,7 +106,7 @@ test "seed creates the library + downloads tree with a valid WAV" {
 
     const cwd = std.Io.Dir.cwd();
     var rb: [96]u8 = undefined;
-    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-demo-test-{d}", .{std.c.getpid()});
+    const root = try std.fmt.bufPrint(&rb, "/tmp/mediastacks-demo-test-{d}", .{std.c.getpid()});
     defer cwd.deleteTree(io, root) catch {};
 
     const s = try seed(a, io, root);

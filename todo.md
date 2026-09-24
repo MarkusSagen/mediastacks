@@ -1,4 +1,4 @@
-# stacks — roadmap & follow-ups
+# mediastacks — roadmap & follow-ups
 
 ## Recently done (2026-08-23)
 
@@ -26,12 +26,12 @@
       `{book}.{ext}`. Embedded cover + tag write-back + external cover.jpg reused.
       Verified on the real LOTR audiobook → `Audiobooks/Tolkien, J.R.R/…`
       (was misfiled as music — A.1 gap resolved).
-- [x] **m4b creation** (done 2026-08-23) — `shelve makem4b DIR [--to LIB]
+- [x] **m4b creation** (done 2026-08-23) — `medias makem4b DIR [--to LIB]
       [--out FILE] [--bitrate B]` (its own subcommand, keeps `apply` io-free):
       `kinds/audiobook.zig` probes each chapter's duration, builds an ffmetadata
       `[CHAPTER]` list + concat list, runs ffmpeg (AAC, embedded cover, chapters)
       → one `{book}.m4b` in `Audiobooks/{author_sort}/{book}/`. Sources kept; the
-      new file is journaled (`.create`) so `shelve undo` removes it.
+      new file is journaled (`.create`) so `medias undo` removes it.
       `scripts/m4b-smoke.sh` (7 checks, real ffmpeg).
 
 ## Comics (done 2026-08-23)
@@ -43,13 +43,13 @@
 - [x] **ComicInfo.xml embed** — on organize (default, gated by `write_nfo`),
       **cbz** archives are repacked (miniz ZipReader→ZipWriter) with a fresh
       `ComicInfo.xml` (Series/Number/Volume/Year); backed up + journaled
-      (`.tagwrite`) so `shelve undo` restores the pre-embed archive. cbr/cb7
+      (`.tagwrite`) so `medias undo` restores the pre-embed archive. cbr/cb7
       skipped (can't rewrite without external tools). `comicinfo-smoke.sh`.
 
-## Web UI — shelve app (biblio-styled, separate app)
+## Web UI — medias app (biblio-styled, separate app)
 
-- [x] **Slice 1 — shell + Organize** (done 2026-08-23). `shelve serve` →
-      `web/app.zig` server + `web/assets/shelve.{html,js,css}` (biblio design
+- [x] **Slice 1 — shell + Organize** (done 2026-08-23). `medias serve` →
+      `web/app.zig` server + `web/assets/medias.{html,js,css}` (biblio design
       tokens: warm-paper default + graphite toggle, Inter/JetBrains-Mono, tabs,
       cards, kind badges). Organize view: enter a folder → `/api/organize` builds
       the Plan → grouped-by-kind cards w/ covers/thumbs + keep/skip/trash +
@@ -89,7 +89,7 @@ not a pile of per-type commands.
 - New media kinds plug in as a `kinds/<kind>.zig` parser + a template default —
   they must **not** need changes to `group`, `apply`, `journal`, `plan`, or the
   CLI.
-- One command surface: `shelve organize DIR [--dry-run] …` works for every
+- One command surface: `medias organize DIR [--dry-run] …` works for every
   kind. Resist per-kind subcommands unless a kind genuinely can't fit.
 - When two kinds want the same thing (e.g. "best copy", "trash junk",
   "sidecars"), lift it into `core/`, don't copy it.
@@ -100,12 +100,12 @@ not a pile of per-type commands.
 
 - [x] Shared engine: `kind`, `classify`, `group`, `plan`, `config`, `journal`,
       `apply`; parsers `kinds/tv`, `kinds/movie`; `mediascore`.
-- [x] `shelve organize DIR` (applies by default) + `--dry-run/-n` + `shelve undo`.
+- [x] `medias organize DIR` (applies by default) + `--dry-run/-n` + `medias undo`.
 - [x] Move-into-library, trash-not-delete, reversible undo journal.
 - [x] Readable plan output (sorted, folder-grouped, keep-vs-discard).
 - [x] Junk detection incl. torrent-site promo litter.
 - [x] Jellyfin naming as the default (`Shows/…`, `Movies/…`).
-- [x] Rename to `stacks` (lib) + `biblio` (books) + `shelve` (organizer).
+- [x] Rename to `mediastacks` (lib) + `biblio` (books) + `medias` (organizer).
 - [x] justfile recipes + zsh/bash completions.
 
 ---
@@ -126,7 +126,7 @@ not a pile of per-type commands.
 
 - [x] **DRM detection (flag, don't remove).** Shared `core/drm.zig`: MP4
       box sniff (`pssh`→CENC, `sinf`/`drms`/`encv`/`enca`→FairPlay) + epub
-      `META-INF/encryption.xml` (ADEPT) / `.acsm`. shelve flags protected
+      `META-INF/encryption.xml` (ADEPT) / `.acsm`. medias flags protected
       videos (`DRM — <scheme>` warning, organized by filename, no probe);
       biblio reports in `info` + `scan` (`drm=N`). Detectors are total
       (odd input → none). **Removal stays out of scope.**
@@ -202,7 +202,7 @@ transcripts — kin to music/podcasts), NOT lumped with ebooks. Config gains
       (`buildId3v24`/`buildFlac`/`buildMp3`), `writeTags` = temp file + atomic
       rename (never in place). Opt-in: `--write-tags`/`--no-write-tags` or config
       `write_tags = on` (default off). `apply` backs up each file to
-      `$XDG_DATA_HOME/stacks/backup/<ts>/` + journals a `tagwrite` entry; `shelve
+      `$XDG_DATA_HOME/mediastacks/backup/<ts>/` + journals a `tagwrite` entry; `medias
       undo` restores the original bytes. Unit round-trip tests + `scripts/tag-smoke.sh`
       (real ffmpeg: multi-artist confirmed, byte-identical undo).
       Deferred: cover-art embedding (APIC / FLAC PICTURE), formats beyond FLAC/MP3
@@ -210,7 +210,7 @@ transcripts — kin to music/podcasts), NOT lumped with ebooks. Config gains
 
 ## Phase 3 — review surfaces over the Plan JSON
 
-- [x] **Web review (Phase 3a).** `shelve review DIR` serves a local page
+- [x] **Web review (Phase 3a).** `medias review DIR` serves a local page
       (`web/review.zig`, server-authoritative session): render grouped plan,
       keep/skip/trash, inline retitle (live path recompute), drag-to-regroup,
       ffmpeg posters (`/api/thumb`), Apply (real move + journal). Shared
@@ -227,7 +227,7 @@ transcripts — kin to music/podcasts), NOT lumped with ebooks. Config gains
       on output (`poster/backdrop/logo/thumb/banner`, music stays `cover.jpg`,
       numbered backdrops); **size-aware sample trashing** (tiny promo → junk,
       real sample → extra). `Fields.edition/part` → `Movie (Year) - 1080p.mkv` /
-      `-cd2.mkv`. `apply` drops a Jellyfin **`.ignore`** in `.stacks-trash/`
+      `-cd2.mkv`. `apply` drops a Jellyfin **`.ignore`** in `.mediastacks-trash/`
       (config `emit_ignore`, default on), journaled + undoable via `Action.create`.
 - [x] **NFO sidecar writing** (done 2026-08-10). `core/nfo.zig` pure builders
       (movie/episode/tvshow/season/album/artist) with title/year/language +
@@ -255,10 +255,10 @@ transcripts — kin to music/podcasts), NOT lumped with ebooks. Config gains
 
 ## Polish / cosmetics (deferred from the rename)
 
-- [ ] Rename the repo directory `booktool/` → `stacks/` and `lib/booktool_c/`.
-- [ ] `biblio` per-command usage strings still print "booktool" (e.g.
-      `biblio scan` → `usage: booktool scan …`). Sweep `src/commands/*.zig`.
-- [ ] `docs/COMMANDS.md` / `WEB.md` / `TUI.md` still say "booktool".
+- [ ] Rename the repo directory `mediastacks/` → `mediastacks/` and `lib/mediastacks_c/`.
+- [ ] `biblio` per-command usage strings still print "mediastacks" (e.g.
+      `biblio scan` → `usage: mediastacks scan …`). Sweep `src/commands/*.zig`.
+- [ ] `docs/COMMANDS.md` / `WEB.md` / `TUI.md` still say "mediastacks".
 
 ## Known limitations / smaller improvements
 

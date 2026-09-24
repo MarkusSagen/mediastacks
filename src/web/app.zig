@@ -1,5 +1,5 @@
-//! `shelve serve` — the organizer web app (a fuller, biblio-styled shell over
-//! the same Plan/edit/apply core as `shelve review`). Slice 1: the app shell +
+//! `medias serve` — the organizer web app (a fuller, biblio-styled shell over
+//! the same Plan/edit/apply core as `medias review`). Slice 1: the app shell +
 //! the Organize flow (enter a folder → preview the plan → edit → apply).
 //! Single-threaded, 127.0.0.1 only; the session holds one "current plan" that
 //! `/api/organize` rebuilds on demand.
@@ -54,7 +54,7 @@ pub fn serve(io: std.Io, gpa: std.mem.Allocator, cfg: config.Config, env: *std.p
     var address = try std.Io.net.IpAddress.parse(opts.bind, opts.port);
     var server = try address.listen(io, .{ .reuse_address = true, .kernel_backlog = 64 });
     defer server.deinit(io);
-    try log.print("shelve web app at http://{s}:{d}/  (Ctrl+C to stop)\n", .{ opts.bind, opts.port });
+    try log.print("medias web app at http://{s}:{d}/  (Ctrl+C to stop)\n", .{ opts.bind, opts.port });
     try log.flush();
 
     while (true) {
@@ -188,9 +188,9 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
     const path = pathOnly(target);
 
     if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html"))
-        return respondAsset(request, static.shelve_html, "text/html; charset=utf-8");
-    if (std.mem.eql(u8, path, "/shelve.js")) return respondAsset(request, static.shelve_js, "application/javascript");
-    if (std.mem.eql(u8, path, "/shelve.css")) return respondAsset(request, static.shelve_css, "text/css");
+        return respondAsset(request, static.medias_html, "text/html; charset=utf-8");
+    if (std.mem.eql(u8, path, "/medias.js")) return respondAsset(request, static.medias_js, "application/javascript");
+    if (std.mem.eql(u8, path, "/medias.css")) return respondAsset(request, static.medias_css, "text/css");
     if (std.mem.eql(u8, path, "/favicon.svg")) return respondAsset(request, static.favicon_svg, "image/svg+xml");
 
     if (std.mem.eql(u8, path, "/api/config")) return handleConfig(app, request);
@@ -539,7 +539,7 @@ fn handleOpen(io: std.Io, app: *App, request: *std.http.Server.Request, target: 
     if (!pathUnderRoot(abs, lib) or std.mem.indexOf(u8, abs, "..") != null)
         return request.respond("forbidden\n", .{ .status = .forbidden });
 
-    const cmd = app.env.get("STACKS_OPEN_CMD") orelse "open";
+    const cmd = app.env.get("MEDIASTACKS_OPEN_CMD") orelse "open";
     const argv: []const []const u8 = if (reveal) &.{ cmd, "-R", abs } else &.{ cmd, abs };
     const r = exec.runCaptureStdout(arena, io, argv, 4096) catch
         return request.respond("open failed\n", .{ .status = .internal_server_error });
@@ -731,13 +731,13 @@ fn handleReindex(io: std.Io, app: *App, request: *std.http.Server.Request, targe
     try respondJson(request, try std.fmt.allocPrint(arena, "{{\"added\":{d},\"updated\":{d},\"removed\":{d},\"total\":{d}}}", .{ st.added, st.updated, st.removed, st.total }));
 }
 
-/// Cache dir for provider HTTP responses: `$XDG_CACHE_HOME/stacks/mb` else
-/// `$HOME/.cache/stacks/mb`. Mirrors `commands/organize.zig`'s `mbCacheDir`.
+/// Cache dir for provider HTTP responses: `$XDG_CACHE_HOME/mediastacks/mb` else
+/// `$HOME/.cache/mediastacks/mb`. Mirrors `commands/organize.zig`'s `mbCacheDir`.
 fn enrichCacheDir(arena: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
     const base = if (env.get("XDG_CACHE_HOME")) |x|
-        try std.fs.path.join(arena, &.{ x, "stacks", "mb" })
+        try std.fs.path.join(arena, &.{ x, "mediastacks", "mb" })
     else
-        try std.fs.path.join(arena, &.{ env.get("HOME") orelse "/tmp", ".cache", "stacks", "mb" });
+        try std.fs.path.join(arena, &.{ env.get("HOME") orelse "/tmp", ".cache", "mediastacks", "mb" });
     standardize.mkdirParents(base) catch {};
     return base;
 }

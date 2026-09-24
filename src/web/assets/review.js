@@ -1,4 +1,4 @@
-// shelve review — renders the Plan from /api/plan, sends edit ops to
+// medias review — renders the Plan from /api/plan, sends edit ops to
 // /api/edit, applies via /api/apply. The server is the source of truth:
 // every edit re-renders from the Plan it returns.
 
@@ -148,7 +148,7 @@ function render() {
 document.getElementById("apply").onclick = async () => {
   const r = await (await fetch("/api/apply", { method: "POST" })).json();
   document.getElementById("result").textContent =
-    `applied: moved=${r.moved} trashed=${r.trashed} skipped=${r.skipped} — run 'shelve undo' to revert`;
+    `applied: moved=${r.moved} trashed=${r.trashed} skipped=${r.skipped} — run 'medias undo' to revert`;
 };
 
 load();

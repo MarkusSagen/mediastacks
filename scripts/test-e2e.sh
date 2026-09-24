@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Browser end-to-end test. Boots a fresh `booktool serve` against an
+# Browser end-to-end test. Boots a fresh `mediastacks serve` against an
 # isolated catalog, seeds it from tests/fixtures (CBZ + ebooks), runs
 # the Playwright test (scripts/test-e2e.mjs) against it, then tears
 # down.
@@ -7,15 +7,15 @@
 # Requires:
 #   - node + a Playwright install (`npm install playwright` in this
 #     repo or globally, OR `npx playwright install chromium`)
-#   - Built booktool binary in zig-out/bin
+#   - Built mediastacks binary in zig-out/bin
 #
-# Skip in CI when Playwright isn't available by setting BOOKTOOL_SKIP_E2E=1.
-# (The legacy BOOKTOOL_SKIP_UI is still honoured for one release.)
+# Skip in CI when Playwright isn't available by setting MEDIASTACKS_SKIP_E2E=1.
+# (The legacy MEDIASTACKS_SKIP_UI is still honoured for one release.)
 
 set -euo pipefail
 
-if [[ "${BOOKTOOL_SKIP_E2E:-${BOOKTOOL_SKIP_UI:-0}}" == "1" ]]; then
-    echo "test-e2e: BOOKTOOL_SKIP_E2E=1 — skipping"
+if [[ "${MEDIASTACKS_SKIP_E2E:-${MEDIASTACKS_SKIP_UI:-0}}" == "1" ]]; then
+    echo "test-e2e: MEDIASTACKS_SKIP_E2E=1 — skipping"
     exit 0
 fi
 
@@ -30,10 +30,10 @@ fi
 # Build any binary fixtures (sample.cbz) first.
 "$ROOT/scripts/build-fixtures.sh"
 
-TMP_BASE="$(mktemp -d -t booktool-ui-smoke.XXXXXX)"
+TMP_BASE="$(mktemp -d -t mediastacks-ui-smoke.XXXXXX)"
 export XDG_DATA_HOME="$TMP_BASE/data"
 mkdir -p "$XDG_DATA_HOME"
-PORT=${BOOKTOOL_TEST_PORT:-8899}
+PORT=${MEDIASTACKS_TEST_PORT:-8899}
 
 cleanup() {
     if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -47,12 +47,12 @@ trap cleanup EXIT
 
 echo "==> build"
 zig build install >/dev/null 2>&1
-BIN="$ROOT/zig-out/bin/booktool"
+BIN="$ROOT/zig-out/bin/mediastacks"
 
 echo "==> seed catalog"
 "$BIN" scan tests/fixtures >/dev/null 2>&1 || true
 
-echo "==> launch booktool serve on :$PORT"
+echo "==> launch mediastacks serve on :$PORT"
 "$BIN" serve --port "$PORT" >"$TMP_BASE/serve.log" 2>&1 &
 SERVER_PID=$!
 
@@ -66,7 +66,7 @@ done
 # or a `pnpm dlx`/`npx` shim. CI does `npx playwright install chromium`
 # before running this; local devs typically have either node_modules or
 # the global Playwright cache populated.
-export BOOKTOOL_TEST_URL="http://127.0.0.1:$PORT"
+export MEDIASTACKS_TEST_URL="http://127.0.0.1:$PORT"
 if [[ -d "$ROOT/node_modules/playwright" ]]; then
     node "$ROOT/scripts/test-e2e.mjs"
 else
@@ -75,7 +75,7 @@ else
     npx --no-install playwright --version >/dev/null 2>&1 || {
         echo "test-e2e: Playwright not installed. Run:" >&2
         echo "  npm i -D playwright && npx playwright install chromium" >&2
-        echo "Or set BOOKTOOL_SKIP_E2E=1 to skip." >&2
+        echo "Or set MEDIASTACKS_SKIP_E2E=1 to skip." >&2
         exit 2
     }
     node "$ROOT/scripts/test-e2e.mjs"

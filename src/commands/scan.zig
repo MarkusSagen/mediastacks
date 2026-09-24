@@ -1,4 +1,4 @@
-//! `booktool scan DIR` — walk DIR recursively, extract embedded metadata,
+//! `mediastacks scan DIR` — walk DIR recursively, extract embedded metadata,
 //! and upsert each ebook into the SQLite catalog.
 
 const std = @import("std");
@@ -15,7 +15,7 @@ const drm = @import("../core/drm.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len < 1) {
-        try ctx.stderr.print("usage: booktool scan DIR\n", .{});
+        try ctx.stderr.print("usage: mediastacks scan DIR\n", .{});
         return 1;
     }
     const dir_path = args[0];

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# API-contract smoke for `shelve review`: build a messy folder, start the
+# API-contract smoke for `medias review`: build a messy folder, start the
 # server, exercise /api/plan + /api/edit (retitle) + /api/apply, assert the
-# resulting library tree, then `shelve undo` and assert it's reverted.
+# resulting library tree, then `medias undo` and assert it's reverted.
 # The browser JS isn't tested here — this covers the API it depends on.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-SHELVE="$ROOT/zig-out/bin/shelve"
-[[ -x "$SHELVE" ]] || { echo "build first: zig build" >&2; exit 2; }
+MEDIAS="$ROOT/zig-out/bin/medias"
+[[ -x "$MEDIAS" ]] || { echo "build first: zig build" >&2; exit 2; }
 command -v python3 >/dev/null || { echo "python3 required" >&2; exit 2; }
 
 PORT=8899
-TMP="$(mktemp -d -t stacks-review.XXXXXX)"
+TMP="$(mktemp -d -t mediastacks-review.XXXXXX)"
 export XDG_DATA_HOME="$TMP/data" XDG_CONFIG_HOME="$TMP/config"
 SRC="$TMP/down/The Show"
 LIB="$TMP/lib"
@@ -26,7 +26,7 @@ SVPID=""
 cleanup() { [[ -n "$SVPID" ]] && kill "$SVPID" 2>/dev/null || true; rm -rf "$TMP"; }
 trap cleanup EXIT
 
-"$SHELVE" review "$SRC" --to "$LIB" --port "$PORT" --no-probe >/dev/null 2>&1 &
+"$MEDIAS" review "$SRC" --to "$LIB" --port "$PORT" --no-probe >/dev/null 2>&1 &
 SVPID=$!
 sleep 1
 
@@ -49,7 +49,7 @@ check "episode landed under renamed folder" 'find "$LIB/Shows/Renamed Show" -ina
 check ".DS_Store trashed (gone from source)" '[[ ! -f "$SRC/.DS_Store" ]]'
 
 echo "== undo =="
-"$SHELVE" undo >/dev/null
+"$MEDIAS" undo >/dev/null
 check "library episode reverted" '! find "$LIB/Shows" -iname "*S01E01*.mkv" 2>/dev/null | grep -q .'
 check "source restored" '[[ -f "$SRC/The.Show.S01E01.720p.mkv" ]]'
 

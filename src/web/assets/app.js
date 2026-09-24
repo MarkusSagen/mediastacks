@@ -4,7 +4,7 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 const SAVED_LAYOUT = (() => {
   try {
-    const v = localStorage.getItem('booktool.layout');
+    const v = localStorage.getItem('mediastacks.layout');
     if (v === 'gallery' || v === 'compact' || v === 'list') return v;
   } catch {}
   return 'gallery';
@@ -105,7 +105,7 @@ function toast(msg, kind) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 3500);
 }
 
-const FACET_STATE_KEY = (key) => `booktool.facet.${key}`;
+const FACET_STATE_KEY = (key) => `mediastacks.facet.${key}`;
 function applyStoredFacetState() {
   for (const det of document.querySelectorAll('details.facet-group, details.library-fold')) {
     const key = det.dataset.key || det.closest('[data-key]')?.dataset.key;
@@ -160,7 +160,7 @@ $$('.layout').forEach(btn => {
     btn.classList.add('active');
     state.layout = btn.dataset.layout;
     $('#library').dataset.layout = state.layout;
-    try { localStorage.setItem('booktool.layout', state.layout); } catch {}
+    try { localStorage.setItem('mediastacks.layout', state.layout); } catch {}
     render();
   });
 });
@@ -277,7 +277,7 @@ $('#search').addEventListener('blur', () => {
   setTimeout(hideSearchHistoryDropdown, 150);
 });
 
-const SEARCH_HISTORY_KEY = 'booktool.search.history';
+const SEARCH_HISTORY_KEY = 'mediastacks.search.history';
 const SEARCH_HISTORY_CAP = 10;
 
 function getSearchHistory() {
@@ -571,7 +571,7 @@ async function loadFacets() {
   }
 }
 
-const SEVENZIP_HINT_KEY = 'booktool.sevenzipHintDismissed';
+const SEVENZIP_HINT_KEY = 'mediastacks.sevenzipHintDismissed';
 async function checkSevenzipHint(formats) {
   try {
     if (localStorage.getItem(SEVENZIP_HINT_KEY) === '1') return;
@@ -2409,7 +2409,7 @@ function emptyStateEl(view) {
     p.textContent = 'No book in your library has another copy (same author + title in another format or with different bytes).';
   } else {
     h.textContent = 'Your catalog is empty';
-    p.innerHTML = 'Run <code>booktool scan DIR</code> in a terminal to ingest a directory of ebooks, then refresh.';
+    p.innerHTML = 'Run <code>mediastacks scan DIR</code> in a terminal to ingest a directory of ebooks, then refresh.';
   }
   wrap.append(h, p);
   if (actions.children.length > 0) wrap.appendChild(actions);
@@ -3673,7 +3673,7 @@ function renderDetail(b) {
       : 'cover override · file unchanged';
     badge.title = b.format === 'epub'
       ? 'A user-selected cover has been written into the EPUB file.'
-      : 'A user-selected cover is being served from the booktool library; the source file is unchanged.';
+      : 'A user-selected cover is being served from the mediastacks library; the source file is unchanged.';
     coverWrap.appendChild(badge);
   }
   body.appendChild(coverWrap);
@@ -5069,14 +5069,14 @@ function pdfStepPage(delta) {
 
 function comicPrefs(bookId) {
   try {
-    const raw = localStorage.getItem(`booktool.comic.prefs.${bookId}`);
+    const raw = localStorage.getItem(`mediastacks.comic.prefs.${bookId}`);
     if (raw) return Object.assign({ rtl: false, spread: false }, JSON.parse(raw));
   } catch {}
   return { rtl: false, spread: false };
 }
 function setComicPrefs(bookId, prefs) {
   try {
-    localStorage.setItem(`booktool.comic.prefs.${bookId}`, JSON.stringify(prefs));
+    localStorage.setItem(`mediastacks.comic.prefs.${bookId}`, JSON.stringify(prefs));
   } catch {}
 }
 

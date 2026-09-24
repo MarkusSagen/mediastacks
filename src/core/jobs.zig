@@ -4,7 +4,7 @@
 //! This module owns the CRUD + the spec parser + the executor that
 //! turns "rescan-all" / "enrich-missing" / etc. into actual catalog
 //! mutations. The scheduler loop (in web/scheduler.zig) calls into
-//! here once per minute; the `booktool schedule daemon` CLI uses
+//! here once per minute; the `mediastacks schedule daemon` CLI uses
 //! the same loop without the HTTP server.
 
 const std = @import("std");

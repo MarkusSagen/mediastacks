@@ -1,42 +1,42 @@
-# booktool documentation
+# mediastacks documentation
 
 Three surfaces, one catalog:
 
 | File | What it covers |
 |---|---|
 | [COMMANDS.md](./COMMANDS.md) | Every CLI subcommand: synopsis, flags, examples, exit codes |
-| [WEB.md](./WEB.md) | `booktool serve` — HTTP API, frontend, customisation, limitations |
-| [TUI.md](./TUI.md) | `booktool tui` — list + reader views, keybindings, EPUB pipeline |
+| [WEB.md](./WEB.md) | `mediastacks serve` — HTTP API, frontend, customisation, limitations |
+| [TUI.md](./TUI.md) | `mediastacks tui` — list + reader views, keybindings, EPUB pipeline |
 
 All three read from the same SQLite catalog at
-`$XDG_DATA_HOME/booktool/catalog.db` (default
-`~/.local/share/booktool/catalog.db`). Mutations made by the CLI show
+`$XDG_DATA_HOME/mediastacks/catalog.db` (default
+`~/.local/share/mediastacks/catalog.db`). Mutations made by the CLI show
 up in the web UI and TUI on the next request / event.
 
 ## Quick tour
 
 ```sh
 # Populate the catalog from a directory tree of ebooks.
-booktool scan ~/Books
+mediastacks scan ~/Books
 
 # Enrich with Open Library data.
-booktool enrich --missing
+mediastacks enrich --missing
 
 # See what's wrong with what's there.
-booktool missing
+mediastacks missing
 
 # Find duplicates across formats / editions; --apply removes them.
-booktool dedup
+mediastacks dedup
 
 # Preview rename, then apply it. Templates are configurable.
-booktool rename --preset series-dir
-booktool rename --apply
+mediastacks rename --preset series-dir
+mediastacks rename --apply
 
 # Browse / read in the terminal.
-booktool tui
+mediastacks tui
 
 # Browse / read in a browser.
-booktool serve
+mediastacks serve
 ```
 
 ## End-to-end smoke test

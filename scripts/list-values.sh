@@ -8,7 +8,7 @@ dim="${1:-}"
 
 case "$dim" in
     on-conflict)
-        # `shelve organize --on-conflict <VALUE>`
+        # `medias organize --on-conflict <VALUE>`
         echo "skip"
         echo "suffix"
         echo "overwrite"

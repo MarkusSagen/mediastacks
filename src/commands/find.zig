@@ -1,4 +1,4 @@
-//! `booktool find PATH [--glob PATTERN] [--format FMT] [-0]`
+//! `mediastacks find PATH [--glob PATTERN] [--format FMT] [-0]`
 //!
 //! Discover ebook files in a directory tree without touching the
 //! catalog. Filters:
@@ -47,7 +47,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     }
 
     const search_path = path orelse {
-        try ctx.stderr.print("usage: booktool find PATH [--glob PAT] [--format FMT]\n", .{});
+        try ctx.stderr.print("usage: mediastacks find PATH [--glob PAT] [--format FMT]\n", .{});
         return 1;
     };
 
@@ -87,7 +87,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 
 fn printHelp(w: *std.Io.Writer) !void {
     try w.writeAll(
-        \\Usage: booktool find PATH [options]
+        \\Usage: mediastacks find PATH [options]
         \\
         \\Walk PATH recursively and print every ebook file. Does not modify
         \\the catalog.
@@ -99,9 +99,9 @@ fn printHelp(w: *std.Io.Writer) !void {
         \\  -0, --null       NUL-separate output for safe xargs -0.
         \\
         \\Examples:
-        \\  booktool find ~/Books
-        \\  booktool find . --glob "**/Hobb*" --format mobi
-        \\  booktool find . -0 | xargs -0 booktool info
+        \\  mediastacks find ~/Books
+        \\  mediastacks find . --glob "**/Hobb*" --format mobi
+        \\  mediastacks find . -0 | xargs -0 mediastacks info
         \\
     );
 }

@@ -782,7 +782,7 @@ test "buildPlan groups music into an album and attaches cover (no-probe)" {
 
     const pid = std.c.getpid();
     var rb: [256]u8 = undefined;
-    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-music-{d}", .{pid});
+    const root = try std.fmt.bufPrint(&rb, "/tmp/mediastacks-music-{d}", .{pid});
     mkdirAt("{s}", .{root});
     try writeFileAt("{s}/track a.mp3", .{root}, "aaa");
     try writeFileAt("{s}/track b.flac", .{root}, "bbbb");
@@ -820,7 +820,7 @@ test "buildPlan routes comics to Comics/{series} (no-probe)" {
 
     const pid = std.c.getpid();
     var rb: [256]u8 = undefined;
-    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-comic-{d}", .{pid});
+    const root = try std.fmt.bufPrint(&rb, "/tmp/mediastacks-comic-{d}", .{pid});
     mkdirAt("{s}", .{root});
     try writeFileAt("{s}/Saga #12 (2018).cbz", .{root}, "a");
     try writeFileAt("{s}/Saga #13 (2018).cbz", .{root}, "b");
@@ -859,8 +859,8 @@ test "buildPlan routes audiobooks to Audiobooks root (no-probe)" {
     const pid = std.c.getpid();
     var rb: [256]u8 = undefined;
     // Path contains "Audiobooks" → keyword detection routes the mp3 chapters.
-    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-ab-{d}/Audiobooks", .{pid});
-    mkdirAt("/tmp/stacks-ab-{d}", .{pid});
+    const root = try std.fmt.bufPrint(&rb, "/tmp/mediastacks-ab-{d}/Audiobooks", .{pid});
+    mkdirAt("/tmp/mediastacks-ab-{d}", .{pid});
     mkdirAt("{s}", .{root});
     mkdirAt("{s}/1984", .{root});
     try writeFileAt("{s}/1984/01.mp3", .{root}, "aaa");
@@ -895,7 +895,7 @@ test "buildPlan routes audiobooks to Audiobooks root (no-probe)" {
     unlinkAt("{s}/The Hobbit.m4b", .{root});
     rmdirAt("{s}/1984", .{root});
     rmdirAt("{s}", .{root});
-    rmdirAt("/tmp/stacks-ab-{d}", .{pid});
+    rmdirAt("/tmp/mediastacks-ab-{d}", .{pid});
 }
 
 test "buildPlan routes extras to Jellyfin subfolders (no-probe)" {
@@ -905,7 +905,7 @@ test "buildPlan routes extras to Jellyfin subfolders (no-probe)" {
 
     const pid = std.c.getpid();
     var rb: [256]u8 = undefined;
-    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-extra-{d}", .{pid});
+    const root = try std.fmt.bufPrint(&rb, "/tmp/mediastacks-extra-{d}", .{pid});
     mkdirAt("{s}", .{root});
     mkdirAt("{s}/trailers", .{root});
     try writeFileAt("{s}/The.Matrix.1999.1080p.mkv", .{root}, "aaaa");
@@ -945,7 +945,7 @@ test "buildPlan places Jellyfin images by canonical name (no-probe)" {
 
     const pid = std.c.getpid();
     var rb: [256]u8 = undefined;
-    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-img-{d}", .{pid});
+    const root = try std.fmt.bufPrint(&rb, "/tmp/mediastacks-img-{d}", .{pid});
     mkdirAt("{s}", .{root});
     try writeFileAt("{s}/The.Matrix.1999.1080p.mkv", .{root}, "aaaa");
     try writeFileAt("{s}/poster.jpg", .{root}, "p");
@@ -979,7 +979,7 @@ test "buildPlan rolls CD subfolders into one multi-disc album (no-probe)" {
 
     const pid = std.c.getpid();
     var rb: [256]u8 = undefined;
-    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-disc-{d}", .{pid});
+    const root = try std.fmt.bufPrint(&rb, "/tmp/mediastacks-disc-{d}", .{pid});
     mkdirAt("{s}", .{root});
     mkdirAt("{s}/CD 1", .{root});
     mkdirAt("{s}/CD 2", .{root});
@@ -1025,7 +1025,7 @@ test "buildPlan flags a DRM video and skips probing" {
 
     const pid = std.c.getpid();
     var rb: [256]u8 = undefined;
-    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-drm-{d}", .{pid});
+    const root = try std.fmt.bufPrint(&rb, "/tmp/mediastacks-drm-{d}", .{pid});
     mkdirAt("{s}", .{root});
 
     var fb: [400]u8 = undefined;
@@ -1061,7 +1061,7 @@ test "buildPlan groups a season, dedups, trashes junk, attaches sidecar" {
 
     const pid = std.c.getpid();
     var rb: [256]u8 = undefined;
-    const root = try std.fmt.bufPrint(&rb, "/tmp/stacks-group-{d}", .{pid});
+    const root = try std.fmt.bufPrint(&rb, "/tmp/mediastacks-group-{d}", .{pid});
 
     mkdirAt("{s}", .{root});
     mkdirAt("{s}/wrap", .{root});

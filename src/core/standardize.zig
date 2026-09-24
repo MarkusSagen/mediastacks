@@ -1,5 +1,5 @@
 //! Canonical-rename planner + applier — shared between the CLI
-//! `booktool rename` command and the web "Rename preview" lens.
+//! `mediastacks rename` command and the web "Rename preview" lens.
 //!
 //! Two surfaces:
 //!   - `planAll(arena, cat, template)` — dry-run; returns one
@@ -214,13 +214,13 @@ test "copyAcrossDevices: copies bytes and fsyncs the destination" {
     const stamp = clock.nowSeconds();
 
     var src_buf: [128]u8 = undefined;
-    const src_str = try std.fmt.bufPrint(&src_buf, "/tmp/booktool-exdev-src-{d}-{d}", .{ pid, stamp });
+    const src_str = try std.fmt.bufPrint(&src_buf, "/tmp/mediastacks-exdev-src-{d}-{d}", .{ pid, stamp });
     var src_z_buf: [4096]u8 = undefined;
     const src_z = try std.fmt.bufPrintZ(&src_z_buf, "{s}", .{src_str});
     defer _ = std.c.unlink(src_z.ptr);
 
     var dst_buf: [128]u8 = undefined;
-    const dst_str = try std.fmt.bufPrint(&dst_buf, "/tmp/booktool-exdev-dst-{d}-{d}", .{ pid, stamp });
+    const dst_str = try std.fmt.bufPrint(&dst_buf, "/tmp/mediastacks-exdev-dst-{d}-{d}", .{ pid, stamp });
     var dst_z_buf: [4096]u8 = undefined;
     const dst_z = try std.fmt.bufPrintZ(&dst_z_buf, "{s}", .{dst_str});
     defer _ = std.c.unlink(dst_z.ptr);
@@ -240,13 +240,13 @@ test "copyAcrossDevices: fails when dst already exists (O_EXCL)" {
     const stamp = clock.nowSeconds();
 
     var src_buf: [128]u8 = undefined;
-    const src_str = try std.fmt.bufPrint(&src_buf, "/tmp/booktool-exdev-src2-{d}-{d}", .{ pid, stamp });
+    const src_str = try std.fmt.bufPrint(&src_buf, "/tmp/mediastacks-exdev-src2-{d}-{d}", .{ pid, stamp });
     var src_z_buf: [4096]u8 = undefined;
     const src_z = try std.fmt.bufPrintZ(&src_z_buf, "{s}", .{src_str});
     defer _ = std.c.unlink(src_z.ptr);
 
     var dst_buf: [128]u8 = undefined;
-    const dst_str = try std.fmt.bufPrint(&dst_buf, "/tmp/booktool-exdev-dst2-{d}-{d}", .{ pid, stamp });
+    const dst_str = try std.fmt.bufPrint(&dst_buf, "/tmp/mediastacks-exdev-dst2-{d}-{d}", .{ pid, stamp });
     var dst_z_buf: [4096]u8 = undefined;
     const dst_z = try std.fmt.bufPrintZ(&dst_z_buf, "{s}", .{dst_str});
     defer _ = std.c.unlink(dst_z.ptr);
@@ -267,19 +267,19 @@ test "applyOne: same-fs rename moves file and updates catalog row" {
     const stamp = clock.nowSeconds();
 
     var name_buf: [128]u8 = undefined;
-    const db = try std.fmt.bufPrint(&name_buf, "/tmp/booktool-stdz-applyone-{d}-{d}.db", .{ pid, stamp });
+    const db = try std.fmt.bufPrint(&name_buf, "/tmp/mediastacks-stdz-applyone-{d}-{d}.db", .{ pid, stamp });
     var db_z: [4096]u8 = undefined;
     const dbz = try std.fmt.bufPrintZ(&db_z, "{s}", .{db});
     defer _ = std.c.unlink(dbz.ptr);
 
     var src_buf: [128]u8 = undefined;
-    const src_str = try std.fmt.bufPrint(&src_buf, "/tmp/booktool-stdz-src-{d}-{d}.epub", .{ pid, stamp });
+    const src_str = try std.fmt.bufPrint(&src_buf, "/tmp/mediastacks-stdz-src-{d}-{d}.epub", .{ pid, stamp });
     var src_z_buf: [4096]u8 = undefined;
     const src_z = try std.fmt.bufPrintZ(&src_z_buf, "{s}", .{src_str});
     defer _ = std.c.unlink(src_z.ptr);
 
     var dst_buf: [128]u8 = undefined;
-    const dst_str = try std.fmt.bufPrint(&dst_buf, "/tmp/booktool-stdz-dst-{d}-{d}.epub", .{ pid, stamp });
+    const dst_str = try std.fmt.bufPrint(&dst_buf, "/tmp/mediastacks-stdz-dst-{d}-{d}.epub", .{ pid, stamp });
     var dst_z_buf: [4096]u8 = undefined;
     const dst_z = try std.fmt.bufPrintZ(&dst_z_buf, "{s}", .{dst_str});
     defer _ = std.c.unlink(dst_z.ptr);

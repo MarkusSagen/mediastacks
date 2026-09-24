@@ -1,4 +1,4 @@
-//! `booktool cover FILE` — render the book's cover in the terminal via
+//! `mediastacks cover FILE` — render the book's cover in the terminal via
 //! chafa. Auto-detects Kitty/Sixel/iTerm2/Unicode.
 
 const std = @import("std");
@@ -8,7 +8,7 @@ const cover_mod = @import("../core/cover.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len < 1) {
-        try ctx.stderr.print("usage: booktool cover FILE\n", .{});
+        try ctx.stderr.print("usage: mediastacks cover FILE\n", .{});
         return 1;
     }
     const path = args[0];

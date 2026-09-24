@@ -1,4 +1,4 @@
-//! `booktool schedule <subcommand>` — manage scheduled maintenance.
+//! `mediastacks schedule <subcommand>` — manage scheduled maintenance.
 //!
 //! Subcommands:
 //!   list                   show every scheduled job
@@ -12,7 +12,7 @@
 //! Types: rescan-all, enrich-missing, standardize-dry, backfill-paths.
 //!
 //! `serve` already runs the same loop in-process, so `daemon` is for
-//! users who don't want to keep `booktool serve` running. The two
+//! users who don't want to keep `mediastacks serve` running. The two
 //! never run on the same catalog at the same time — both poll the
 //! catalog every minute and would double-fire jobs. We don't enforce
 //! that with a file lock (would surprise users behind a NAT mount);
@@ -78,7 +78,7 @@ fn cmdList(ctx: cli.Context, cat: *catalog_mod.Catalog) !u8 {
 
 fn cmdAdd(ctx: cli.Context, cat: *catalog_mod.Catalog, args: []const []const u8) !u8 {
     if (args.len < 3) {
-        try ctx.stderr.print("usage: booktool schedule add NAME SPEC TYPE\n", .{});
+        try ctx.stderr.print("usage: mediastacks schedule add NAME SPEC TYPE\n", .{});
         return 1;
     }
     const name = args[0];
@@ -108,7 +108,7 @@ fn cmdAdd(ctx: cli.Context, cat: *catalog_mod.Catalog, args: []const []const u8)
 
 fn cmdRemove(ctx: cli.Context, cat: *catalog_mod.Catalog, args: []const []const u8) !u8 {
     if (args.len < 1) {
-        try ctx.stderr.print("usage: booktool schedule rm ID\n", .{});
+        try ctx.stderr.print("usage: mediastacks schedule rm ID\n", .{});
         return 1;
     }
     const id = std.fmt.parseInt(i64, args[0], 10) catch {
@@ -122,7 +122,7 @@ fn cmdRemove(ctx: cli.Context, cat: *catalog_mod.Catalog, args: []const []const 
 
 fn cmdSetEnabled(ctx: cli.Context, cat: *catalog_mod.Catalog, args: []const []const u8, enabled: bool) !u8 {
     if (args.len < 1) {
-        try ctx.stderr.print("usage: booktool schedule {s} ID\n", .{if (enabled) "enable" else "disable"});
+        try ctx.stderr.print("usage: mediastacks schedule {s} ID\n", .{if (enabled) "enable" else "disable"});
         return 1;
     }
     const id = std.fmt.parseInt(i64, args[0], 10) catch {
@@ -136,7 +136,7 @@ fn cmdSetEnabled(ctx: cli.Context, cat: *catalog_mod.Catalog, args: []const []co
 
 fn cmdRun(ctx: cli.Context, cat: *catalog_mod.Catalog, args: []const []const u8) !u8 {
     if (args.len < 1) {
-        try ctx.stderr.print("usage: booktool schedule run ID\n", .{});
+        try ctx.stderr.print("usage: mediastacks schedule run ID\n", .{});
         return 1;
     }
     const id = std.fmt.parseInt(i64, args[0], 10) catch {
@@ -184,7 +184,7 @@ fn eq(a: []const u8, b: []const u8) bool {
 
 fn printHelp(w: *std.Io.Writer) !void {
     try w.writeAll(
-        \\Usage: booktool schedule <subcommand>
+        \\Usage: mediastacks schedule <subcommand>
         \\
         \\Subcommands:
         \\  list                       Show every scheduled job
@@ -205,8 +205,8 @@ fn printHelp(w: *std.Io.Writer) !void {
         \\  backfill-paths  Parse series / index from filenames
         \\
         \\Examples:
-        \\  booktool schedule add nightly-rescan @daily rescan-all
-        \\  booktool schedule add every-6h-backfill "every 6h" backfill-paths
+        \\  mediastacks schedule add nightly-rescan @daily rescan-all
+        \\  mediastacks schedule add every-6h-backfill "every 6h" backfill-paths
         \\
     );
 }

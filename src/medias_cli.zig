@@ -1,4 +1,4 @@
-//! `shelve` CLI dispatcher — the media-organizer front-end. Shares the
+//! `medias` CLI dispatcher — the media-organizer front-end. Shares the
 //! same core library as the book binary; exposes only the organize/undo
 //! surface.
 
@@ -25,7 +25,7 @@ pub fn run(ctx: cli.Context) !u8 {
         return 0;
     }
     if (eq(cmd, "version") or eq(cmd, "--version") or eq(cmd, "-V")) {
-        try ctx.stdout.print("shelve 0.0.0\n", .{});
+        try ctx.stdout.print("medias 0.0.0\n", .{});
         return 0;
     }
     if (eq(cmd, "organize")) return organize_cmd.run(ctx, rest);
@@ -46,10 +46,10 @@ fn eq(a: []const u8, b: []const u8) bool {
 
 pub fn printUsage(w: *std.Io.Writer) !void {
     try w.writeAll(
-        \\shelve — reorganize & relabel media into a clean library.
+        \\medias — reorganize & relabel media into a clean library.
         \\
         \\Usage:
-        \\  shelve <command> [args]
+        \\  medias <command> [args]
         \\
         \\Commands:
         \\  organize DIR [flags]   Reorganize DIR into the library (applies by default)
@@ -70,8 +70,8 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\  version                Print version
         \\
         \\Configuration:
-        \\  $XDG_CONFIG_HOME/stacks/config.toml — library_root, tv_template, movie_template
-        \\  Undo journals live under $XDG_DATA_HOME/stacks/undo/
+        \\  $XDG_CONFIG_HOME/mediastacks/config.toml — library_root, tv_template, movie_template
+        \\  Undo journals live under $XDG_DATA_HOME/mediastacks/undo/
         \\
     );
 }

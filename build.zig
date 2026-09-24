@@ -1,6 +1,6 @@
 const std = @import("std");
 
-// Build script for booktool.
+// Build script for mediastacks.
 //
 // Wires up:
 //   - vendored miniz (C source compiled in-tree)
@@ -41,8 +41,8 @@ pub fn build(b: *std.Build) void {
     });
     const vaxis_mod = vaxis_dep.module("vaxis");
 
-    // ---- booktool library module ---------------------------------------
-    const stacks_mod = b.addModule("stacks", .{
+    // ---- mediastacks library module ---------------------------------------
+    const mediastacks_mod = b.addModule("mediastacks", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
@@ -54,15 +54,15 @@ pub fn build(b: *std.Build) void {
     });
 
     // Compile vendored miniz directly into the library module.
-    stacks_mod.addCSourceFile(.{
+    mediastacks_mod.addCSourceFile(.{
         .file = b.path("lib/miniz/miniz.c"),
         .flags = &.{ "-std=c99", "-Wno-unused-function" },
     });
-    stacks_mod.addIncludePath(b.path("lib/miniz"));
+    mediastacks_mod.addIncludePath(b.path("lib/miniz"));
 
     // Small C-side helpers for things translate-c can't express cleanly.
-    stacks_mod.addCSourceFile(.{
-        .file = b.path("lib/booktool_c/sqlite_helpers.c"),
+    mediastacks_mod.addCSourceFile(.{
+        .file = b.path("lib/mediastacks_c/sqlite_helpers.c"),
         .flags = &.{"-std=c99"},
     });
 
@@ -71,8 +71,8 @@ pub fn build(b: *std.Build) void {
     // performs signed left-shifts on `int bitBuf` that Clang's UBSAN
     // flags — even though the wrapping behaviour is intentional. The
     // generated JPEG is correct; UBSAN is overly conservative here.
-    stacks_mod.addCSourceFile(.{
-        .file = b.path("lib/booktool_c/cover_resize.c"),
+    mediastacks_mod.addCSourceFile(.{
+        .file = b.path("lib/mediastacks_c/cover_resize.c"),
         .flags = &.{
             "-std=c11",
             "-fno-sanitize=undefined",
@@ -84,11 +84,11 @@ pub fn build(b: *std.Build) void {
     });
 
     // Link system libraries.
-    for (library_dirs) |dir| stacks_mod.addLibraryPath(.{ .cwd_relative = dir });
-    for (include_dirs) |dir| stacks_mod.addIncludePath(.{ .cwd_relative = dir });
-    stacks_mod.linkSystemLibrary("mobi", .{});
-    stacks_mod.linkSystemLibrary("xml2", .{});
-    stacks_mod.linkSystemLibrary("sqlite3", .{});
+    for (library_dirs) |dir| mediastacks_mod.addLibraryPath(.{ .cwd_relative = dir });
+    for (include_dirs) |dir| mediastacks_mod.addIncludePath(.{ .cwd_relative = dir });
+    mediastacks_mod.linkSystemLibrary("mobi", .{});
+    mediastacks_mod.linkSystemLibrary("xml2", .{});
+    mediastacks_mod.linkSystemLibrary("sqlite3", .{});
 
     // ---- Executable ----------------------------------------------------
     const exe = b.addExecutable(.{
@@ -98,7 +98,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "stacks", .module = stacks_mod },
+                .{ .name = "mediastacks", .module = mediastacks_mod },
             },
         }),
     });
@@ -112,34 +112,34 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // ---- Second executable: the media organizer -----------------------
-    const shelve_exe = b.addExecutable(.{
-        .name = "shelve",
+    const medias_exe = b.addExecutable(.{
+        .name = "medias",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/shelve_main.zig"),
+            .root_source_file = b.path("src/medias_main.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "stacks", .module = stacks_mod },
+                .{ .name = "mediastacks", .module = mediastacks_mod },
             },
         }),
     });
-    b.installArtifact(shelve_exe);
+    b.installArtifact(medias_exe);
 
-    const shelve_run_step = b.step("run-shelve", "Run shelve");
-    const shelve_run_cmd = b.addRunArtifact(shelve_exe);
-    shelve_run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| shelve_run_cmd.addArgs(args);
-    shelve_run_step.dependOn(&shelve_run_cmd.step);
+    const medias_run_step = b.step("run-medias", "Run medias");
+    const medias_run_cmd = b.addRunArtifact(medias_exe);
+    medias_run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| medias_run_cmd.addArgs(args);
+    medias_run_step.dependOn(&medias_run_cmd.step);
 
     // ---- `zig build test` ---------------------------------------------
-    const mod_tests = b.addTest(.{ .root_module = stacks_mod });
+    const mod_tests = b.addTest(.{ .root_module = mediastacks_mod });
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
-    const shelve_tests = b.addTest(.{ .root_module = shelve_exe.root_module });
+    const medias_tests = b.addTest(.{ .root_module = medias_exe.root_module });
 
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&b.addRunArtifact(mod_tests).step);
     test_step.dependOn(&b.addRunArtifact(exe_tests).step);
-    test_step.dependOn(&b.addRunArtifact(shelve_tests).step);
+    test_step.dependOn(&b.addRunArtifact(medias_tests).step);
 }
 
 // Probe well-known prefixes for system C headers.

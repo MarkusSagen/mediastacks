@@ -287,16 +287,16 @@ pub const Catalog = struct {
 
 pub fn defaultPath(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
     if (env.get("XDG_DATA_HOME")) |xdg| {
-        return std.fs.path.join(alloc, &.{ xdg, "stacks", "media.db" });
+        return std.fs.path.join(alloc, &.{ xdg, "mediastacks", "media.db" });
     }
     const home = env.get("HOME") orelse return error.NoHome;
-    return std.fs.path.join(alloc, &.{ home, ".local", "share", "stacks", "media.db" });
+    return std.fs.path.join(alloc, &.{ home, ".local", "share", "mediastacks", "media.db" });
 }
 
 test "upsertItem inserts then updates by path" {
     const a = std.testing.allocator;
     var buf: [64]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-{d}.db", .{clock.nowSeconds()});
+    const path = try std.fmt.bufPrint(&buf, "/tmp/mediastacks-mc-{d}.db", .{clock.nowSeconds()});
     var path_z_buf: [4096]u8 = undefined;
     const path_z = try std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path});
     defer _ = std.c.unlink(path_z.ptr);
@@ -335,7 +335,7 @@ fn freeItems(a: std.mem.Allocator, items: []Item) void {
 test "search filters by kind, text and status" {
     const a = std.testing.allocator;
     var buf: [64]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-search-{d}.db", .{clock.nowSeconds()});
+    const path = try std.fmt.bufPrint(&buf, "/tmp/mediastacks-mc-search-{d}.db", .{clock.nowSeconds()});
     var path_z_buf: [4096]u8 = undefined;
     const path_z = try std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path});
     defer _ = std.c.unlink(path_z.ptr);
@@ -373,7 +373,7 @@ test "search filters by kind, text and status" {
 test "deleteUnderPath, clear, allPaths, defaultPath" {
     const a = std.testing.allocator;
     var buf: [64]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-del-{d}.db", .{clock.nowSeconds()});
+    const path = try std.fmt.bufPrint(&buf, "/tmp/mediastacks-mc-del-{d}.db", .{clock.nowSeconds()});
     var path_z_buf: [4096]u8 = undefined;
     const path_z = try std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path});
     defer _ = std.c.unlink(path_z.ptr);
@@ -405,13 +405,13 @@ test "deleteUnderPath, clear, allPaths, defaultPath" {
     try env.put("XDG_DATA_HOME", "/data");
     const dp = try defaultPath(a, &env);
     defer a.free(dp);
-    try std.testing.expectEqualStrings("/data/stacks/media.db", dp);
+    try std.testing.expectEqualStrings("/data/mediastacks/media.db", dp);
 }
 
 test "search treats % and _ in query as literal" {
     const a = std.testing.allocator;
     var buf: [64]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-like-{d}.db", .{clock.nowSeconds()});
+    const path = try std.fmt.bufPrint(&buf, "/tmp/mediastacks-mc-like-{d}.db", .{clock.nowSeconds()});
     var pz: [96]u8 = undefined;
     const pz2 = try std.fmt.bufPrintZ(&pz, "{s}", .{path});
     defer _ = std.c.unlink(pz2.ptr);
@@ -431,7 +431,7 @@ test "search treats % and _ in query as literal" {
 test "getById returns the row or null" {
     const a = std.testing.allocator;
     var buf: [64]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-byid-{d}.db", .{clock.nowSeconds()});
+    const path = try std.fmt.bufPrint(&buf, "/tmp/mediastacks-mc-byid-{d}.db", .{clock.nowSeconds()});
     var pz: [96]u8 = undefined;
     const pathz = std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch unreachable;
     defer _ = std.c.unlink(pathz.ptr);
@@ -455,7 +455,7 @@ test "getById returns the row or null" {
 
 test "deleteUnderPath escapes LIKE metacharacters in the prefix" {
     var buf: [80]u8 = undefined;
-    const path = try std.fmt.bufPrint(&buf, "/tmp/stacks-mc-delesc-{d}.db", .{clock.nowSeconds()});
+    const path = try std.fmt.bufPrint(&buf, "/tmp/mediastacks-mc-delesc-{d}.db", .{clock.nowSeconds()});
     var pz: [112]u8 = undefined;
     const pz2 = try std.fmt.bufPrintZ(&pz, "{s}", .{path});
     defer _ = std.c.unlink(pz2.ptr);

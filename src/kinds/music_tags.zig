@@ -187,7 +187,7 @@ pub fn buildFlac(alloc: std.mem.Allocator, original: []const u8, tags: TagSet) E
     // Build the VORBIS_COMMENT payload.
     var vc: std.ArrayList(u8) = .empty;
     defer vc.deinit(alloc);
-    const vendor = "stacks";
+    const vendor = "mediastacks";
     vc.appendSlice(alloc, &le32(vendor.len)) catch return Error.OutOfMemory;
     vc.appendSlice(alloc, vendor) catch return Error.OutOfMemory;
 
@@ -417,7 +417,7 @@ test "writeTags round-trips a temp file and rejects unsupported ext" {
     const a = arena.allocator();
     const pid = std.c.getpid();
     var pb: [256]u8 = undefined;
-    const path = try std.fmt.bufPrint(&pb, "/tmp/stacks-tags-{d}.flac", .{pid});
+    const path = try std.fmt.bufPrint(&pb, "/tmp/mediastacks-tags-{d}.flac", .{pid});
     const orig = try synthFlacForTest(a);
     writeWhole(path, orig);
     try writeTags(a, path, .{ .artists = &.{ "A", "B" }, .album = "Z" });
@@ -428,7 +428,7 @@ test "writeTags round-trips a temp file and rejects unsupported ext" {
     _ = std.c.unlink((std.fmt.bufPrintZ(&pz, "{s}", .{path}) catch unreachable).ptr);
 
     var xb: [256]u8 = undefined;
-    const xpath = try std.fmt.bufPrint(&xb, "/tmp/stacks-tags-{d}.m4a", .{pid});
+    const xpath = try std.fmt.bufPrint(&xb, "/tmp/mediastacks-tags-{d}.m4a", .{pid});
     writeWhole(xpath, "junk");
     try t.expectError(Error.UnsupportedFormat, writeTags(a, xpath, .{}));
     _ = std.c.unlink((std.fmt.bufPrintZ(&pz, "{s}", .{xpath}) catch unreachable).ptr);

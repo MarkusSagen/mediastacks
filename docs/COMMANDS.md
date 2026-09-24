@@ -1,15 +1,15 @@
-# booktool CLI reference
+# mediastacks CLI reference
 
 Every subcommand exits with `0` on success, `1` on bad arguments or
 empty result sets, `2` on I/O / external-tool failures.
 
-The catalog database lives at `$XDG_DATA_HOME/booktool/catalog.db`
-(default: `~/.local/share/booktool/catalog.db`). It's created on first
+The catalog database lives at `$XDG_DATA_HOME/mediastacks/catalog.db`
+(default: `~/.local/share/mediastacks/catalog.db`). It's created on first
 write.
 
 ---
 
-## `booktool info FILE`
+## `mediastacks info FILE`
 
 Print embedded metadata of a single ebook. No catalog interaction.
 
@@ -18,7 +18,7 @@ comic archives **CBZ / CBR / CB7 / CBT**. For comic archives the values
 come from a sibling `ComicInfo.xml` inside the archive (when present).
 
 ```
-$ booktool info "Sanderson, Brandon - The Way of Kings.epub"
+$ mediastacks info "Sanderson, Brandon - The Way of Kings.epub"
 Path:        Sanderson, Brandon - The Way of Kings.epub
 Format:      epub
 Title:       The Way of Kings
@@ -30,7 +30,7 @@ Language:    en
 
 ---
 
-## `booktool find PATH [options]`
+## `mediastacks find PATH [options]`
 
 Read-only ebook discovery. Walks `PATH` recursively, prints every
 ebook by absolute path. Does not touch the catalog.
@@ -44,25 +44,25 @@ ebook by absolute path. Does not touch the catalog.
 Examples:
 
 ```sh
-booktool find ~/Books
-booktool find . --glob "**/Hobb*" --format mobi
-booktool find . -0 | xargs -0 -n1 booktool info
+mediastacks find ~/Books
+mediastacks find . --glob "**/Hobb*" --format mobi
+mediastacks find . -0 | xargs -0 -n1 mediastacks info
 ```
 
 Exit code is `1` if no matches.
 
 ---
 
-## `booktool scan DIR`
+## `mediastacks scan DIR`
 
 Walk `DIR` recursively, hash every supported file (SHA-256), extract
 embedded metadata, and upsert into the catalog. Picks up every format
-booktool knows about: **EPUB / MOBI / AZW3 / PDF** and the comic
+mediastacks knows about: **EPUB / MOBI / AZW3 / PDF** and the comic
 archives **CBZ / CBR / CB7 / CBT**. Re-scanning is idempotent — files
 with unchanged SHA are reported as `[=]` and not re-processed.
 
 ```
-$ booktool scan ~/Books
+$ mediastacks scan ~/Books
 [+] id=1 epub /Users/me/Books/Sanderson, Brandon - The Way of Kings.epub
 [=] id=2 /Users/me/Books/Hobb, Robin - Assassin's Apprentice.mobi
 ...
@@ -71,24 +71,24 @@ seen=247 ingested=12 unchanged=235 errors=0
 
 ---
 
-## `booktool missing [PATH] [--glob PATTERN]`
+## `mediastacks missing [PATH] [--glob PATTERN]`
 
 List catalogued books that lack one or more of: **title**, **author**,
 **published_year**, **isbn**. Optionally restricted to a path prefix
 or glob.
 
 ```sh
-booktool missing
-booktool missing ~/Books/scifi
-booktool missing --glob "**/Hobb*"
+mediastacks missing
+mediastacks missing ~/Books/scifi
+mediastacks missing --glob "**/Hobb*"
 ```
 
-Each entry shows the missing-field set; use `booktool enrich` or
-`booktool set-meta` to fill them in.
+Each entry shows the missing-field set; use `mediastacks enrich` or
+`mediastacks set-meta` to fill them in.
 
 ---
 
-## `booktool cover FILE`
+## `mediastacks cover FILE`
 
 Extract the cover image from `FILE` and render it inline via
 [`chafa`](https://hpjansson.org/chafa/). Auto-detects Kitty graphics
@@ -100,7 +100,7 @@ For MOBI/AZW3, additionally requires `mobitool` (ships with `libmobi`).
 
 ---
 
-## `booktool convert SRC --to FMT`
+## `mediastacks convert SRC --to FMT`
 
 Convert `SRC` into format `FMT` (epub/mobi/azw3/pdf). Output is
 written next to the source.
@@ -111,15 +111,15 @@ written next to the source.
 | anything else | Calibre's `ebook-convert` (must be installed) |
 
 ```sh
-booktool convert dracula.mobi --to epub
-booktool convert dracula.epub --to mobi
+mediastacks convert dracula.mobi --to epub
+mediastacks convert dracula.epub --to mobi
 ```
 
 Returns the path of the new file on stdout.
 
 ---
 
-## `booktool enrich [--missing] [--limit N]`
+## `mediastacks enrich [--missing] [--limit N]`
 
 Query Open Library for every (or just incomplete) book in the catalog
 and merge results into the existing metadata. The merge respects
@@ -132,13 +132,13 @@ network results.
 | `--limit N` | Stop after N books (spot-test). |
 
 ```sh
-booktool enrich --limit 5
-booktool enrich --missing
+mediastacks enrich --limit 5
+mediastacks enrich --missing
 ```
 
 ---
 
-## `booktool dedup [--apply] [--exact-only] [--fuzzy-only]`
+## `mediastacks dedup [--apply] [--exact-only] [--fuzzy-only]`
 
 Two-tier duplicate detection:
 
@@ -163,7 +163,7 @@ With `--apply`, duplicates are deleted from disk and the catalog.
 
 ---
 
-## `booktool rename [options]`
+## `mediastacks rename [options]`
 
 Rewrite filenames into a canonical, template-driven layout. **Dry-run by
 default; pass `--apply` to move files.**
@@ -210,7 +210,7 @@ needed.
 
 ---
 
-## `booktool set-meta FILE [options]`
+## `mediastacks set-meta FILE [options]`
 
 Edit the **embedded** metadata of a single book (the title shown by
 readers, not the filename). Re-packs the archive in place.
@@ -228,37 +228,37 @@ MOBI/AZW3: shells out to `mobimeta` (libmobi). `--series` flags are
 EPUB-only.
 
 ```sh
-booktool set-meta "Hobb*.mobi" --title "Assassin's Apprentice"
-booktool set-meta book.epub --series "Stormlight" --series-index 1
+mediastacks set-meta "Hobb*.mobi" --title "Assassin's Apprentice"
+mediastacks set-meta book.epub --series "Stormlight" --series-index 1
 ```
 
 ---
 
-## `booktool set-cover FILE IMAGE`
+## `mediastacks set-cover FILE IMAGE`
 
 Replace the cover image. Behaviour depends on format:
 
 - **EPUB** — image bytes are dropped into the existing `cover-image`
   manifest entry and the archive is repacked. The same bytes are also
-  mirrored into `$XDG_DATA_HOME/booktool/covers/<id>.<ext>` so the web
+  mirrored into `$XDG_DATA_HOME/mediastacks/covers/<id>.<ext>` so the web
   UI / TUI render the chosen cover instantly without re-extracting
   from the archive.
 - **MOBI / AZW3** — libmobi exposes no cover-write API, so the source
   file is left untouched. The image is written *only* as a library-side
-  override at `$XDG_DATA_HOME/booktool/covers/<id>.<ext>`, where every
-  booktool surface picks it up. The command prints the override path
-  and reminds you to run `booktool convert --to epub` if you want the
+  override at `$XDG_DATA_HOME/mediastacks/covers/<id>.<ext>`, where every
+  mediastacks surface picks it up. The command prints the override path
+  and reminds you to run `mediastacks convert --to epub` if you want the
   change baked into the file itself. **Requires the book to already
-  be in the catalog** (`booktool scan` it first) so the override file
+  be in the catalog** (`mediastacks scan` it first) so the override file
   has a stable id to key off of.
 
 ```sh
-booktool set-cover book.epub ~/Pictures/new-cover.jpg
-booktool set-cover book.mobi ~/Pictures/new-cover.jpg   # override only
+mediastacks set-cover book.epub ~/Pictures/new-cover.jpg
+mediastacks set-cover book.mobi ~/Pictures/new-cover.jpg   # override only
 ```
 
 For EPUBs the archive must already declare a `cover-image` item;
-booktool refuses to fabricate a cover entry from scratch (use a tool
+mediastacks refuses to fabricate a cover entry from scratch (use a tool
 like Calibre or Sigil to set one initially).
 
 Content type (`image/jpeg` vs `image/png`) is auto-detected from magic
@@ -266,7 +266,7 @@ bytes; the override file is named accordingly.
 
 ---
 
-## `booktool optimize FILE...`
+## `mediastacks optimize FILE...`
 
 Recompress EPUB archives with the highest deflate level. Saves typically
 0–10 % depending on how the source was packed. The `mimetype` entry is
@@ -276,7 +276,7 @@ Refuses to overwrite if the result is no smaller. Atomic rename only on
 strict improvement.
 
 ```sh
-booktool optimize ~/Books/*.epub
+mediastacks optimize ~/Books/*.epub
 ```
 
 Image recompression and HTML/CSS minification are **not** in this
@@ -285,7 +285,7 @@ the next iteration here.
 
 ---
 
-## `booktool standardize DIR [options]`
+## `mediastacks standardize DIR [options]`
 
 Meta-command that pipelines:
 
@@ -299,9 +299,9 @@ Dry-run by default. Skip individual steps with `--no-enrich`,
 `--no-dedup`, `--no-rename`, `--no-optimize`.
 
 ```sh
-booktool standardize ~/Books              # preview everything
-booktool standardize ~/Books --apply      # do it
-booktool standardize ~/Books --apply --no-optimize --template "{year} - {author_sort} - {title}.{ext}"
+mediastacks standardize ~/Books              # preview everything
+mediastacks standardize ~/Books --apply      # do it
+mediastacks standardize ~/Books --apply --no-optimize --template "{year} - {author_sort} - {title}.{ext}"
 ```
 
 Execution is sequential. Parallelizing with `std.Io.concurrent` is
@@ -309,7 +309,7 @@ planned but not yet wired up.
 
 ---
 
-## `booktool serve [--port N] [--bind IP]`
+## `mediastacks serve [--port N] [--bind IP]`
 
 Run the web UI on the given address (default `http://127.0.0.1:8787`).
 The SPA serves the same catalog the CLI sees: list, search, facets,
@@ -322,11 +322,11 @@ table.
 
 ---
 
-## `booktool schedule <sub>`
+## `mediastacks schedule <sub>`
 
 Manage scheduled maintenance jobs. Definitions live in the catalog
-DB so both `booktool serve` (in-process scheduler thread) and
-`booktool schedule daemon` (standalone) execute the same list.
+DB so both `mediastacks serve` (in-process scheduler thread) and
+`mediastacks schedule daemon` (standalone) execute the same list.
 
 | Subcommand | Effect |
 |---|---|
@@ -360,21 +360,21 @@ Job types:
 Examples:
 
 ```sh
-booktool schedule add nightly-rescan @daily rescan-all
-booktool schedule add backfill-6h "every 6h" backfill-paths
-booktool schedule run 1            # fire now, regardless of schedule
-booktool schedule daemon           # run the loop without the web server
+mediastacks schedule add nightly-rescan @daily rescan-all
+mediastacks schedule add backfill-6h "every 6h" backfill-paths
+mediastacks schedule run 1            # fire now, regardless of schedule
+mediastacks schedule daemon           # run the loop without the web server
 ```
 
 Concurrency: only one job runs at a time, guarded by a process-local
-mutex inside the executor. Both `booktool serve` and
-`booktool schedule daemon` can be running simultaneously without
+mutex inside the executor. Both `mediastacks serve` and
+`mediastacks schedule daemon` can be running simultaneously without
 double-firing if they share a catalog — the second one's tick will
 skip jobs the first already claimed via `last_run_status='running'`.
 
 ---
 
-## `booktool tui`
+## `mediastacks tui`
 
 Open the terminal UI. Two views:
 
@@ -387,7 +387,7 @@ EPUB only for now — MOBI/AZW3 books prompt to convert first.
 
 ---
 
-## `booktool help` / `version`
+## `mediastacks help` / `version`
 
 Standard. `version` is also `-V` and `--version`. Help is `-h`,
 `--help`, or the subcommand `help`.

@@ -482,7 +482,7 @@ pub fn handleExport(
     const datestamp = try formatDateUtc(arena);
     if (is_csv) {
         try writeCsvExport(arena, &out, books);
-        const filename = try std.fmt.allocPrint(arena, "booktool-library-{s}.csv", .{datestamp});
+        const filename = try std.fmt.allocPrint(arena, "mediastacks-library-{s}.csv", .{datestamp});
         const disposition = try std.fmt.allocPrint(arena, "attachment; filename=\"{s}\"", .{filename});
         try request.respond(out.items, .{
             .status = .ok,
@@ -494,7 +494,7 @@ pub fn handleExport(
         });
     } else {
         try writeBookListJson(arena, &out, ctx, books);
-        const filename = try std.fmt.allocPrint(arena, "booktool-library-{s}.json", .{datestamp});
+        const filename = try std.fmt.allocPrint(arena, "mediastacks-library-{s}.json", .{datestamp});
         const disposition = try std.fmt.allocPrint(arena, "attachment; filename=\"{s}\"", .{filename});
         try request.respond(out.items, .{
             .status = .ok,
@@ -2332,7 +2332,7 @@ fn handleConvert(
 ///                              Open Library "alternative covers")
 ///
 /// Always writes a library-side override file under
-/// `$XDG_DATA_HOME/booktool/covers/<id>.<ext>` so the chosen cover is
+/// `$XDG_DATA_HOME/mediastacks/covers/<id>.<ext>` so the chosen cover is
 /// served everywhere a `/cover` URL is used. For EPUB we *also* repack
 /// the book file so the chosen cover is embedded in the ebook itself;
 /// for MOBI/AZW3/PDF the source file is left untouched (libmobi has no
@@ -3073,7 +3073,7 @@ fn writeJobJson(arena: std.mem.Allocator, out: *std.ArrayList(u8), j: jobs_mod.J
 fn testTempCatalogPath(buf: []u8, suffix: []const u8) ![]u8 {
     const pid = std.c.getpid();
     const stamp = clock.nowSeconds();
-    return std.fmt.bufPrint(buf, "/tmp/booktool-web-{s}-{d}-{d}.db", .{ suffix, pid, stamp });
+    return std.fmt.bufPrint(buf, "/tmp/mediastacks-web-{s}-{d}-{d}.db", .{ suffix, pid, stamp });
 }
 
 fn testSeedBook(

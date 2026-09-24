@@ -1,4 +1,4 @@
-//! `booktool tui` — interactive terminal UI for browsing and reading.
+//! `mediastacks tui` — interactive terminal UI for browsing and reading.
 
 const std = @import("std");
 const cli = @import("../cli.zig");

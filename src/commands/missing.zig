@@ -1,4 +1,4 @@
-//! `booktool missing [PATH] [--glob PATTERN]` — list books with
+//! `mediastacks missing [PATH] [--glob PATTERN]` — list books with
 //! incomplete metadata.
 //!
 //! With no arguments, lists every incomplete book in the catalog. With
@@ -60,16 +60,16 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
 
 fn printHelp(w: *std.Io.Writer) !void {
     try w.writeAll(
-        \\Usage: booktool missing [PATH] [--glob PATTERN]
+        \\Usage: mediastacks missing [PATH] [--glob PATTERN]
         \\
         \\Lists catalogued books that lack one or more of: title, author,
         \\published_year, isbn. Use PATH to restrict by directory prefix
         \\and --glob for shell-style patterns.
         \\
         \\Examples:
-        \\  booktool missing
-        \\  booktool missing ~/Books/scifi
-        \\  booktool missing --glob "**/Hobb*"
+        \\  mediastacks missing
+        \\  mediastacks missing ~/Books/scifi
+        \\  mediastacks missing --glob "**/Hobb*"
         \\
     );
 }

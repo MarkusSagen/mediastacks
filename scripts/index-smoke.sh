@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# shelve index smoke: build a synthetic library, index it, assert catalog rows.
+# medias index smoke: build a synthetic library, index it, assert catalog rows.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
-SHELVE="$ROOT/zig-out/bin/shelve"
-[[ -x "$SHELVE" ]] || { echo "build first: zig build" >&2; exit 2; }
+MEDIAS="$ROOT/zig-out/bin/medias"
+[[ -x "$MEDIAS" ]] || { echo "build first: zig build" >&2; exit 2; }
 
-TMP="$(mktemp -d -t stacks-index.XXXXXX)"
+TMP="$(mktemp -d -t mediastacks-index.XXXXXX)"
 export XDG_DATA_HOME="$TMP/data" XDG_CONFIG_HOME="$TMP/cfg"
 LIB="$TMP/lib"
 trap 'rm -rf "$TMP"' EXIT
@@ -22,11 +22,11 @@ mkdir -p "$LIB/Movies/Dune (2021) [tmdbid-438631]" \
 PASS=0; FAIL=0
 chk(){ if eval "$2"; then echo "  ok: $1"; PASS=$((PASS+1)); else echo "  FAIL: $1"; FAIL=$((FAIL+1)); fi; }
 
-OUT="$("$SHELVE" index --rebuild --to "$LIB")"
+OUT="$("$MEDIAS" index --rebuild --to "$LIB")"
 echo "$OUT"
 chk "reports 3 items" 'grep -q "indexed 3 item" <<<"$OUT"'
 
-DB="$XDG_DATA_HOME/stacks/media.db"
+DB="$XDG_DATA_HOME/mediastacks/media.db"
 chk "catalog file created" '[[ -f "$DB" ]]'
 if command -v sqlite3 >/dev/null; then
   chk "movie row has tmdb + cover" \
@@ -41,7 +41,7 @@ fi
 
 # Re-index after removing Music → removed count reflects it.
 rm -rf "$LIB/Music"
-OUT2="$("$SHELVE" index --to "$LIB")"
+OUT2="$("$MEDIAS" index --to "$LIB")"
 echo "$OUT2"
 chk "re-index removes the deleted album" 'grep -q "removed 1" <<<"$OUT2"'
 

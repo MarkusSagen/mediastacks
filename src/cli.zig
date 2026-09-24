@@ -106,8 +106,8 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\  version                Print version
         \\
         \\Configuration:
-        \\  Catalog DB lives at $XDG_DATA_HOME/stacks/catalog.db
-        \\  (default: ~/.local/share/stacks/catalog.db)
+        \\  Catalog DB lives at $XDG_DATA_HOME/mediastacks/catalog.db
+        \\  (default: ~/.local/share/mediastacks/catalog.db)
         \\
     );
 }

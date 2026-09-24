@@ -140,7 +140,7 @@ test "second fetch is served from disk (no inner call)" {
 
     const pid = std.c.getpid();
     var db: [256]u8 = undefined;
-    const dir = try std.fmt.bufPrint(&db, "/tmp/stacks-hc-{d}", .{pid});
+    const dir = try std.fmt.bufPrint(&db, "/tmp/mediastacks-hc-{d}", .{pid});
     mkdirZ(dir);
     defer {
         unlinkKey(dir, "https://mb/x");
@@ -169,7 +169,7 @@ test "5xx is not cached" {
 
     const pid = std.c.getpid();
     var db: [256]u8 = undefined;
-    const dir = try std.fmt.bufPrint(&db, "/tmp/stacks-hc5-{d}", .{pid});
+    const dir = try std.fmt.bufPrint(&db, "/tmp/mediastacks-hc5-{d}", .{pid});
     mkdirZ(dir);
     defer {
         unlinkKey(dir, "https://mb/e");

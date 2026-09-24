@@ -10,6 +10,6 @@ pub const review_html = @embedFile("assets/review.html");
 pub const review_js = @embedFile("assets/review.js");
 pub const review_css = @embedFile("assets/review.css");
 
-pub const shelve_html = @embedFile("assets/shelve.html");
-pub const shelve_js = @embedFile("assets/shelve.js");
-pub const shelve_css = @embedFile("assets/shelve.css");
+pub const medias_html = @embedFile("assets/medias.html");
+pub const medias_js = @embedFile("assets/medias.js");
+pub const medias_css = @embedFile("assets/medias.css");

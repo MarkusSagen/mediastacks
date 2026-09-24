@@ -1,4 +1,4 @@
-//! Terminal UI for booktool.
+//! Terminal UI for mediastacks.
 //!
 //! Four modes:
 //!
@@ -133,7 +133,7 @@ pub fn run(
 
     try reloadCatalog(&app);
     if (app.all_books.len == 0) {
-        std.log.err("catalog is empty — run `booktool scan DIR` first.", .{});
+        std.log.err("catalog is empty — run `mediastacks scan DIR` first.", .{});
         return;
     }
 
@@ -566,7 +566,7 @@ fn enrichSelected(app: *App) !void {
 fn rescanAllSources(app: *App) !void {
     const sources = try app.cat.listSources(app.arena);
     if (sources.len == 0) {
-        setStatus(app, "no sources — add one with `booktool sources add PATH`", .{});
+        setStatus(app, "no sources — add one with `mediastacks sources add PATH`", .{});
         return;
     }
     var total_added: u32 = 0;
@@ -877,13 +877,13 @@ fn drawTitleBar(app: *App, win: vaxis.Window) void {
     bar.fill(.{ .style = .{ .bg = Color.rail } });
     const text = std.fmt.bufPrint(
         &title_buf,
-        " booktool — / search · e detail · r read · i info · R rescan · ? help · q quit  ─  {d} books · sort {s}{s} ",
+        " mediastacks — / search · e detail · r read · i info · R rescan · ? help · q quit  ─  {d} books · sort {s}{s} ",
         .{
             app.visible_books.len,
             app.sort.label(),
             if (app.filter_active) " · filtered" else "",
         },
-    ) catch " booktool ";
+    ) catch " mediastacks ";
     _ = bar.printSegment(.{
         .text = text,
         .style = .{ .fg = .default, .bg = Color.rail },

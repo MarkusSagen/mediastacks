@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>booktool</title>
+  <title>mediastacks</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -19,7 +19,7 @@
         <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
       </svg>
     </button>
-    <div class="brand">booktool</div>
+    <div class="brand">mediastacks</div>
     <input id="search" type="search" placeholder="search title / author…  (try: author:hobb year:2010-2020 status:reading)" autocomplete="off">
     <nav class="tabs">
       <button class="tab active" data-view="all">All</button>
@@ -157,7 +157,7 @@
     <section id="library" data-layout="gallery">
       <div id="library-empty" class="empty-state" hidden>
         <h2>your catalog is empty</h2>
-        <p>Run <code>booktool scan DIR</code> in a terminal to ingest a directory of ebooks, then refresh.</p>
+        <p>Run <code>mediastacks scan DIR</code> in a terminal to ingest a directory of ebooks, then refresh.</p>
       </div>
       <div id="library-grid"></div>
     </section>
@@ -201,7 +201,7 @@
       <div class="modal-body">
         <section class="modal-section">
           <h3>Add a new folder</h3>
-          <p class="modal-sub">Pick a folder containing ebooks, PDFs, or comics. Booktool walks the directory recursively, remembers the location, and tracks new / removed files.</p>
+          <p class="modal-sub">Pick a folder containing ebooks, PDFs, or comics. Mediastacks walks the directory recursively, remembers the location, and tracks new / removed files.</p>
           <div class="add-source-row">
             <button id="modal-browse-btn" class="primary" type="button">Browse…</button>
             <input id="modal-path-input" type="text" placeholder="…or paste a path" autocomplete="off">
@@ -313,7 +313,7 @@
       <div class="modal-body">
         <section class="modal-section">
           <h3>Add a job</h3>
-          <p class="modal-sub">Schedule a periodic rescan / metadata refresh / filename backfill. Runs automatically while <code>booktool serve</code> is open (or <code>booktool schedule daemon</code>).</p>
+          <p class="modal-sub">Schedule a periodic rescan / metadata refresh / filename backfill. Runs automatically while <code>mediastacks serve</code> is open (or <code>mediastacks schedule daemon</code>).</p>
           <div class="jobs-add-row">
             <input id="job-name-input" type="text" placeholder="name (e.g. nightly-rescan)" autocomplete="off">
             <select id="job-type-select">

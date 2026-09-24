@@ -1,4 +1,4 @@
-//! `shelve undo` — reverse the most recent apply from its journal.
+//! `medias undo` — reverse the most recent apply from its journal.
 
 const std = @import("std");
 const cli = @import("../cli.zig");

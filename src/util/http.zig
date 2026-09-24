@@ -24,7 +24,7 @@ pub const Response = struct {
 };
 
 pub const ClientOptions = struct {
-    user_agent: []const u8 = "booktool/0.0 (+https://github.com/markussagen/booktool)",
+    user_agent: []const u8 = "mediastacks/0.0 (+https://github.com/markussagen/mediastacks)",
 };
 
 /// GET a URL and return the body. Caller owns `Response.body`.

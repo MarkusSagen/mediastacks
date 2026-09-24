@@ -117,7 +117,7 @@ pub fn extractCover(
     path: []const u8,
 ) ![]u8 {
     var dir_buf: [256]u8 = undefined;
-    const dir = try std.fmt.bufPrint(&dir_buf, "/tmp/booktool-cover-{d}", .{std.c.getpid()});
+    const dir = try std.fmt.bufPrint(&dir_buf, "/tmp/mediastacks-cover-{d}", .{std.c.getpid()});
     var dir_z_buf: [256]u8 = undefined;
     const dir_z = try std.fmt.bufPrintZ(&dir_z_buf, "{s}", .{dir});
     _ = std.c.mkdir(dir_z.ptr, 0o755);

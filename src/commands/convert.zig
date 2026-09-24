@@ -1,4 +1,4 @@
-//! `booktool convert SRC --to FMT` — convert one file.
+//! `mediastacks convert SRC --to FMT` — convert one file.
 
 const std = @import("std");
 const cli = @import("../cli.zig");
@@ -8,7 +8,7 @@ const convert_mod = @import("../convert/convert.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len < 3 or !std.mem.eql(u8, args[1], "--to")) {
-        try ctx.stderr.print("usage: booktool convert SRC --to FMT\n", .{});
+        try ctx.stderr.print("usage: mediastacks convert SRC --to FMT\n", .{});
         return 1;
     }
     const src = args[0];

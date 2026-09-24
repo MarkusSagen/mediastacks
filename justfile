@@ -1,4 +1,4 @@
-# stacks — task runner (biblio = books, shelve = media organizer). Run `just` (no args) for the recipe list.
+# mediastacks — task runner (biblio = books, medias = media organizer). Run `just` (no args) for the recipe list.
 #
 # Convention: the comment line directly above each recipe is what
 # `just --list` shows, so it has to be a single-line summary. Longer
@@ -89,9 +89,9 @@ dev PORT=PORT: build
        fi) &
     ./zig-out/bin/biblio serve --port {{PORT}}
 
-# Same as `serve` but with STACKS_DEBUG=1 — emits scoped debug logs.
+# Same as `serve` but with MEDIASTACKS_DEBUG=1 — emits scoped debug logs.
 serve-debug PORT=PORT: build
-    STACKS_DEBUG=1 ./zig-out/bin/biblio serve --port {{PORT}}
+    MEDIASTACKS_DEBUG=1 ./zig-out/bin/biblio serve --port {{PORT}}
 
 # Release-built server — what you'd ship; slower compile, snappier runtime.
 serve-release PORT=PORT: build-release
@@ -164,15 +164,15 @@ sources *SUB: build
 
 # Open the catalog DB in the sqlite3 REPL (read/write — careful).
 catalog-sql:
-    sqlite3 "${XDG_DATA_HOME:-$HOME/.local/share}/stacks/catalog.db"
+    sqlite3 "${XDG_DATA_HOME:-$HOME/.local/share}/mediastacks/catalog.db"
 
 # Print the catalog DB path + its current size on disk.
 catalog-info:
-    @path="${XDG_DATA_HOME:-$HOME/.local/share}/stacks/catalog.db"; \
+    @path="${XDG_DATA_HOME:-$HOME/.local/share}/mediastacks/catalog.db"; \
       echo "$path"; \
       if [ -f "$path" ]; then ls -lh "$path"; fi
 
-# ───────── media organizer (shelve) ────────────────────────────────
+# ───────── media organizer (medias) ────────────────────────────────
 
 # Reorganize DIR's TV / movies / music into the library. Applies by default;
 # pass --dry-run (-n) to preview. Undo any run with `just undo`.
@@ -184,17 +184,17 @@ catalog-info:
 # --write-tags rewrites FLAC/MP3 tags (multi-artist) on apply (backed up; undoable).
 organize DIR="" *FLAGS="": build
     @if [ -z "{{DIR}}" ]; then echo "usage: just organize DIR [--dry-run] [--to LIB] [--offline] [--write-tags] [--on-conflict skip|suffix|overwrite] [--plan FILE] [--from FILE]"; exit 1; fi
-    ./zig-out/bin/shelve organize "{{DIR}}" {{FLAGS}}
+    ./zig-out/bin/medias organize "{{DIR}}" {{FLAGS}}
 
 # Review & edit a reorg in the browser, then apply on click (undo with `just undo`).
 # e.g. `just review ~/Downloads/down/Show --to ~/Media`
 review DIR="" *FLAGS="": build
     @if [ -z "{{DIR}}" ]; then echo "usage: just review DIR [--to LIB] [--port N] [--no-probe] [--offline]"; exit 1; fi
-    ./zig-out/bin/shelve review "{{DIR}}" {{FLAGS}}
+    ./zig-out/bin/medias review "{{DIR}}" {{FLAGS}}
 
-# Start the shelve organizer web app (Library / Organize / Undo / Settings).
-shelve-serve PORT="8799" *FLAGS="": build
-    ./zig-out/bin/shelve serve --port {{PORT}} {{FLAGS}}
+# Start the medias organizer web app (Library / Organize / Undo / Settings).
+medias-serve PORT="8799" *FLAGS="": build
+    ./zig-out/bin/medias serve --port {{PORT}} {{FLAGS}}
 
 # Headless smoke for the web app (serve → organize → apply over HTTP).
 app-smoke: build
@@ -202,13 +202,13 @@ app-smoke: build
 
 # Reverse the most recent `just organize` (from its undo journal).
 undo: build
-    ./zig-out/bin/shelve undo
+    ./zig-out/bin/medias undo
 
 # End-to-end organize → apply → undo smoke on a synthetic messy folder.
 organize-smoke: build
     ./scripts/organize-smoke.sh
 
-# API-contract smoke for `shelve review` (plan → edit → apply → undo).
+# API-contract smoke for `medias review` (plan → edit → apply → undo).
 review-smoke: build
     ./scripts/review-smoke.sh
 
@@ -248,12 +248,12 @@ index-smoke: build
 # e.g. `just makem4b ~/Downloads/Orwell/1984 --to ~/Media`
 makem4b DIR="" *FLAGS="": build
     @if [ -z "{{DIR}}" ]; then echo "usage: just makem4b DIR [--to LIB] [--out FILE.m4b] [--bitrate 128k]"; exit 1; fi
-    ./zig-out/bin/shelve makem4b "{{DIR}}" {{FLAGS}}
+    ./zig-out/bin/medias makem4b "{{DIR}}" {{FLAGS}}
 
-# Print where shelve keeps organizer state (config + undo journals).
-shelve-info:
-    @echo "config:  ${XDG_CONFIG_HOME:-$HOME/.config}/stacks/config.toml"; \
-      echo "undo:    ${XDG_DATA_HOME:-$HOME/.local/share}/stacks/undo/"
+# Print where medias keeps organizer state (config + undo journals).
+medias-info:
+    @echo "config:  ${XDG_CONFIG_HOME:-$HOME/.config}/mediastacks/config.toml"; \
+      echo "undo:    ${XDG_DATA_HOME:-$HOME/.local/share}/mediastacks/undo/"
 
 # ───────── shell completions ────────────────────────────────────────
 

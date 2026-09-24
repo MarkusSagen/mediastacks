@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const stacks = @import("stacks");
+const mediastacks = @import("mediastacks");
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
@@ -16,7 +16,7 @@ const debug_state_disabled: u8 = 2;
 
 /// Latched on first `customLogFn` call to avoid hitting getenv on every
 /// log line. Initial `0` means "not yet checked"; transitions to `1` or
-/// `2` after we've consulted `STACKS_DEBUG`. Race between threads is
+/// `2` after we've consulted `MEDIASTACKS_DEBUG`. Race between threads is
 /// benign: every caller deterministically observes the same env value
 /// and the same final state.
 var debug_env_state: std.atomic.Value(u8) = .init(debug_state_unchecked);
@@ -24,14 +24,14 @@ var debug_env_state: std.atomic.Value(u8) = .init(debug_state_unchecked);
 /// Returns true iff `.debug` lines should reach the writer for this build.
 /// - Debug builds always emit (matches "you're developing — show me
 ///   everything" expectation).
-/// - Release builds emit only when `STACKS_DEBUG` is set to any
-///   non-empty value (so `STACKS_DEBUG=1`, `STACKS_DEBUG=ol`, etc
+/// - Release builds emit only when `MEDIASTACKS_DEBUG` is set to any
+///   non-empty value (so `MEDIASTACKS_DEBUG=1`, `MEDIASTACKS_DEBUG=ol`, etc
 ///   all turn it on — we don't try to scope by value).
 fn debugEmitEnabled() bool {
     if (builtin.mode == .Debug) return true;
     var state = debug_env_state.load(.acquire);
     if (state == debug_state_unchecked) {
-        const present = std.c.getenv("STACKS_DEBUG") != null;
+        const present = std.c.getenv("MEDIASTACKS_DEBUG") != null;
         state = if (present) debug_state_enabled else debug_state_disabled;
         debug_env_state.store(state, .release);
     }
@@ -49,12 +49,14 @@ fn customLogFn(
 }
 
 pub fn main(init: std.process.Init) !void {
-    stacks.shutdown.install() catch |err| {
+    mediastacks.shutdown.install() catch |err| {
         std.debug.print("signal handler install failed: {s}\n", .{@errorName(err)});
     };
 
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
+
+    mediastacks.datadir.migrateLegacyDirs(arena, init.environ_map); // stacks/ -> mediastacks/ (pre-rename data)
 
     var stdout_buf: [4096]u8 = undefined;
     var stdout_fw: std.Io.File.Writer = .initStreaming(.stdout(), init.io, &stdout_buf);
@@ -64,7 +66,7 @@ pub fn main(init: std.process.Init) !void {
     var stderr_fw: std.Io.File.Writer = .initStreaming(.stderr(), init.io, &stderr_buf);
     const stderr = &stderr_fw.interface;
 
-    const exit_code = stacks.cli.run(.{
+    const exit_code = mediastacks.cli.run(.{
         .arena = arena,
         .io = init.io,
         .args = args,

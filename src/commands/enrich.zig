@@ -1,4 +1,4 @@
-//! `booktool enrich [--missing]` — query Open Library for each book in
+//! `mediastacks enrich [--missing]` — query Open Library for each book in
 //! the catalog, merge results into the existing metadata, write the
 //! enriched row back, and cache the provider response for audit.
 //!

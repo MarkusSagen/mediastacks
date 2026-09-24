@@ -1,4 +1,4 @@
-//! `booktool serve [--port N] [--bind IP]` — start the web UI.
+//! `mediastacks serve [--port N] [--bind IP]` — start the web UI.
 
 const std = @import("std");
 const cli = @import("../cli.zig");
@@ -21,7 +21,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
             i += 1;
             opts.bind = args[i];
         } else {
-            try ctx.stderr.print("usage: booktool serve [--port N] [--bind IP]\n", .{});
+            try ctx.stderr.print("usage: mediastacks serve [--port N] [--bind IP]\n", .{});
             return 1;
         }
     }

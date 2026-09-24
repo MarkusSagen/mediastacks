@@ -1,4 +1,4 @@
-//! `shelve organize DIR [flags]` — build a reorganization plan and, with
+//! `medias organize DIR [flags]` — build a reorganization plan and, with
 //! `--apply`, execute it. The dry-run plan is always printed first.
 
 const std = @import("std");
@@ -26,12 +26,12 @@ const Opts = struct {
     on_conflict: apply_mod.OnConflict = .skip,
 };
 
-/// `$XDG_CACHE_HOME/stacks/mb` (or `$HOME/.cache/stacks/mb`), created.
+/// `$XDG_CACHE_HOME/mediastacks/mb` (or `$HOME/.cache/mediastacks/mb`), created.
 fn mbCacheDir(alloc: std.mem.Allocator, env: *std.process.Environ.Map) ![]u8 {
     const base = if (env.get("XDG_CACHE_HOME")) |x|
-        try std.fs.path.join(alloc, &.{ x, "stacks", "mb" })
+        try std.fs.path.join(alloc, &.{ x, "mediastacks", "mb" })
     else
-        try std.fs.path.join(alloc, &.{ env.get("HOME") orelse "/tmp", ".cache", "stacks", "mb" });
+        try std.fs.path.join(alloc, &.{ env.get("HOME") orelse "/tmp", ".cache", "mediastacks", "mb" });
     standardize.mkdirParents(base) catch {};
     return base;
 }
@@ -219,7 +219,7 @@ fn printPlan(alloc: std.mem.Allocator, w: *std.Io.Writer, p: plan_mod.Plan, home
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     const opts = parseArgs(args) catch |err| {
         try ctx.stderr.print("bad arguments: {s}\n", .{@errorName(err)});
-        try ctx.stderr.print("usage: shelve organize DIR [--dry-run|-n] [--no-probe] [--to LIB] [--plan FILE] [--from FILE] [--on-conflict skip|suffix|overwrite]\n", .{});
+        try ctx.stderr.print("usage: medias organize DIR [--dry-run|-n] [--no-probe] [--to LIB] [--plan FILE] [--from FILE] [--on-conflict skip|suffix|overwrite]\n", .{});
         return 1;
     };
 
@@ -241,7 +241,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
             };
         }
         const dir = opts.dir orelse {
-            try ctx.stderr.print("usage: shelve organize DIR [flags]\n", .{});
+            try ctx.stderr.print("usage: medias organize DIR [flags]\n", .{});
             return 1;
         };
         // Online enrichment (MusicBrainz + TMDB) when configured and not --offline.
@@ -289,7 +289,7 @@ pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
         return 2;
     };
     try ctx.stdout.print(
-        "\napplied: moved={d} trashed={d} skipped={d}\nundo with: shelve undo   (journal: {s})\n",
+        "\napplied: moved={d} trashed={d} skipped={d}\nundo with: medias undo   (journal: {s})\n",
         .{ res.moved, res.trashed, res.skipped, res.journal_path },
     );
     return 0;

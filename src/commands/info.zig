@@ -1,4 +1,4 @@
-//! `booktool info FILE` — print embedded metadata of one ebook.
+//! `mediastacks info FILE` — print embedded metadata of one ebook.
 
 const std = @import("std");
 const cli = @import("../cli.zig");
@@ -9,7 +9,7 @@ const drm = @import("../core/drm.zig");
 
 pub fn run(ctx: cli.Context, args: []const []const u8) !u8 {
     if (args.len < 1) {
-        try ctx.stderr.print("usage: booktool info FILE\n", .{});
+        try ctx.stderr.print("usage: mediastacks info FILE\n", .{});
         return 1;
     }
     const path = args[0];

@@ -1,6 +1,6 @@
-// Tiny Playwright smoke test for the booktool web UI.
+// Tiny Playwright smoke test for the mediastacks web UI.
 //
-// Runs against a `booktool serve` already listening on $BOOKTOOL_TEST_URL
+// Runs against a `mediastacks serve` already listening on $MEDIASTACKS_TEST_URL
 // (defaults to http://127.0.0.1:8899). The shell script
 // scripts/smoke-ui.sh starts the server, runs this, and cleans up.
 //
@@ -17,7 +17,7 @@
 
 import { chromium } from 'playwright';
 
-const URL = process.env.BOOKTOOL_TEST_URL || 'http://127.0.0.1:8899';
+const URL = process.env.MEDIASTACKS_TEST_URL || 'http://127.0.0.1:8899';
 const HEADLESS = process.env.HEADLESS !== '0';
 
 const errors = [];
@@ -47,7 +47,7 @@ console.log(`== smoke-ui against ${URL} ==`);
 await page.goto(URL, { waitUntil: 'networkidle' });
 
 const title = await page.title();
-check('page title is "booktool"', title === 'booktool', `got "${title}"`);
+check('page title is "mediastacks"', title === 'mediastacks', `got "${title}"`);
 
 check('zero console errors after load', errors.length === 0, errors.slice(0, 2).join(' | '));
 
@@ -87,7 +87,7 @@ if (cbz) {
     const list = await fetch('/api/books?format=cbz').then(r => r.json());
     const book = list.find(b => b.id === id);
     // Clean prefs so test is reproducible.
-    localStorage.removeItem(`booktool.comic.prefs.${id}`);
+    localStorage.removeItem(`mediastacks.comic.prefs.${id}`);
     await openReader(book);
     await new Promise(r => setTimeout(r, 600));
     const counter = document.querySelector('.comic-counter');

@@ -1,4 +1,4 @@
-//! Public library surface for booktool.
+//! Public library surface for mediastacks.
 //!
 //! The CLI in `cli.zig` is a thin dispatcher over these modules; the future
 //! TUI and Web UI will call the same APIs.
@@ -6,7 +6,7 @@
 const std = @import("std");
 
 pub const cli = @import("cli.zig");
-pub const shelve_cli = @import("shelve_cli.zig");
+pub const medias_cli = @import("medias_cli.zig");
 
 pub const kind = @import("core/kind.zig");
 pub const classify = @import("core/classify.zig");
@@ -35,6 +35,7 @@ pub const index_cmd = @import("commands/index.zig");
 pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
 pub const demo = @import("core/demo.zig");
+pub const datadir = @import("core/datadir.zig");
 pub const mediacatalog = @import("core/mediacatalog.zig");
 pub const indexer = @import("core/indexer.zig");
 pub const dedup = @import("core/dedup.zig");

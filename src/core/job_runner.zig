@@ -1,7 +1,7 @@
 //! Job executor + scheduler loop.
 //!
-//! Shared by the in-process scheduler running inside `booktool serve`
-//! and the standalone `booktool schedule daemon`. The executor takes
+//! Shared by the in-process scheduler running inside `mediastacks serve`
+//! and the standalone `mediastacks schedule daemon`. The executor takes
 //! a Job and dispatches by `job_type` to the actual work. The loop
 //! polls the catalog every minute for due jobs and runs them one at
 //! a time.

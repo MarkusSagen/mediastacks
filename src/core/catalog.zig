@@ -1,4 +1,4 @@
-//! SQLite-backed catalog of every book booktool has seen.
+//! SQLite-backed catalog of every book mediastacks has seen.
 //!
 //! Schema is materialized on `open()` if missing. Strings returned from
 //! repo calls are duped into the caller-provided allocator (an arena in
@@ -38,7 +38,7 @@ pub const Book = struct {
     added_at: i64 = 0,
     updated_at: i64 = 0,
     /// Library source this book was ingested from. Null when added
-    /// directly via `booktool scan PATH` (no enrolled source).
+    /// directly via `mediastacks scan PATH` (no enrolled source).
     source_id: ?i64 = null,
     /// Set by rescan when the file at `path` no longer exists. Cleared
     /// if a later scan finds it again.
@@ -1869,10 +1869,10 @@ pub fn defaultPath(
     env: *std.process.Environ.Map,
 ) ![]const u8 {
     if (env.get("XDG_DATA_HOME")) |xdg| {
-        return std.fs.path.join(allocator, &.{ xdg, "stacks", "catalog.db" });
+        return std.fs.path.join(allocator, &.{ xdg, "mediastacks", "catalog.db" });
     }
     const home = env.get("HOME") orelse return error.NoHome;
-    return std.fs.path.join(allocator, &.{ home, ".local", "share", "stacks", "catalog.db" });
+    return std.fs.path.join(allocator, &.{ home, ".local", "share", "mediastacks", "catalog.db" });
 }
 
 test "encodeAuthors round-trips through decodeAuthors" {
@@ -1907,7 +1907,7 @@ test "Catalog open/insert/query round-trip" {
     var name_buf: [128]u8 = undefined;
     const name = try std.fmt.bufPrint(
         &name_buf,
-        "/tmp/booktool-test-{d}-{d}.db",
+        "/tmp/mediastacks-test-{d}-{d}.db",
         .{ pid, stamp },
     );
     var path_z_buf: [4096]u8 = undefined;
@@ -1952,7 +1952,7 @@ test "migration backfills original_path on next open" {
     var name_buf: [128]u8 = undefined;
     const name = try std.fmt.bufPrint(
         &name_buf,
-        "/tmp/booktool-test-origpath-migration-{d}-{d}.db",
+        "/tmp/mediastacks-test-origpath-migration-{d}-{d}.db",
         .{ pid, stamp },
     );
     var path_z_buf: [4096]u8 = undefined;
@@ -2002,7 +2002,7 @@ test "updateBookPath preserves original_path" {
     var name_buf: [128]u8 = undefined;
     const name = try std.fmt.bufPrint(
         &name_buf,
-        "/tmp/booktool-test-origpath-{d}-{d}.db",
+        "/tmp/mediastacks-test-origpath-{d}-{d}.db",
         .{ pid, stamp },
     );
     var path_z_buf: [4096]u8 = undefined;
@@ -2036,7 +2036,7 @@ test "ReadLocation: null when unset" {
     var name_buf: [128]u8 = undefined;
     const name = try std.fmt.bufPrint(
         &name_buf,
-        "/tmp/booktool-test-loc-null-{d}-{d}.db",
+        "/tmp/mediastacks-test-loc-null-{d}-{d}.db",
         .{ pid, stamp },
     );
     var path_z_buf: [4096]u8 = undefined;
@@ -2055,7 +2055,7 @@ test "ReadLocation: set then get round-trips location + percent" {
     var name_buf: [128]u8 = undefined;
     const name = try std.fmt.bufPrint(
         &name_buf,
-        "/tmp/booktool-test-loc-rt-{d}-{d}.db",
+        "/tmp/mediastacks-test-loc-rt-{d}-{d}.db",
         .{ pid, stamp },
     );
     var path_z_buf: [4096]u8 = undefined;
