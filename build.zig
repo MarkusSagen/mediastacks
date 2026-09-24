@@ -160,9 +160,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(medias_tests).step);
 }
 
-// Probe well-known prefixes for system C headers.
+// Well-known prefixes for system C headers / libraries, added unconditionally:
+// the compiler silently ignores any that don't exist, and build.zig can't stat
+// them without libc — which the build runner does NOT link on Linux/Windows
+// (it does on macOS, which is why an existence check "worked" locally). Any
+// non-standard prefix (Nix, a custom install) is picked up by the compiler's
+// own C_INCLUDE_PATH / CPATH / LIBRARY_PATH environment handling, so we don't
+// read the environment here (that would need libc too).
 fn collectIncludeDirs(b: *std.Build) []const []const u8 {
-    var list: std.ArrayList([]const u8) = .empty;
     const candidates = [_][]const u8{
         "/opt/homebrew/include", // Apple Silicon Homebrew
         "/opt/homebrew/opt/libmobi/include",
@@ -176,27 +181,10 @@ fn collectIncludeDirs(b: *std.Build) []const []const u8 {
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/libxml2",
     };
-    for (candidates) |c| {
-        if (dirExists(c)) list.append(b.allocator, c) catch @panic("OOM");
-    }
-    // Also honor the environment so non-Homebrew prefixes work (Nix, custom).
-    appendEnvDirs(b, &list, "C_INCLUDE_PATH");
-    appendEnvDirs(b, &list, "CPATH");
-    return list.toOwnedSlice(b.allocator) catch @panic("OOM");
-}
-
-/// Append existing `:`-separated dirs from environment variable `name`.
-fn appendEnvDirs(b: *std.Build, list: *std.ArrayList([]const u8), name: [*:0]const u8) void {
-    const raw = std.c.getenv(name) orelse return;
-    const val = std.mem.span(raw);
-    var it = std.mem.tokenizeScalar(u8, val, ':');
-    while (it.next()) |dir| {
-        if (dirExists(dir)) list.append(b.allocator, b.dupe(dir)) catch @panic("OOM");
-    }
+    return b.allocator.dupe([]const u8, &candidates) catch @panic("OOM");
 }
 
 fn collectLibraryDirs(b: *std.Build) []const []const u8 {
-    var list: std.ArrayList([]const u8) = .empty;
     const candidates = [_][]const u8{
         "/opt/homebrew/lib",
         "/opt/homebrew/opt/libmobi/lib",
@@ -205,19 +193,5 @@ fn collectLibraryDirs(b: *std.Build) []const []const u8 {
         "/usr/local/opt/libmobi/lib",
         "/usr/lib",
     };
-    for (candidates) |c| {
-        if (dirExists(c)) list.append(b.allocator, c) catch @panic("OOM");
-    }
-    appendEnvDirs(b, &list, "LIBRARY_PATH");
-    return list.toOwnedSlice(b.allocator) catch @panic("OOM");
-}
-
-fn dirExists(path: []const u8) bool {
-    // Use libc access() — works in 0.16 build scripts where std.fs / std.Io
-    // are restructured. F_OK = 0 (existence test).
-    var buf: [4096]u8 = undefined;
-    if (path.len >= buf.len) return false;
-    @memcpy(buf[0..path.len], path);
-    buf[path.len] = 0;
-    return std.c.access(@ptrCast(&buf), 0) == 0;
+    return b.allocator.dupe([]const u8, &candidates) catch @panic("OOM");
 }
