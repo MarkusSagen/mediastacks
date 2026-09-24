@@ -36,6 +36,7 @@ pub const metadata = @import("core/metadata.zig");
 pub const catalog = @import("core/catalog.zig");
 pub const demo = @import("core/demo.zig");
 pub const subtitles = @import("core/subtitles.zig");
+pub const remux = @import("core/remux.zig");
 pub const datadir = @import("core/datadir.zig");
 pub const mediacatalog = @import("core/mediacatalog.zig");
 pub const indexer = @import("core/indexer.zig");

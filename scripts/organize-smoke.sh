@@ -90,6 +90,16 @@ if command -v ffprobe >/dev/null 2>&1 && command -v ffmpeg >/dev/null 2>&1; then
     OUT2="$("$MEDIAS" organize "$PSRC" --to "$TMP/plib" --dry-run)"
     check "probe shows media info (720)" 'grep -qE "· .*720" <<<"$OUT2"'
     check "--no-probe suppresses media info" '! "$MEDIAS" organize "$PSRC" --to "$TMP/plib" --dry-run --no-probe | grep -qE "· .*720"'
+
+    echo "== remux =="
+    RSRC="$TMP/rsrc"; mkdir -p "$RSRC"
+    ffmpeg -v error -f lavfi -i "testsrc=d=1:s=320x240" -f lavfi -i "sine=f=440:d=1" -f lavfi -i "sine=f=330:d=1" \
+      -map 0:v -map 1:a -map 2:a -metadata:s:a:0 language=eng -metadata:s:a:1 language=jpn -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -y "$RSRC/Clip.mkv" >/dev/null 2>&1
+    RDRY="$("$MEDIAS" remux "$RSRC/Clip.mkv" --keep-langs en --dry-run)"
+    check "remux dry-run drops the non-kept audio" 'grep -qE "keep 1 drop 1" <<<"$RDRY"'
+    "$MEDIAS" remux "$RSRC/Clip.mkv" --keep-langs en >/dev/null 2>&1
+    check "remux kept exactly 1 audio track" '[[ "$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$RSRC/Clip.mkv" | grep -c .)" == "1" ]]'
+    check "remux trashed the original (reversible)" '[[ -d "$RSRC/.mediastacks-trash" ]]'
 fi
 
 echo

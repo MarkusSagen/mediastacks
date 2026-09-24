@@ -10,6 +10,7 @@ const review_cmd = @import("commands/review.zig");
 const makem4b_cmd = @import("commands/makem4b.zig");
 const webapp_cmd = @import("commands/webapp.zig");
 const index_cmd = @import("commands/index.zig");
+const remux_cmd = @import("commands/remux.zig");
 
 pub fn run(ctx: cli.Context) !u8 {
     if (ctx.args.len < 2) {
@@ -34,6 +35,7 @@ pub fn run(ctx: cli.Context) !u8 {
     if (eq(cmd, "makem4b")) return makem4b_cmd.run(ctx, rest);
     if (eq(cmd, "undo")) return undo_cmd.run(ctx, rest);
     if (eq(cmd, "index")) return index_cmd.run(ctx, rest);
+    if (eq(cmd, "remux")) return remux_cmd.run(ctx, rest);
 
     try ctx.stderr.print("unknown command: {s}\n", .{cmd});
     try printUsage(ctx.stderr);
@@ -64,7 +66,11 @@ pub fn printUsage(w: *std.Io.Writer) !void {
         \\    --to LIB               Override the library root
         \\    --out FILE.m4b         Write to an explicit path instead
         \\    --bitrate B            AAC bitrate (default 128k)
-        \\  undo                   Reverse the most recent organize
+        \\  remux FILE|DIR [flags] Losslessly repackage video → clean .mkv (ffmpeg -c copy)
+        \\    --keep-langs en,ja     Drop audio/subtitle tracks in other languages
+        \\    --no-embed-subs        Don't mux matching external subtitle sidecars in
+        \\    --dry-run              Preview only
+        \\  undo                   Reverse the most recent organize / remux
         \\  index [--rebuild] [--to LIB]   scan the library into the media catalog
         \\  help                   Show this help
         \\  version                Print version

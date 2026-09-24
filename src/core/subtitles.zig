@@ -55,6 +55,13 @@ fn langOf(tok: []const u8) ?[]const u8 {
     return null;
 }
 
+/// Normalize a language token (name / ISO-639-1 / ISO-639-2, e.g. "english",
+/// "en", "eng") to its 2-letter code, or null when unrecognized. Used to match
+/// a keep-languages policy against ffprobe's `tags.language`.
+pub fn toCode(tok: []const u8) ?[]const u8 {
+    return langOf(tok);
+}
+
 fn isForced(tok: []const u8) bool {
     return std.ascii.eqlIgnoreCase(tok, "forced");
 }
