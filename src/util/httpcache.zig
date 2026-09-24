@@ -6,20 +6,10 @@
 
 const std = @import("std");
 const http = @import("http.zig");
+const clock = @import("clock.zig");
 
-// Wall-clock milliseconds via libc (0.16 has no std.time.Instant / milliTimestamp
-// without an Io). `usec` is 32-bit on darwin — matching the C timeval layout.
-const Timeval = extern struct { sec: c_long, usec: c_int };
-extern "c" fn gettimeofday(tv: *Timeval, tz: ?*anyopaque) c_int;
-fn nowMs() i64 {
-    var tv: Timeval = undefined;
-    if (gettimeofday(&tv, null) != 0) return 0;
-    return @as(i64, tv.sec) * 1000 + @divTrunc(@as(i64, tv.usec), 1000);
-}
-fn sleepMs(ms: u64) void {
-    const req = std.c.timespec{ .sec = @intCast(ms / 1000), .nsec = @intCast((ms % 1000) * std.time.ns_per_ms) };
-    _ = std.c.nanosleep(&req, null);
-}
+const nowMs = clock.nowMs;
+const sleepMs = clock.sleepMs;
 
 pub const CachingHttpClient = struct {
     inner: http.HttpClient,

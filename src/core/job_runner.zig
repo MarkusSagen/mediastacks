@@ -258,11 +258,7 @@ fn sleepInterruptible(seconds: u64) void {
     while (remaining_ms > 0) {
         if (shutdown.isRequested()) return;
         const chunk: u64 = if (remaining_ms > 250) 250 else remaining_ms;
-        const req = std.c.timespec{
-            .sec = 0,
-            .nsec = @intCast(chunk * std.time.ns_per_ms),
-        };
-        _ = std.c.nanosleep(&req, null);
+        clock.sleepMs(chunk);
         remaining_ms -= chunk;
     }
 }

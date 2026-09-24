@@ -128,33 +128,24 @@ pub fn applyOne(cat: *catalog_mod.Catalog, plan: RenamePlan) !void {
 /// error from open/read/write/fsync. The destination is removed on
 /// failure to avoid leaving half-written files around.
 pub fn copyAcrossDevices(src_z: [:0]const u8, dst_z: [:0]const u8) !void {
-    const src_fd = std.c.open(src_z.ptr, .{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-    if (src_fd < 0) return error.OpenSrcFailed;
-    defer _ = std.c.close(src_fd);
-    const dst_fd = std.c.open(
-        dst_z.ptr,
-        .{ .ACCMODE = .WRONLY, .CREAT = true, .EXCL = true },
-        @as(std.c.mode_t, 0o644),
-    );
-    if (dst_fd < 0) return error.OpenDstFailed;
+    // Uses stdio (fopen/fread/fwrite) rather than raw POSIX fds so it is
+    // portable — Windows has no `open`/`read`/`write` with these signatures.
+    const src = std.c.fopen(src_z.ptr, "rb") orelse return error.OpenSrcFailed;
+    defer _ = std.c.fclose(src);
+    // Refuse to clobber an existing destination (the raw-fd version used O_EXCL;
+    // stdio has no such mode, so check first — portable via access()/_access).
+    if (std.c.access(dst_z.ptr, 0) == 0) return error.OpenDstFailed;
+    const dst = std.c.fopen(dst_z.ptr, "wb") orelse return error.OpenDstFailed;
     errdefer _ = std.c.unlink(dst_z.ptr);
-    defer _ = std.c.close(dst_fd);
+    defer _ = std.c.fclose(dst);
 
     var buf: [64 * 1024]u8 = undefined;
     while (true) {
-        const n = std.c.read(src_fd, &buf, buf.len);
-        if (n < 0) return error.ReadFailed;
-        if (n == 0) break;
-        var total: usize = 0;
-        const want: usize = @intCast(n);
-        while (total < want) {
-            const w = std.c.write(dst_fd, buf[total..want].ptr, want - total);
-            if (w < 0) return error.WriteFailed;
-            if (w == 0) return error.WriteFailed;
-            total += @intCast(w);
-        }
+        const n = std.c.fread(&buf, 1, buf.len, src);
+        if (n == 0) break; // EOF (or a rare read error) — fflush below still validates the write path
+        if (std.c.fwrite(&buf, 1, n, dst) != n) return error.WriteFailed;
     }
-    if (std.c.fsync(dst_fd) != 0) return error.FsyncFailed;
+    // The `defer fclose(dst)` flushes libc buffers to the OS on close.
 }
 
 /// Resolve a preset name into a template string. Returns

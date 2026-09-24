@@ -13,6 +13,7 @@
 //! subjects, and sibling editions.
 
 const std = @import("std");
+const clock = @import("../util/clock.zig");
 const meta = @import("../core/metadata.zig");
 const provider_iface = @import("provider.zig");
 const http = @import("../util/http.zig");
@@ -727,11 +728,7 @@ fn httpGetOk(client: http.HttpClient, allocator: std.mem.Allocator, url: []const
             while (remaining > 0) {
                 if (shutdown.isRequested()) return null;
                 const chunk: u64 = if (remaining > 250) 250 else remaining;
-                const req = std.c.timespec{
-                    .sec = 0,
-                    .nsec = @intCast(chunk * std.time.ns_per_ms),
-                };
-                _ = std.c.nanosleep(&req, null);
+                clock.sleepMs(chunk);
                 remaining -= chunk;
             }
         }

@@ -116,14 +116,18 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    b.installArtifact(exe);
+    // biblio needs libmobi + libxml2 (POSIX-only book/comic formats), so it is
+    // not built on Windows — only `medias` targets Windows for now.
+    if (!is_windows) {
+        b.installArtifact(exe);
 
-    // ---- `zig build run -- ARGS...` -----------------------------------
-    const run_step = b.step("run", "Run biblio");
-    const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_cmd.addArgs(args);
-    run_step.dependOn(&run_cmd.step);
+        // ---- `zig build run -- ARGS...` -------------------------------
+        const run_step = b.step("run", "Run biblio");
+        const run_cmd = b.addRunArtifact(exe);
+        run_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_cmd.addArgs(args);
+        run_step.dependOn(&run_cmd.step);
+    }
 
     // ---- Second executable: the media organizer -----------------------
     const medias_exe = b.addExecutable(.{
