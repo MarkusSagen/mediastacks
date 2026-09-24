@@ -57,6 +57,14 @@ pub const MusicBrainz = struct {
         const detail_body = httpGetOk(self.http_client, alloc, detail_url) orelse return null;
         return parseRelease(alloc, mbid, detail_body);
     }
+
+    /// Download cover art from a Cover Art Archive `url` (see `Release.cover_url`).
+    /// Returns image bytes (owned by `alloc`) or null on any failure. CAA 307-
+    /// redirects to the underlying image; the HTTP client follows redirects.
+    pub fn fetchCover(self: *MusicBrainz, alloc: std.mem.Allocator, url: []const u8) ?[]u8 {
+        if (url.len == 0) return null;
+        return httpGetOk(self.http_client, alloc, url);
+    }
 };
 
 /// Percent-encode for a MusicBrainz query value; space → %20 (not +).
@@ -254,6 +262,11 @@ pub const Enricher = struct {
         const rel = self.mb.lookupRelease(alloc, album, album_artist, track_count, hint_year) catch null;
         try self.memo.put(key, rel);
         return rel;
+    }
+
+    /// Best-effort cover-art download for an enriched album.
+    pub fn fetchCover(self: *Enricher, alloc: std.mem.Allocator, url: []const u8) ?[]u8 {
+        return self.mb.fetchCover(alloc, url);
     }
 };
 

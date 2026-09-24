@@ -90,6 +90,16 @@ chk "stream range body is the slice"    '[[ "$(curl -s -H "Range: bytes=2-4" "ht
 chk "stream no-range is 200"            '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/stream?id=$SID")" == "200" ]]'
 chk "stream 404 on bad id"              '[[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/stream?id=99999")" == "404" ]]'
 
+# Cover art (enrichment writes poster.jpg; here we verify the on-disk -> catalog ->
+# /api/cover serve chain that enriched covers feed into).
+printf '\xFF\xD8\xFFPOSTER\xFF\xD9' > "$LIB/Movies/Stream Test (2020)/poster.jpg"
+curl -s -X POST "http://127.0.0.1:$PORT/api/reindex" >/dev/null
+LIBC="$(curl -s "http://127.0.0.1:$PORT/api/library?kind=movie")"
+chk "catalog marks the item has_cover" 'grep -q "\"has_cover\":true" <<<"$LIBC"'
+chk "library emits an /api/cover url"  'grep -q "/api/cover?path=" <<<"$LIBC"'
+COVURL="$(grep -o "/api/cover?path=[^\"]*" <<<"$LIBC" | head -1)"
+chk "/api/cover serves the poster as an image" '[[ "$(curl -s -o /dev/null -w "%{content_type}" "http://127.0.0.1:$PORT$COVURL")" == image/* ]]'
+
 # Enrichment job (slice E): no tmdb_key configured → job runs, finds no match,
 # but the thread + status endpoint work end-to-end (no network hit).
 ENID="$(curl -s "http://127.0.0.1:$PORT/api/library?kind=movie" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)"

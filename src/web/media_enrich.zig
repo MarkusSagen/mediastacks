@@ -38,14 +38,42 @@ fn writeNfo(arena: std.mem.Allocator, dir_abs: []const u8, name: []const u8, byt
 }
 
 /// Re-upsert `item` with enriched provider metadata. Keeps every other column.
-fn upsertEnriched(cat: *mc.Catalog, item: mc.Item, provider: []const u8, provider_id: ?[]const u8, title: []const u8, year: ?u32) !void {
+/// `cover_rel` (a library-relative path like "Movies/Dune (2021)/poster.jpg")
+/// is set only when a cover was freshly downloaded this run; otherwise the
+/// item's existing cover columns are preserved.
+fn upsertEnriched(cat: *mc.Catalog, item: mc.Item, provider: []const u8, provider_id: ?[]const u8, title: []const u8, year: ?u32, cover_rel: ?[]const u8) !void {
     var it = item;
     it.provider = provider;
     it.provider_id = provider_id;
     it.title = title;
     if (year) |y| it.year = @intCast(y);
     it.has_metadata = true;
+    if (cover_rel) |cr| {
+        it.cover_path = cr;
+        it.has_cover = true;
+    }
     try cat.upsertItem(it);
+}
+
+/// Best-effort: download a video poster and write it as `poster.jpg` in the
+/// item folder. Returns the library-relative cover path on success, else null.
+/// Never fails enrichment — a missing/broken poster just means no cover.
+fn fetchVideoCover(arena: std.mem.Allocator, video: *tmdb.Enricher, poster_path: ?[]const u8, dir_abs: []const u8, item_path: []const u8) ?[]const u8 {
+    const pp = poster_path orelse return null;
+    const bytes = video.fetchPoster(arena, pp) orelse return null;
+    if (bytes.len == 0) return null;
+    writeNfo(arena, dir_abs, "poster.jpg", bytes) catch return null;
+    return std.fs.path.join(arena, &.{ item_path, "poster.jpg" }) catch null;
+}
+
+/// Best-effort: download album cover art (Cover Art Archive) and write it as
+/// `cover.jpg` (Jellyfin music convention) in the album folder.
+fn fetchMusicCover(arena: std.mem.Allocator, music: *musicbrainz.Enricher, cover_url: ?[]const u8, dir_abs: []const u8, item_path: []const u8) ?[]const u8 {
+    const url = cover_url orelse return null;
+    const bytes = music.fetchCover(arena, url) orelse return null;
+    if (bytes.len == 0) return null;
+    writeNfo(arena, dir_abs, "cover.jpg", bytes) catch return null;
+    return std.fs.path.join(arena, &.{ item_path, "cover.jpg" }) catch null;
 }
 
 /// Enrich one organized item in place (non-destructive: NFO + catalog only).
@@ -59,7 +87,8 @@ pub fn enrichOne(arena: std.mem.Allocator, cat: *mc.Catalog, item: mc.Item, onli
         const merged = enrich.mergeMovieOnline(arena, .{ .title = item.title, .year = yearU32(item.year) }, info) catch return .err;
         const bytes = nfo.movieNfo(arena, merged.fields) catch return .err;
         writeNfo(arena, dir_abs, "movie.nfo", bytes) catch return .err;
-        upsertEnriched(cat, item, "tmdb", merged.fields.tmdb_id, merged.fields.title orelse item.title, merged.fields.year) catch return .err;
+        const cover_rel = fetchVideoCover(arena, video, info.poster_path, dir_abs, item.path);
+        upsertEnriched(cat, item, "tmdb", merged.fields.tmdb_id, merged.fields.title orelse item.title, merged.fields.year, cover_rel) catch return .err;
         return .ok;
     }
     if (std.mem.eql(u8, item.kind, "tv")) {
@@ -68,7 +97,8 @@ pub fn enrichOne(arena: std.mem.Allocator, cat: *mc.Catalog, item: mc.Item, onli
         const merged = enrich.mergeTvOnline(arena, .{ .series = item.title, .series_year = yearU32(item.year) }, s, null) catch return .err;
         const bytes = nfo.tvshowNfo(arena, merged.fields) catch return .err;
         writeNfo(arena, dir_abs, "tvshow.nfo", bytes) catch return .err;
-        upsertEnriched(cat, item, "tmdb", merged.fields.tmdb_id, merged.fields.series orelse item.title, merged.fields.series_year) catch return .err;
+        const cover_rel = fetchVideoCover(arena, video, s.poster_path, dir_abs, item.path);
+        upsertEnriched(cat, item, "tmdb", merged.fields.tmdb_id, merged.fields.series orelse item.title, merged.fields.series_year, cover_rel) catch return .err;
         return .ok;
     }
     if (std.mem.eql(u8, item.kind, "music")) {
@@ -79,7 +109,8 @@ pub fn enrichOne(arena: std.mem.Allocator, cat: *mc.Catalog, item: mc.Item, onli
         const fields = plan.Fields{ .album = rel.title, .album_artist = rel.album_artist, .year = rel.year, .release_mbid = rel.mbid };
         const bytes = nfo.albumNfo(arena, fields) catch return .err;
         writeNfo(arena, dir_abs, "album.nfo", bytes) catch return .err;
-        upsertEnriched(cat, item, "musicbrainz", rel.mbid, rel.title, rel.year) catch return .err;
+        const cover_rel = fetchMusicCover(arena, music, rel.cover_url, dir_abs, item.path);
+        upsertEnriched(cat, item, "musicbrainz", rel.mbid, rel.title, rel.year, cover_rel) catch return .err;
         return .ok;
     }
     return .no_match; // audiobook / comic: no online provider
@@ -117,8 +148,9 @@ test "enrichOne enriches a movie via mocked TMDB" {
         \\{"results":[{"id":438631,"title":"Dune","release_date":"2021-10-01"}]}
     );
     try mock.add("https://api.themoviedb.org/3/movie/438631?api_key=k&language=en-US&append_to_response=external_ids", 200,
-        \\{"id":438631,"title":"Dune","release_date":"2021-10-01","original_language":"en","imdb_id":"tt1160419","external_ids":{"imdb_id":"tt1160419"}}
+        \\{"id":438631,"title":"Dune","release_date":"2021-10-01","original_language":"en","imdb_id":"tt1160419","poster_path":"/dune.jpg","external_ids":{"imdb_id":"tt1160419"}}
     );
+    try mock.add("https://image.tmdb.org/t/p/w500/dune.jpg", 200, "\xFF\xD8\xFFJPEGDATA"); // fake poster bytes
 
     var tmdb_api = tmdb.Tmdb{ .http_client = mock.client(), .api_key = "k" };
     var video = tmdb.Enricher.init(a, &tmdb_api);
@@ -135,4 +167,13 @@ test "enrichOne enriches a movie via mocked TMDB" {
     // movie.nfo was written
     var f = try cwd.openFile(io, try std.fs.path.join(a, &.{ root, "Movies/Dune (2021)/movie.nfo" }), .{});
     f.close(io);
+
+    // poster.jpg was downloaded + the catalog row reflects the cover
+    try t.expect(after.has_cover);
+    try t.expectEqualStrings("Movies/Dune (2021)/poster.jpg", after.cover_path.?);
+    var pf = try cwd.openFile(io, try std.fs.path.join(a, &.{ root, "Movies/Dune (2021)/poster.jpg" }), .{});
+    defer pf.close(io);
+    var hdr: [3]u8 = undefined;
+    _ = try pf.readPositionalAll(io, &hdr, 0);
+    try t.expectEqualSlices(u8, &.{ 0xFF, 0xD8, 0xFF }, &hdr); // JPEG magic
 }

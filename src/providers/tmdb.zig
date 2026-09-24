@@ -14,6 +14,7 @@ pub const MovieInfo = struct {
     title: []const u8,
     year: ?u32 = null,
     original_language: ?[]const u8 = null,
+    poster_path: ?[]const u8 = null, // TMDB image path, e.g. "/abc.jpg"
 };
 
 pub const SeriesInfo = struct {
@@ -23,6 +24,7 @@ pub const SeriesInfo = struct {
     name: []const u8,
     year: ?u32 = null,
     original_language: ?[]const u8 = null,
+    poster_path: ?[]const u8 = null,
 };
 
 pub const Tmdb = struct {
@@ -56,6 +58,7 @@ pub const Tmdb = struct {
             .title = objStrDup(alloc, o, "title") orelse "",
             .year = objYear(o, "release_date"),
             .original_language = objStrDup(alloc, o, "original_language"),
+            .poster_path = objStrDup(alloc, o, "poster_path"),
         };
     }
 
@@ -87,7 +90,16 @@ pub const Tmdb = struct {
             .name = objStrDup(alloc, o, "name") orelse "",
             .year = objYear(o, "first_air_date"),
             .original_language = objStrDup(alloc, o, "original_language"),
+            .poster_path = objStrDup(alloc, o, "poster_path"),
         };
+    }
+
+    /// Download the poster for `poster_path` (e.g. "/abc.jpg") at w500 width.
+    /// Returns the image bytes (owned by `alloc`), or null on any failure.
+    pub fn fetchPoster(self: *Tmdb, alloc: std.mem.Allocator, poster_path: []const u8) ?[]u8 {
+        if (poster_path.len == 0) return null;
+        const url = std.fmt.allocPrint(alloc, "https://image.tmdb.org/t/p/w500{s}", .{poster_path}) catch return null;
+        return httpGetOk(self.http_client, alloc, url);
     }
 
     pub fn episodeTitle(self: *Tmdb, alloc: std.mem.Allocator, tmdb_id: []const u8, season: u32, episode: u32) !?[]const u8 {
@@ -217,15 +229,20 @@ pub const Enricher = struct {
     pub fn lookupMovie(self: *Enricher, alloc: std.mem.Allocator, title: []const u8, hint_year: ?u32) !?MovieInfo {
         const key = try std.fmt.allocPrint(alloc, "{s}|{?d}", .{ title, hint_year });
         if (self.movies.get(key)) |c| return c;
-        const r = self.api.lookupMovie(alloc, title, hint_year) catch null;
+        const r = try self.api.lookupMovie(alloc, title, hint_year); // propagate errors (network/provider) — don't cache them as "no match"
         try self.movies.put(key, r);
         return r;
+    }
+
+    /// Best-effort poster download for an enriched movie/series result.
+    pub fn fetchPoster(self: *Enricher, alloc: std.mem.Allocator, poster_path: []const u8) ?[]u8 {
+        return self.api.fetchPoster(alloc, poster_path);
     }
 
     pub fn lookupSeries(self: *Enricher, alloc: std.mem.Allocator, name: []const u8, hint_year: ?u32) !?SeriesInfo {
         const key = try std.fmt.allocPrint(alloc, "{s}|{?d}", .{ name, hint_year });
         if (self.series.get(key)) |c| return c;
-        const r = self.api.lookupSeries(alloc, name, hint_year) catch null;
+        const r = try self.api.lookupSeries(alloc, name, hint_year); // propagate errors — don't cache as "no match"
         try self.series.put(key, r);
         return r;
     }
