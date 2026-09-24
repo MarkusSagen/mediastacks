@@ -41,11 +41,12 @@
               pkgs.zlib
               libmobi
             ];
-            shellHook = ''
-              export C_INCLUDE_PATH="${libmobi}/include:${pkgs.libxml2.dev}/include/libxml2:${pkgs.sqlite.dev}/include''${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
-              export LIBRARY_PATH="${libmobi}/lib:${pkgs.libxml2.out}/lib:${pkgs.sqlite.out}/lib:${pkgs.zlib}/lib''${LIBRARY_PATH:+:$LIBRARY_PATH}"
-              echo "mediastacks dev shell — zig $(zig version); run: zig build"
-            '';
+            # Set as derivation env (not shellHook) so `nix develop -c CMD`,
+            # which skips the shellHook, still sees them. The compiler reads
+            # C_INCLUDE_PATH / LIBRARY_PATH to find libmobi/libxml2.
+            C_INCLUDE_PATH = "${libmobi}/include:${pkgs.libxml2.dev}/include/libxml2:${pkgs.sqlite.dev}/include";
+            LIBRARY_PATH = "${libmobi}/lib:${pkgs.libxml2.out}/lib:${pkgs.sqlite.out}/lib:${pkgs.zlib}/lib";
+            shellHook = ''echo "mediastacks dev shell — zig $(zig version); run: zig build"'';
           };
         });
     };
