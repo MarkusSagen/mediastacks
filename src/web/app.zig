@@ -18,6 +18,7 @@ const review = @import("review.zig");
 const static = @import("static.zig");
 const shutdown = @import("../util/shutdown.zig");
 const exec = @import("../util/exec.zig");
+const opener = @import("../util/opener.zig");
 const media_enrich_job = @import("media_enrich_job.zig");
 const demo = @import("../core/demo.zig");
 
@@ -569,12 +570,13 @@ fn handleOpen(io: std.Io, app: *App, request: *std.http.Server.Request, target: 
     if (!pathUnderRoot(abs, lib) or std.mem.indexOf(u8, abs, "..") != null)
         return request.respond("forbidden\n", .{ .status = .forbidden });
 
-    const cmd = app.env.get("MEDIASTACKS_OPEN_CMD") orelse "open";
-    const argv: []const []const u8 = if (reveal) &.{ cmd, "-R", abs } else &.{ cmd, abs };
+    const argv = opener.argv(arena, app.env, reveal, abs) catch
+        return request.respond("open failed\n", .{ .status = .internal_server_error });
     const r = exec.runCaptureStdout(arena, io, argv, 4096) catch
         return request.respond("open failed\n", .{ .status = .internal_server_error });
     arena.free(r.stdout);
-    if (r.exit_code != 0)
+    // Windows `explorer` returns 1 even on success, so its exit code is ignored.
+    if (opener.exitIsMeaningful() and r.exit_code != 0)
         return request.respond("open exited nonzero\n", .{ .status = .internal_server_error });
     try respondJson(request, "{\"ok\":true}");
 }

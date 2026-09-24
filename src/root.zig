@@ -38,6 +38,7 @@ pub const demo = @import("core/demo.zig");
 pub const subtitles = @import("core/subtitles.zig");
 pub const remux = @import("core/remux.zig");
 pub const datadir = @import("core/datadir.zig");
+pub const opener = @import("util/opener.zig");
 pub const mediacatalog = @import("core/mediacatalog.zig");
 pub const indexer = @import("core/indexer.zig");
 pub const dedup = @import("core/dedup.zig");
