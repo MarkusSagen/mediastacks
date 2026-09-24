@@ -11,6 +11,7 @@ const group = @import("../core/group.zig");
 const apply_mod = @import("../core/apply.zig");
 const journal = @import("../core/journal.zig");
 const mediacatalog = @import("../core/mediacatalog.zig");
+const probe = @import("../core/probe.zig");
 const indexer = @import("../core/indexer.zig");
 const standardize = @import("../core/standardize.zig");
 const review = @import("review.zig");
@@ -449,6 +450,21 @@ fn statSizeApp(io: std.Io, path: []const u8) u64 {
 }
 
 /// One item's full detail + the files currently on disk under its folder.
+fn appendTracks(arena: std.mem.Allocator, body: *std.ArrayList(u8), key: []const u8, tracks: []const probe.Track) !void {
+    try body.appendSlice(arena, try std.fmt.allocPrint(arena, ",\"{s}\":[", .{key}));
+    for (tracks, 0..) |tr, i| {
+        if (i > 0) try body.appendSlice(arena, ",");
+        try body.appendSlice(arena, try std.fmt.allocPrint(arena, "{{\"lang\":\"{s}\",\"codec\":\"{s}\",\"title\":\"{s}\",\"default\":{s},\"forced\":{s}}}", .{
+            try jsonEsc(arena, tr.lang orelse ""),
+            try jsonEsc(arena, tr.codec orelse ""),
+            try jsonEsc(arena, tr.title orelse ""),
+            boolStr(tr.default),
+            boolStr(tr.forced),
+        }));
+    }
+    try body.appendSlice(arena, "]");
+}
+
 fn handleItem(io: std.Io, app: *App, request: *std.http.Server.Request, target: []const u8) !void {
     var arena_state = std.heap.ArenaAllocator.init(app.gpa);
     defer arena_state.deinit();
@@ -510,7 +526,21 @@ fn handleItem(io: std.Io, app: *App, request: *std.http.Server.Request, target: 
             }));
         }
     }
-    try body.appendSlice(arena, "]}");
+    try body.appendSlice(arena, "]");
+
+    // Audio/subtitle tracks (epic Phase B): probe the primary video on demand
+    // (skipped silently when ffprobe is missing or the item isn't video).
+    if (std.mem.eql(u8, item.kind, "movie") or std.mem.eql(u8, item.kind, "tv")) {
+        if (item.primary_path) |pp| {
+            const pabs = try std.fs.path.join(arena, &.{ lib, pp });
+            if (probe.run(arena, io, pabs)) |pr| {
+                try appendTracks(arena, &body, "audio", pr.audio);
+                try appendTracks(arena, &body, "subs", pr.subs);
+            }
+        }
+    }
+
+    try body.appendSlice(arena, "}");
     try respondJson(request, body.items);
 }
 

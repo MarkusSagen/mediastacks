@@ -308,6 +308,22 @@ async function openDetail(id) {
     if (cimg) cimg.addEventListener("error", () => { const ph = document.createElement("div"); ph.className = "detail-cover ph"; cimg.replaceWith(ph); });
   } catch { host.innerHTML = `<div class="empty">Could not load item.</div>`; }
 }
+function trackText(tr) {
+  const parts = [(tr.lang || "und").toUpperCase()];
+  if (tr.codec) parts.push(tr.codec);
+  if (tr.forced) parts.push("forced");
+  if (tr.default) parts.push("default");
+  return parts.join(" ");
+}
+// Audio/subtitle languages (Phase B) — only present for probed video items.
+function tracksHtml(d) {
+  const a = d.audio || [], s = d.subs || [];
+  if (!a.length && !s.length) return "";
+  const row = (label, arr) => arr.length
+    ? `<div class="track-row"><span class="track-k">${label}</span><span>${arr.map((t) => esc(trackText(t))).join(" · ")}</span></div>`
+    : "";
+  return `<div class="detail-tracks">${row("Audio", a)}${row("Subtitles", s)}</div>`;
+}
 function detailHtml(d) {
   const cover = d.cover ? `<img class="detail-cover" src="${esc(d.cover)}" alt="">` : `<div class="detail-cover ph"></div>`;
   const canEnrich = (d.kind === "movie" || d.kind === "tv" || d.kind === "music");
@@ -337,6 +353,7 @@ function detailHtml(d) {
         </div>
       </div></div>
     ${player}
+    ${tracksHtml(d)}
     <div class="detail-files"><h4>Files</h4>${files || `<div class="hint">No files found on disk.</div>`}</div>`;
 }
 async function openExternal(id, mode) {
