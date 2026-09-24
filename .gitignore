@@ -29,3 +29,7 @@ docs/superpowers/
 
 # nix build symlink
 /result
+
+# local dev (playwright for screenshots)
+node_modules/
+package-lock.json

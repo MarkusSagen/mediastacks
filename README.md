@@ -1,23 +1,64 @@
+<div align="center">
+
 # mediastacks
 
-A kind-aware media organizer. One shared Zig core library, two binaries:
+### Turn a folder of messy downloads into a clean, Jellyfin-ready media library — then browse, play, and enrich it. All local. All yours.
 
-- **`biblio`** — the book/comic tool. Three surfaces over one library:
-  - **CLI** — scan, enrich, dedup, rename, convert, optimize, set
-    metadata/covers, standardize a directory in one command.
-  - **Web UI** (`biblio serve`) — browse, search, triage, edit, and
-    read books in the browser. Supports EPUB, MOBI, AZW3, PDF, and the
-    comic archive formats (CBZ / CBR / CB7 / CBT).
-  - **TUI** (`biblio tui`) — same library, plaintext reader, full
-    keyboard control.
-- **`medias`** — the general media organizer. Point it at a messy
-  download folder and it groups, dedups, and relabels TV & movies into
-  a clean, templated library: `medias organize DIR` (applies by default;
-  add `--dry-run` to preview), `medias undo`. Offline-first; deletes go
-  to a trash dir; every run is reversible via an undo journal.
+[![Built with Zig 0.16](https://img.shields.io/badge/built%20with-Zig%200.16-F7A41D?logo=zig&logoColor=white)](https://ziglang.org)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux-4c566a)](#install)
+[![Output](https://img.shields.io/badge/output-Jellyfin%20%C2%B7%20Kodi%20ready-5a3a7a)](#what-it-does)
+[![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20%C2%B7%20no%20telemetry-3f6b3a)](#why)
 
-Written in Zig 0.16. Small, deliberately. Book state lives in one
-SQLite file; the organizer works directly on the filesystem.
+<br/>
+
+![The medias library — browse your collection with covers](docs/media/library.png)
+
+</div>
+
+## What it does
+
+**`medias`** points at your download folder and turns this…
+
+```
+Sicario.2015.1080p.BluRay.x264-SPARKS.mkv
+The.Bear.S01E01.1080p.WEB.h264-GLHF.mkv
+The.Bear.S01E01.en.srt
+arrival.2016.2160p.uhd.bluray.x265-terminal.mkv
+RARBG.txt
+```
+
+…into a tidy, player-ready library — grouped, de-duplicated, correctly named, subtitles language-tagged, junk swept aside:
+
+```
+Movies/Sicario (2015)/Sicario (2015).mkv
+Shows/The Bear/Season 01/The Bear S01E01.mkv
+Shows/The Bear/Season 01/The Bear S01E01.en.srt
+Movies/Arrival (2016)/Arrival (2016).mkv
+```
+
+Then it hands you a **local web app** to browse the result with covers, play files inline, fetch posters + metadata, and undo anything — no cloud account, no library scanner phoning home.
+
+It ships alongside **`biblio`**, a sibling tool for organizing and reading books & comics (EPUB / MOBI / AZW3 / PDF / CBZ / CBR).
+
+## Highlights
+
+- **Preview-first & fully reversible** — nothing moves until you approve the plan; every run is one click to undo.
+- **Kind-aware organizing** — TV, movies, music, audiobooks, and comics, each with its own parser and Jellyfin/Kodi naming.
+- **Browse & play in the browser** — a fast local UI with cover art, search, filters, and inline audio/video playback.
+- **Enrichment** — pull canonical metadata + poster/cover art from **TMDB** and **MusicBrainz**, written as NFO + image sidecars.
+- **Subtitles & languages** — subtitle sidecars get Jellyfin language tags (`Movie (2021).en.srt`, `.forced`, `.sdh`); audio & subtitle track languages surface in the detail view.
+- **Local-first & private** — one SQLite catalog on disk, filesystem is the source of truth, zero telemetry.
+- **Safe to try** — `medias serve --demo` spins up a throwaway sandbox with sample media so you can click around risk-free.
+- **Tiny & dependency-light** — written in Zig, SQLite vendored in-tree, deletes go to a trash dir, and it cross-compiles to a single binary.
+
+## Screenshots
+
+|  |  |
+| :---: | :---: |
+| **See every move before it happens** | **Rich detail — with audio & subtitle tracks** |
+| ![Organize preview](docs/media/organize.png) | ![Item detail](docs/media/detail.png) |
+| **First-run onboarding + a safe demo** | **Light & dark, your call** |
+| ![Welcome](docs/media/welcome.png) | ![Dark mode](docs/media/library-dark.png) |
 
 ## Install
 
@@ -27,168 +68,58 @@ SQLite file; the organizer works directly on the filesystem.
 curl -fsSL https://raw.githubusercontent.com/markussagen/mediastacks/main/scripts/install.sh | bash
 ```
 
-This downloads the latest release for your platform, verifies its checksum, and
-installs `biblio` + `medias` (to `/usr/local/bin`, or `~/.local/bin`). Pin a
-version with `MEDIASTACKS_VERSION=v1.2.3` or choose a dir with `--dir ~/bin`.
-You'll still need the runtime libraries once:
+Downloads the latest release for your platform, verifies its checksum, and installs `medias` + `biblio` (to `/usr/local/bin`, or `~/.local/bin`). Pin a version with `MEDIASTACKS_VERSION=v1.2.3`, choose a dir with `--dir ~/bin`. Then install the runtime libraries once:
 
 ```sh
 brew install libmobi libxml2 sqlite                 # macOS
-sudo apt install libmobi-dev libxml2 libsqlite3-0   # Debian/Ubuntu
+sudo apt install libmobi-dev libxml2 libsqlite3-0   # Debian / Ubuntu
 ```
 
-Or grab a tarball straight from the [releases page](https://github.com/markussagen/mediastacks/releases).
-Windows is not yet supported (the tools are POSIX-only for now).
+Or grab a tarball from the [releases page](https://github.com/markussagen/mediastacks/releases).
 
-**Nix:** `nix develop` gives a reproducible build shell (Zig 0.16 + the C deps);
-see [`flake.nix`](./flake.nix).
+**Nix:** `nix develop` gives a reproducible build shell (Zig 0.16 + the C deps) — see [`flake.nix`](./flake.nix).
 
-**From source:** see [Requirements](#requirements) + [Build](#build) below.
+**Windows:** `medias` cross-compiles to a Windows binary today; runtime support is still experimental (`biblio` is macOS/Linux only).
+
+## Quick start
+
+```sh
+medias serve --demo          # explore a sandbox — nothing on your disk is touched
+# → open http://127.0.0.1:8799
+
+medias organize ~/Downloads --dry-run   # preview the plan for real files
+medias organize ~/Downloads             # apply it (reversible)
+medias undo                             # changed your mind
+```
+
+Add a free [TMDB API key](https://www.themoviedb.org/settings/api) in **Settings** and hit **Enrich** to pull real metadata and cover art.
+
+### How it works
+
+1. **Point** `medias` at a folder of downloads.
+2. **Preview** the plan — grouped, renamed, de-duplicated. Nothing moves until you say so.
+3. **Apply** — files land tidily in your library, ready for Jellyfin, Kodi, or Plex.
+
+## Build from source
+
+```sh
+mise install                         # Zig 0.16 + zls (see .tool-versions)
+zig build                            # → ./zig-out/bin/{medias,biblio}
+zig build -Doptimize=ReleaseFast     # optimized
+zig build test                       # unit tests
+zig build run-medias -- serve        # build + run medias
+```
+
+**Requirements:** Zig 0.16 (managed via [mise](https://mise.jdx.dev)); SQLite is vendored, so `medias` needs no system C libraries. `biblio` additionally links **libmobi** (`brew install libmobi`) and **libxml2** (macOS SDK / `apt install libxml2-dev`). Optional: `ffmpeg`/`ffprobe` for media inspection, `chafa` for terminal cover previews, `sevenzip` for CBR/CB7/CBT.
 
 ## Documentation
 
-- [`docs/README.md`](./docs/README.md) — quick tour and index
 - [`docs/COMMANDS.md`](./docs/COMMANDS.md) — every CLI subcommand
-- [`docs/WEB.md`](./docs/WEB.md) — web UI: routes, frontend, customisation
-- [`docs/TUI.md`](./docs/TUI.md) — terminal UI: keybindings, EPUB pipeline
+- [`docs/WEB.md`](./docs/WEB.md) — the web UI: routes, frontend, customization
+- [`docs/TUI.md`](./docs/TUI.md) — the terminal reader: keybindings, EPUB pipeline
 
-## Requirements
+## Why
 
-- Zig 0.16.0 (managed via [mise](https://mise.jdx.dev))
-- libmobi (`brew install libmobi`)
-- libxml2 (ships with macOS SDK; `apt install libxml2-dev` on Linux)
-- sqlite3 (`brew install sqlite`)
-- chafa, optional, for `cover` command (`brew install chafa`)
-- Calibre, optional, for conversion directions libmobi can't handle
-- sevenzip, optional, for **CBR / CB7 / CBT** covers and metadata
-  (`brew install sevenzip` on macOS, `apt install p7zip-full` on Linux).
-  CBZ doesn't need it — miniz is vendored.
+Media servers are great at *serving* a library and terrible at *building* one. Existing renamers are either heavyweight, cloud-tied, or fire-and-forget with no preview. `mediastacks` is the opposite: small, local, preview-first, reversible, and honest about what it's about to do — the tool you actually want between "downloaded a pile of files" and "it just shows up correctly in Jellyfin."
 
-## Build
-
-```sh
-mise install            # installs Zig 0.16 + zls
-zig build               # produces ./zig-out/bin/mediastacks (also re-links on rebuild)
-zig build -Doptimize=ReleaseFast   # optimized build
-zig build run -- info SOMEFILE.epub
-zig build test          # runs the unit-test suite (109 tests)
-./scripts/smoke.sh      # end-to-end checks against tests/fixtures (25)
-./scripts/smoke-web.sh  # web-layer smoke against a live server (23)
-./scripts/test-e2e.sh   # Playwright browser end-to-end (15; needs `npm i playwright`)
-```
-
-To force a clean rebuild: `rm -rf .zig-cache zig-out && zig build`.
-
-### Dev loop (watch + incremental)
-
-```sh
-zig build --watch -fincremental -Doptimize=ReleaseFast --summary none
-```
-
-Rebuilds on file change, reuses the incremental cache between runs, and
-suppresses the per-step summary so only errors surface. Incremental is
-still flagged experimental in Zig 0.16 — if you hit a weird cache state,
-wipe `.zig-cache` and re-run.
-
-## Common commands
-
-Full reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). Quick map of
-what you reach for day-to-day:
-
-### Getting a library into shape
-
-```sh
-mediastacks scan ~/Books              # walk + hash + ingest into the catalog
-mediastacks enrich --missing          # fill gaps from Open Library
-mediastacks dedup                     # show duplicates (cross-format aware)
-mediastacks dedup --apply             # delete the lower-quality copies
-mediastacks rename                    # preview canonical names
-mediastacks rename --apply            # actually move files
-mediastacks standardize ~/Books --apply  # all of the above in one pipeline
-```
-
-### Asking the catalog questions
-
-```sh
-mediastacks find ~/Books --glob "**/Hobb*"     # list files, no catalog write
-mediastacks find ~/Books --format mobi         # filter by format
-mediastacks missing                            # books with incomplete metadata
-mediastacks missing --glob "**/scifi/**"       # restrict by path
-mediastacks info path/to/book.epub             # embedded metadata for one file
-```
-
-### Editing a single book
-
-```sh
-mediastacks set-meta book.epub --title "Better Title" --series "Stormlight" --series-index 1
-mediastacks set-cover book.epub ~/Pictures/new-cover.jpg
-mediastacks convert book.mobi --to epub        # via libmobi (MOBI/AZW3→EPUB) or Calibre
-mediastacks optimize book.epub                 # recompress, save a few percent
-```
-
-### Reading and browsing
-
-```sh
-mediastacks tui                                # in-terminal list + reader
-mediastacks serve                              # web UI on http://127.0.0.1:8787
-mediastacks cover book.epub                    # render cover via chafa (Kitty/Sixel/Unicode)
-```
-
-### Renaming with custom templates
-
-```sh
-mediastacks rename --list-presets              # default | flat | series-dir
-mediastacks rename --preset series-dir         # nest into Author/Series/01 - Title.epub
-mediastacks rename --template "{year} - {author_sort} - {title}.{ext}"
-mediastacks rename --template "{author}/{title} [{isbn}].{ext}"
-```
-
-Template fields: `{author_sort}`, `{author}`, `{title}`, `{series}`,
-`{series_index:02}`, `{year}`, `{isbn}`, `{format}`, `{ext}`. Paths
-may contain `/` to nest into subdirectories.
-
-### Putting it together
-
-A typical "I just downloaded a pile of ebooks" workflow:
-
-```sh
-mediastacks scan ~/Downloads/books            # tell mediastacks about them
-mediastacks enrich --missing                  # pull missing series / year / cover URLs
-mediastacks dedup                             # eyeball duplicates
-mediastacks rename                            # dry-run, sanity-check the names
-mediastacks rename --apply                    # commit
-mediastacks optimize ~/Downloads/books/*.epub # shave a percent or two
-```
-
-…or do all of the above in one command:
-
-```sh
-mediastacks standardize ~/Downloads/books --apply
-```
-
-### Hands-off maintenance
-
-Once a library is set up, schedule the recurring chores instead of
-running them manually:
-
-```sh
-mediastacks schedule add nightly-rescan @daily rescan-all
-mediastacks schedule add catch-new-meta "every 6h" enrich-missing
-mediastacks schedule list                     # show what's configured
-mediastacks schedule run 1                    # fire job 1 now
-mediastacks schedule daemon                   # run the scheduler without the web UI
-```
-
-The same schedule definitions are picked up by `mediastacks serve` (an
-in-process thread checks every minute) or by `mediastacks schedule
-daemon` when you don't want the HTTP server running. Definitions
-live in the catalog DB, so both modes share the same list.
-
-## Roadmap
-
-- **Part 1:** CLI + library API ✅
-- **Part 1.post:** TUI ebook reader ✅
-- **Part 2:** Web UI ✅
-- **Part 3:** Drop external C dependencies — pure-Zig MOBI / EPUB
-  parsers, plus a parity test suite golden-comparing against the
-  current C-backed outputs.
+<div align="center"><sub>Built in Zig. Local-first. No cloud, no accounts, no telemetry.</sub></div>
