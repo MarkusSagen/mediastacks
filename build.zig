@@ -60,6 +60,16 @@ pub fn build(b: *std.Build) void {
     });
     mediastacks_mod.addIncludePath(b.path("lib/miniz"));
 
+    // Vendored SQLite amalgamation — compiled in-tree so there's no system
+    // sqlite dependency on any platform (simplifies Nix/install and is a
+    // prerequisite for Windows, which has no system sqlite3). Added before the
+    // C helpers so its header wins the include search over any system copy.
+    mediastacks_mod.addIncludePath(b.path("lib/sqlite"));
+    mediastacks_mod.addCSourceFile(.{
+        .file = b.path("lib/sqlite/sqlite3.c"),
+        .flags = &.{ "-std=c99", "-w", "-DSQLITE_THREADSAFE=1" },
+    });
+
     // Small C-side helpers for things translate-c can't express cleanly.
     mediastacks_mod.addCSourceFile(.{
         .file = b.path("lib/mediastacks_c/sqlite_helpers.c"),
@@ -83,12 +93,16 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    // Link system libraries.
-    for (library_dirs) |dir| mediastacks_mod.addLibraryPath(.{ .cwd_relative = dir });
-    for (include_dirs) |dir| mediastacks_mod.addIncludePath(.{ .cwd_relative = dir });
-    mediastacks_mod.linkSystemLibrary("mobi", .{});
-    mediastacks_mod.linkSystemLibrary("xml2", .{});
-    mediastacks_mod.linkSystemLibrary("sqlite3", .{});
+    // System libraries. sqlite is vendored above. libmobi + libxml2 back the
+    // book/comic (biblio) formats, which are POSIX-only — skip them on Windows,
+    // where the medias-only build comptime-excludes those code paths.
+    const is_windows = target.result.os.tag == .windows;
+    if (!is_windows) {
+        for (library_dirs) |dir| mediastacks_mod.addLibraryPath(.{ .cwd_relative = dir });
+        for (include_dirs) |dir| mediastacks_mod.addIncludePath(.{ .cwd_relative = dir });
+        mediastacks_mod.linkSystemLibrary("mobi", .{});
+        mediastacks_mod.linkSystemLibrary("xml2", .{});
+    }
 
     // ---- Executable ----------------------------------------------------
     const exe = b.addExecutable(.{
