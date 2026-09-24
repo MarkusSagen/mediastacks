@@ -49,6 +49,13 @@ jobs:
       - name: smoke (web)
         run: bash scripts/smoke-web.sh
 
+      # medias (media organizer) coverage — the active web product.
+      - name: smoke (medias organize)
+        run: bash scripts/organize-smoke.sh
+
+      - name: smoke (medias web app)
+        run: bash scripts/app-smoke.sh
+
       # Browser smoke. Only runs when Playwright + Chromium are
       # installable on the runner; the script skips itself otherwise.
       - name: setup node (for Playwright)
@@ -61,3 +68,14 @@ jobs:
           npx playwright install --with-deps chromium
       - name: test-e2e (Playwright)
         run: bash scripts/test-e2e.sh
+
+  nix:
+    name: nix flake (dev shell + libmobi)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: build libmobi derivation
+        run: nix build .#libmobi
+      - name: build in the dev shell
+        run: nix develop -c zig build

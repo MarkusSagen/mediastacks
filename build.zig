@@ -161,7 +161,20 @@ fn collectIncludeDirs(b: *std.Build) []const []const u8 {
     for (candidates) |c| {
         if (dirExists(c)) list.append(b.allocator, c) catch @panic("OOM");
     }
+    // Also honor the environment so non-Homebrew prefixes work (Nix, custom).
+    appendEnvDirs(b, &list, "C_INCLUDE_PATH");
+    appendEnvDirs(b, &list, "CPATH");
     return list.toOwnedSlice(b.allocator) catch @panic("OOM");
+}
+
+/// Append existing `:`-separated dirs from environment variable `name`.
+fn appendEnvDirs(b: *std.Build, list: *std.ArrayList([]const u8), name: [*:0]const u8) void {
+    const raw = std.c.getenv(name) orelse return;
+    const val = std.mem.span(raw);
+    var it = std.mem.tokenizeScalar(u8, val, ':');
+    while (it.next()) |dir| {
+        if (dirExists(dir)) list.append(b.allocator, b.dupe(dir)) catch @panic("OOM");
+    }
 }
 
 fn collectLibraryDirs(b: *std.Build) []const []const u8 {
@@ -177,6 +190,7 @@ fn collectLibraryDirs(b: *std.Build) []const []const u8 {
     for (candidates) |c| {
         if (dirExists(c)) list.append(b.allocator, c) catch @panic("OOM");
     }
+    appendEnvDirs(b, &list, "LIBRARY_PATH");
     return list.toOwnedSlice(b.allocator) catch @panic("OOM");
 }
 

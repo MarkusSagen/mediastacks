@@ -19,6 +19,32 @@ A kind-aware media organizer. One shared Zig core library, two binaries:
 Written in Zig 0.16. Small, deliberately. Book state lives in one
 SQLite file; the organizer works directly on the filesystem.
 
+## Install
+
+**Prebuilt (macOS / Linux):**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/markussagen/mediastacks/main/scripts/install.sh | bash
+```
+
+This downloads the latest release for your platform, verifies its checksum, and
+installs `biblio` + `medias` (to `/usr/local/bin`, or `~/.local/bin`). Pin a
+version with `MEDIASTACKS_VERSION=v1.2.3` or choose a dir with `--dir ~/bin`.
+You'll still need the runtime libraries once:
+
+```sh
+brew install libmobi libxml2 sqlite                 # macOS
+sudo apt install libmobi-dev libxml2 libsqlite3-0   # Debian/Ubuntu
+```
+
+Or grab a tarball straight from the [releases page](https://github.com/markussagen/mediastacks/releases).
+Windows is not yet supported (the tools are POSIX-only for now).
+
+**Nix:** `nix develop` gives a reproducible build shell (Zig 0.16 + the C deps);
+see [`flake.nix`](./flake.nix).
+
+**From source:** see [Requirements](#requirements) + [Build](#build) below.
+
 ## Documentation
 
 - [`docs/README.md`](./docs/README.md) — quick tour and index

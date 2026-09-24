@@ -20,7 +20,7 @@ jobs:
             target: macos-arm64
             zig_target: aarch64-macos
             brew_prefix: /opt/homebrew
-          - os: macos-13          # Intel runner — Apple's macOS-13 image is x86_64
+          - os: macos-15-intel          # Intel runner (macos-13 was retired)
             target: macos-x86_64
             zig_target: x86_64-macos
             brew_prefix: /usr/local

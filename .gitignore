@@ -26,3 +26,6 @@ tests/fixtures/output/
 
 # Design/process docs (specs, plans, brainstorming) — local only, never committed.
 docs/superpowers/
+
+# nix build symlink
+/result
