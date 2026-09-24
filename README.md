@@ -11,7 +11,7 @@
 
 <br/>
 
-![The medias library — browse your collection with covers](docs/media/library.png)
+![medias — browse, play, and manage your local media library](docs/media/demo.gif)
 
 </div>
 
