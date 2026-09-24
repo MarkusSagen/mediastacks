@@ -26,7 +26,7 @@ pub fn run(ctx: cli.Context) !u8 {
         return 0;
     }
     if (eq(cmd, "version") or eq(cmd, "--version") or eq(cmd, "-V")) {
-        try ctx.stdout.print("medias 0.0.0\n", .{});
+        try ctx.stdout.print("medias 0.1.0\n", .{});
         return 0;
     }
     if (eq(cmd, "organize")) return organize_cmd.run(ctx, rest);

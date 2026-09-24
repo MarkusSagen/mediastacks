@@ -11,7 +11,7 @@
 class Mediastacks < Formula
   desc "Turn messy downloads into a clean, Jellyfin-ready media library"
   homepage "https://github.com/markussagen/mediastacks"
-  version "0.0.0"
+  version "0.1.0"
 
   # medias vendors SQLite; biblio additionally needs these at runtime.
   depends_on "libmobi"

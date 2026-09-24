@@ -47,7 +47,7 @@ pub fn run(ctx: Context) !u8 {
         return 0;
     }
     if (eq(cmd, "version") or eq(cmd, "--version") or eq(cmd, "-V")) {
-        try ctx.stdout.print("biblio 0.0.0\n", .{});
+        try ctx.stdout.print("biblio 0.1.0\n", .{});
         return 0;
     }
     if (eq(cmd, "info")) return info_cmd.run(ctx, rest);
