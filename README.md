@@ -1,12 +1,15 @@
 <div align="center">
 
+<img src="docs/media/logo.svg" width="82" alt="mediastacks logo">
+
 # mediastacks
 
 ### Turn a folder of messy downloads into a clean, Jellyfin-ready media library — then browse, play, and enrich it. All local. All yours.
 
+[![Latest release](https://img.shields.io/github/v/release/MarkusSagen/mediastacks?label=release&color=5a3a7a&sort=semver)](https://github.com/MarkusSagen/mediastacks/releases/latest)
 [![Built with Zig 0.16](https://img.shields.io/badge/built%20with-Zig%200.16-F7A41D?logo=zig&logoColor=white)](https://ziglang.org)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux-4c566a)](#install)
-[![Output](https://img.shields.io/badge/output-Jellyfin%20%C2%B7%20Kodi%20ready-5a3a7a)](#what-it-does)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-4c566a)](#install)
+[![CI](https://img.shields.io/github/actions/workflow/status/MarkusSagen/mediastacks/ci.yml?branch=main&label=CI)](https://github.com/MarkusSagen/mediastacks/actions)
 [![Local-first](https://img.shields.io/badge/local--first-no%20cloud%20%C2%B7%20no%20telemetry-3f6b3a)](#why)
 
 <br/>

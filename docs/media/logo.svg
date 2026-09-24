@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- "stacks": two offset frames behind -->
+  <rect x="16" y="7" width="38" height="26" rx="4" fill="#ffb86c" opacity="0.40"/>
+  <rect x="12" y="13" width="40" height="28" rx="4" fill="#ffb86c" opacity="0.68"/>
+  <!-- front media frame -->
+  <rect x="8" y="21" width="48" height="35" rx="5" fill="#16161d"/>
+  <!-- play triangle -->
+  <path d="M27 30 L43 38.5 L27 47 Z" fill="#ffb86c"/>
+</svg>
