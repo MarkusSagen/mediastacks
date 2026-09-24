@@ -193,7 +193,7 @@ fn handle(io: std.Io, app: *App, request: *std.http.Server.Request) !void {
         return respondAsset(request, static.medias_html, "text/html; charset=utf-8");
     if (std.mem.eql(u8, path, "/medias.js")) return respondAsset(request, static.medias_js, "application/javascript");
     if (std.mem.eql(u8, path, "/medias.css")) return respondAsset(request, static.medias_css, "text/css");
-    if (std.mem.eql(u8, path, "/favicon.svg")) return respondAsset(request, static.favicon_svg, "image/svg+xml");
+    if (std.mem.eql(u8, path, "/favicon.svg")) return respondAsset(request, static.favicon_media_svg, "image/svg+xml");
 
     if (std.mem.eql(u8, path, "/api/config")) return handleConfig(app, request);
     if (std.mem.eql(u8, path, "/api/organize")) return handleOrganize(io, app, request, target);

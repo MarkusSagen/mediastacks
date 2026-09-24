@@ -4,7 +4,8 @@
 pub const index_html = @embedFile("assets/index.html");
 pub const app_js = @embedFile("assets/app.js");
 pub const styles_css = @embedFile("assets/styles.css");
-pub const favicon_svg = @embedFile("assets/favicon.svg");
+pub const favicon_svg = @embedFile("assets/favicon.svg"); // biblio (book)
+pub const favicon_media_svg = @embedFile("assets/favicon-media.svg"); // medias (media)
 
 pub const review_html = @embedFile("assets/review.html");
 pub const review_js = @embedFile("assets/review.js");
