@@ -18,6 +18,10 @@ const http = @import("../util/http.zig");
 const httpcache = @import("../util/httpcache.zig");
 const config = @import("../core/config.zig");
 const clock = @import("../util/clock.zig");
+
+/// Worker observability. Lifecycle at .info (always shown); per-item at .debug
+/// (release builds emit these only with MEDIASTACKS_DEBUG set — see customLogFn).
+const log = std.log.scoped(.enrich);
 const shutdown = @import("../util/shutdown.zig");
 
 pub const State = enum(u8) { idle, running, finished, canceled };
@@ -166,6 +170,11 @@ fn workerEntry(ctx: *WorkerCtx) void {
     } else cat.search(oa, .{ .status = .missing_metadata }) catch &[_]mc.Item{};
 
     ctx.job.total.store(items.len, .monotonic);
+    log.info("starting job over {d} item(s) (tmdb={s}, musicbrainz={s})", .{
+        items.len,
+        if (ctx.tmdb_key != null) "on" else "off",
+        if (ctx.mb_enabled) "on" else "off",
+    });
 
     // Build real enrichers once (own their caching http clients).
     var real = http.RealHttpClient{ .io = ctx.io };
@@ -182,8 +191,9 @@ fn workerEntry(ctx: *WorkerCtx) void {
 
     var inner = std.heap.ArenaAllocator.init(ctx.allocator);
     defer inner.deinit();
-    for (items) |it| {
+    for (items, 0..) |it, i| {
         if (ctx.job.cancel_requested.load(.monotonic) or shutdown.isRequested()) {
+            log.info("canceled after {d}/{d} item(s)", .{ i, items.len });
             finalize(ctx.job, .canceled);
             return;
         }
@@ -196,8 +206,15 @@ fn workerEntry(ctx: *WorkerCtx) void {
             .err => _ = ctx.job.errored.fetchAdd(1, .monotonic),
         }
         _ = ctx.job.processed.fetchAdd(1, .monotonic);
+        log.debug("[{d}/{d}] {s} (id={d}, kind={s}) -> {s}", .{ i + 1, items.len, it.title, it.id, it.kind, @tagName(outcome) });
     }
     ctx.job.clearCurrent();
+    log.info("finished — {d} enriched, {d} no-match, {d} error(s) of {d}", .{
+        ctx.job.ok.load(.monotonic),
+        ctx.job.no_match.load(.monotonic),
+        ctx.job.errored.load(.monotonic),
+        items.len,
+    });
     finalize(ctx.job, .finished);
 }
 

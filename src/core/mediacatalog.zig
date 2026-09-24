@@ -65,6 +65,14 @@ pub const Catalog = struct {
         if (std.fs.path.dirname(path)) |d| standardize.mkdirParents(d) catch {};
         const db = try sql.open(path);
         var cat = Catalog{ .db = db };
+        // Concurrency hygiene: the web server thread and the background enrich
+        // worker share this DB. busy_timeout makes a writer wait-and-retry
+        // instead of failing immediately on SQLITE_BUSY; WAL lets readers and
+        // the single writer proceed without blocking each other. Best-effort —
+        // a PRAGMA that can't apply (e.g. WAL on a network FS) must not fail open.
+        sql.exec(db, "PRAGMA busy_timeout = 5000;") catch {};
+        sql.exec(db, "PRAGMA journal_mode = WAL;") catch {};
+        sql.exec(db, "PRAGMA synchronous = NORMAL;") catch {};
         try cat.ensureSchema();
         return cat;
     }
