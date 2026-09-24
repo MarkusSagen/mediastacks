@@ -54,6 +54,7 @@ check "plan: 3 files organized" 'grep -q "3 file(s) into" <<<"$OUT"'
 check "plan: 1 junk trashed" 'grep -q "1 junk trashed" <<<"$OUT"'
 check "plan: 1 duplicate left" 'grep -q "1 duplicate(s) left" <<<"$OUT"'
 check "plan: groups under a folder header" 'grep -qE "Season 01/$" <<<"$OUT"'
+check "subtitle gets a Jellyfin language tag (.en.srt)" 'grep -qE "S01E05.*\.en\.srt" <<<"$OUT"'
 check "dry-run did not create the library" '[[ ! -d "$LIB" ]]'
 check "dry-run did not move .DS_Store" '[[ -f "$SRC/.DS_Store" ]]'
 

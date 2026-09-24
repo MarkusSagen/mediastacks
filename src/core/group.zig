@@ -20,6 +20,7 @@ const probe = @import("probe.zig");
 const enrich = @import("enrich.zig");
 const drm = @import("drm.zig");
 const naming = @import("naming.zig");
+const subtitles = @import("subtitles.zig");
 const musicbrainz = @import("../providers/musicbrainz.zig");
 const tmdb = @import("../providers/tmdb.zig");
 const extras_mod = @import("extras.zig");
@@ -166,7 +167,7 @@ fn isJunkBase(base: []const u8) bool {
 }
 
 fn isSidecarExt(ext_dot: []const u8) bool {
-    const set = [_][]const u8{ ".nfo", ".srt", ".sub", ".ass", ".ssa" };
+    const set = [_][]const u8{ ".nfo", ".srt", ".sub", ".ass", ".ssa", ".vtt", ".idx" };
     for (set) |e| {
         if (std.ascii.eqlIgnoreCase(ext_dot, e)) return true;
     }
@@ -615,10 +616,19 @@ pub fn buildPlan(
         if (best_media) |c| {
             if (c.fields) |pf| {
                 var f = pf;
-                f.ext = sc.ext; // sidecar sits beside the primary, own extension
+                // Subtitles get a Jellyfin language/flag suffix derived from the
+                // original name (e.g. `<base>.en.forced.srt`); other sidecars
+                // (.nfo) keep a bare `<base>.<ext>`.
+                var reason: []const u8 = "sidecar";
+                if (subtitles.isSubtitleExt(sc.ext)) {
+                    f.ext = try subtitles.destExt(arena, subtitles.parse(sc.stem), sc.ext);
+                    reason = "subtitle";
+                } else {
+                    f.ext = sc.ext; // sidecar sits beside the primary, own extension
+                }
                 const gk = gbs.items[c.group_idx].kind;
                 const dst = try naming.dstFor(arena, cfg, gk, f);
-                try gbs.items[c.group_idx].items.append(arena, .{ .src = sc.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = "sidecar", .fields = f });
+                try gbs.items[c.group_idx].items.append(arena, .{ .src = sc.abs, .role = .sidecar, .op = .move, .dst = dst, .reason = reason, .fields = f });
                 continue;
             }
         }
