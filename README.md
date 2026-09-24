@@ -77,9 +77,21 @@ sudo apt install libmobi-dev libxml2 libsqlite3-0   # Debian / Ubuntu
 
 Or grab a tarball from the [releases page](https://github.com/markussagen/mediastacks/releases).
 
+**Homebrew:**
+
+```sh
+brew install markussagen/mediastacks/mediastacks
+```
+
+**Chocolatey (Windows):**
+
+```powershell
+choco install mediastacks
+```
+
 **Nix:** `nix develop` gives a reproducible build shell (Zig 0.16 + the C deps) — see [`flake.nix`](./flake.nix).
 
-**Windows:** `medias` cross-compiles to a Windows binary today; runtime support is still experimental (`biblio` is macOS/Linux only).
+**Windows:** `medias` runs on Windows (built + smoke-tested in CI); `biblio` is macOS/Linux only. Packaging details in [`docs/PACKAGING.md`](./docs/PACKAGING.md).
 
 ## Quick start
 

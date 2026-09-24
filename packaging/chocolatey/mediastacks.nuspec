@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>mediastacks</id>
+    <version>0.0.0</version>
+    <packageSourceUrl>https://github.com/markussagen/mediastacks/tree/main/packaging/chocolatey</packageSourceUrl>
+    <owners>markussagen</owners>
+    <title>mediastacks (medias)</title>
+    <authors>markussagen</authors>
+    <projectUrl>https://github.com/markussagen/mediastacks</projectUrl>
+    <projectSourceUrl>https://github.com/markussagen/mediastacks</projectSourceUrl>
+    <bugTrackerUrl>https://github.com/markussagen/mediastacks/issues</bugTrackerUrl>
+    <tags>media organizer jellyfin kodi cli rename subtitles remux</tags>
+    <summary>Turn messy downloads into a clean, Jellyfin-ready media library.</summary>
+    <description>
+mediastacks ships **medias**, a local-first media organizer: point it at a folder
+of downloads and it groups, renames, de-duplicates, and language-tags TV, movies,
+and music into a tidy Jellyfin/Kodi-ready library — with a browser UI to preview
+every move, play files, fetch posters + metadata, remux, and undo anything.
+
+This package installs the `medias` command (Windows x64). No cloud, no telemetry.
+    </description>
+    <releaseNotes>https://github.com/markussagen/mediastacks/releases</releaseNotes>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

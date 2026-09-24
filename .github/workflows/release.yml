@@ -74,9 +74,34 @@ jobs:
           name: mediastacks-${{ matrix.target }}
           path: dist/*
 
+  # Windows ships `medias` only (biblio needs libmobi/libxml2). Native build,
+  # zipped — this is what the Chocolatey package and install.sh consume.
+  build-windows:
+    name: windows-x86_64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          version: 2025.5.6
+          install: true
+      - name: Build (Release)
+        run: zig build install -Doptimize=ReleaseFast
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path zig-out/bin/medias.exe -DestinationPath dist/mediastacks-windows-x86_64.zip
+          $h = (Get-FileHash dist/mediastacks-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
+          "$h  mediastacks-windows-x86_64.zip" | Out-File -Encoding ascii dist/mediastacks-windows-x86_64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mediastacks-windows-x86_64
+          path: dist/*
+
   release:
     name: Publish release
-    needs: build
+    needs: [build, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
