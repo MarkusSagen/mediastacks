@@ -76,27 +76,31 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-      # No system deps: sqlite is vendored, and medias doesn't link libmobi/xml2.
+      # medias.exe doesn't link libmobi/xml2, but translate-c needs their headers.
+      - name: Install header deps (for translate-c)
+        run: sudo apt-get update && sudo apt-get install -y libmobi-dev libxml2-dev
       - name: cross-compile medias for Windows
         run: zig build -Dtarget=x86_64-windows
       - name: confirm it is a Windows PE binary
         run: file zig-out/bin/medias.exe | grep -q 'PE32+'
+      # Run it on a real Windows runner to validate the binary actually works.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: medias-exe-ci
+          path: zig-out/bin/medias.exe
 
   windows-run:
-    name: windows native build + run
+    name: windows run (cross-built .exe)
+    needs: windows-cross
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
+      - uses: actions/download-artifact@v4
         with:
-          version: 0.16.0
-      # Native Windows build (biblio is skipped on Windows; sqlite is vendored).
-      - name: build medias.exe
-        run: zig build
+          name: medias-exe-ci
       - name: run it
         run: |
-          ./zig-out/bin/medias.exe --help
-          ./zig-out/bin/medias.exe version
+          ./medias.exe --help
+          ./medias.exe version
 
   nix:
     name: nix flake (dev shell + libmobi)

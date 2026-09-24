@@ -73,25 +73,27 @@ jobs:
           name: mediastacks-${{ matrix.target }}
           path: dist/*
 
-  # Windows ships `medias` only (biblio needs libmobi/libxml2). Native build,
-  # zipped — this is what the Chocolatey package and install.sh consume.
+  # Windows ships `medias` only. Cross-compiled from Linux: `medias.exe` never
+  # links libmobi/libxml2 (dead-code-eliminated), but translate-c still needs
+  # their *headers* on the build host — which Linux has via apt and native
+  # Windows does not. The resulting .exe runs on Windows with no extra DLLs.
   build-windows:
     name: windows-x86_64
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-      - name: Build (Release)
-        run: zig build install -Doptimize=ReleaseFast
+      - name: Install header deps (for translate-c)
+        run: sudo apt-get update && sudo apt-get install -y libmobi-dev libxml2-dev
+      - name: Build (Release, Windows target)
+        run: zig build install -Doptimize=ReleaseFast -Dtarget=x86_64-windows
       - name: Package
-        shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path zig-out/bin/medias.exe -DestinationPath dist/mediastacks-windows-x86_64.zip
-          $h = (Get-FileHash dist/mediastacks-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
-          "$h  mediastacks-windows-x86_64.zip" | Out-File -Encoding ascii dist/mediastacks-windows-x86_64.zip.sha256
+          mkdir -p dist
+          (cd zig-out/bin && zip -q ../../dist/mediastacks-windows-x86_64.zip medias.exe)
+          shasum -a 256 dist/mediastacks-windows-x86_64.zip > dist/mediastacks-windows-x86_64.zip.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: mediastacks-windows-x86_64
