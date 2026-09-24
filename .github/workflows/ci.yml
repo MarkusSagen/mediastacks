@@ -17,10 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jdx/mise-action@v2
+      - uses: mlugg/setup-zig@v2
         with:
-          version: 2025.5.6
-          install: true
+          version: 0.16.0
 
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
@@ -74,10 +73,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: mlugg/setup-zig@v2
         with:
-          version: 2025.5.6
-          install: true
+          version: 0.16.0
       # No system deps: sqlite is vendored, and medias doesn't link libmobi/xml2.
       - name: cross-compile medias for Windows
         run: zig build -Dtarget=x86_64-windows
@@ -89,10 +87,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: mlugg/setup-zig@v2
         with:
-          version: 2025.5.6
-          install: true
+          version: 0.16.0
       # Native Windows build (biblio is skipped on Windows; sqlite is vendored).
       - name: build medias.exe
         run: zig build

@@ -31,11 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Install Zig 0.16 via mise (matches the pinned dev environment).
-      - uses: jdx/mise-action@v2
+      # Install Zig 0.16 (mlugg/setup-zig handles 0.16.0 tarball naming + mirrors).
+      - uses: mlugg/setup-zig@v2
         with:
-          version: 2025.5.6
-          install: true
+          version: 0.16.0
 
       # System deps (libmobi, libxml2, sqlite3). On macOS via Homebrew,
       # on Linux via apt. The build.zig probes both prefixes.
@@ -81,10 +80,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: mlugg/setup-zig@v2
         with:
-          version: 2025.5.6
-          install: true
+          version: 0.16.0
       - name: Build (Release)
         run: zig build install -Doptimize=ReleaseFast
       - name: Package
