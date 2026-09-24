@@ -79,14 +79,14 @@ jobs:
   # Windows does not. The resulting .exe runs on Windows with no extra DLLs.
   build-windows:
     name: windows-x86_64
-    runs-on: ubuntu-latest
+    runs-on: macos-latest # cross-compiles cleanly (Linux's /usr/include glibc headers conflict with a Windows target)
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
       - name: Install header deps (for translate-c)
-        run: sudo apt-get update && sudo apt-get install -y libmobi-dev libxml2-dev
+        run: brew install libmobi libxml2
       - name: Build (Release, Windows target)
         run: zig build install -Doptimize=ReleaseFast -Dtarget=x86_64-windows
       - name: Package

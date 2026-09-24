@@ -70,7 +70,7 @@ jobs:
 
   windows-cross:
     name: windows cross-compile (medias.exe)
-    runs-on: ubuntu-latest
+    runs-on: macos-latest # cross to Windows from macOS; Linux's glibc headers conflict with the Windows target
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
@@ -78,7 +78,7 @@ jobs:
           version: 0.16.0
       # medias.exe doesn't link libmobi/xml2, but translate-c needs their headers.
       - name: Install header deps (for translate-c)
-        run: sudo apt-get update && sudo apt-get install -y libmobi-dev libxml2-dev
+        run: brew install libmobi libxml2
       - name: cross-compile medias for Windows
         run: zig build -Dtarget=x86_64-windows
       - name: confirm it is a Windows PE binary
