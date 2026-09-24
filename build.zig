@@ -181,7 +181,13 @@ fn collectIncludeDirs(b: *std.Build) []const []const u8 {
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/libxml2",
     };
-    return b.allocator.dupe([]const u8, &candidates) catch @panic("OOM");
+    var list: std.ArrayList([]const u8) = .empty;
+    list.appendSlice(b.allocator, &candidates) catch @panic("OOM");
+    // Non-standard prefixes (Nix, custom) via a `:`-separated env var. zig's
+    // clang ignores C_INCLUDE_PATH/CPATH, so paths must be passed as explicit
+    // -I; we read them libc-free (std.posix.getenv iterates `environ`).
+    appendEnvDirs(b, &list, "MEDIASTACKS_INCLUDE_DIRS");
+    return list.toOwnedSlice(b.allocator) catch @panic("OOM");
 }
 
 fn collectLibraryDirs(b: *std.Build) []const []const u8 {
@@ -193,5 +199,16 @@ fn collectLibraryDirs(b: *std.Build) []const []const u8 {
         "/usr/local/opt/libmobi/lib",
         "/usr/lib",
     };
-    return b.allocator.dupe([]const u8, &candidates) catch @panic("OOM");
+    var list: std.ArrayList([]const u8) = .empty;
+    list.appendSlice(b.allocator, &candidates) catch @panic("OOM");
+    appendEnvDirs(b, &list, "MEDIASTACKS_LIB_DIRS");
+    return list.toOwnedSlice(b.allocator) catch @panic("OOM");
+}
+
+/// Append `:`-separated dirs from a build-time env var, read via the build
+/// graph's captured environment (libc-free, cross-platform).
+fn appendEnvDirs(b: *std.Build, list: *std.ArrayList([]const u8), name: []const u8) void {
+    const val = b.graph.environ_map.get(name) orelse return;
+    var it = std.mem.tokenizeScalar(u8, val, ':');
+    while (it.next()) |dir| list.append(b.allocator, b.dupe(dir)) catch @panic("OOM");
 }

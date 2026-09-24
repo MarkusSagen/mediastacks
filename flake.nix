@@ -42,10 +42,11 @@
               libmobi
             ];
             # Set as derivation env (not shellHook) so `nix develop -c CMD`,
-            # which skips the shellHook, still sees them. The compiler reads
-            # C_INCLUDE_PATH / LIBRARY_PATH to find libmobi/libxml2.
-            C_INCLUDE_PATH = "${libmobi}/include:${pkgs.libxml2.dev}/include/libxml2:${pkgs.sqlite.dev}/include";
-            LIBRARY_PATH = "${libmobi}/lib:${pkgs.libxml2.out}/lib:${pkgs.sqlite.out}/lib:${pkgs.zlib}/lib";
+            # which skips the shellHook, still sees them. build.zig reads these
+            # and passes them to the compiler as -I/-L (zig ignores the standard
+            # C_INCLUDE_PATH/LIBRARY_PATH, so those wouldn't work).
+            MEDIASTACKS_INCLUDE_DIRS = "${libmobi}/include:${pkgs.libxml2.dev}/include/libxml2:${pkgs.sqlite.dev}/include";
+            MEDIASTACKS_LIB_DIRS = "${libmobi}/lib:${pkgs.libxml2.out}/lib:${pkgs.sqlite.out}/lib:${pkgs.zlib}/lib";
             shellHook = ''echo "mediastacks dev shell — zig $(zig version); run: zig build"'';
           };
         });
